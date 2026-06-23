@@ -1,14 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../domain/models/irn_referential.dart';
 
-class AboutScreen extends StatelessWidget {
+class AboutScreen extends StatefulWidget {
   final IrnReferential referential;
 
   const AboutScreen({
     required this.referential,
     super.key,
   });
+
+  @override
+  State<AboutScreen> createState() => _AboutScreenState();
+}
+
+class _AboutScreenState extends State<AboutScreen> {
+  late final Future<PackageInfo> _packageInfoFuture =
+      PackageInfo.fromPlatform();
 
   @override
   Widget build(BuildContext context) {
@@ -22,14 +31,17 @@ class AboutScreen extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              _ApplicationCard(referential: referential),
+              _ApplicationCard(
+                referential: widget.referential,
+                packageInfoFuture: _packageInfoFuture,
+              ),
               const SizedBox(height: 12),
-              _ReferentialCard(referential: referential),
+              _ReferentialCard(referential: widget.referential),
               const SizedBox(height: 12),
-              _LicenseCard(referential: referential),
-              if (referential.importWarnings.isNotEmpty) ...[
+              _LicenseCard(referential: widget.referential),
+              if (widget.referential.importWarnings.isNotEmpty) ...[
                 const SizedBox(height: 12),
-                _ImportWarningsCard(warnings: referential.importWarnings),
+                _ImportWarningsCard(warnings: widget.referential.importWarnings),
               ],
             ],
           ),
@@ -41,8 +53,12 @@ class AboutScreen extends StatelessWidget {
 
 class _ApplicationCard extends StatelessWidget {
   final IrnReferential referential;
+  final Future<PackageInfo> packageInfoFuture;
 
-  const _ApplicationCard({required this.referential});
+  const _ApplicationCard({
+    required this.referential,
+    required this.packageInfoFuture,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -74,14 +90,25 @@ class _ApplicationCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 16),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                Chip(label: Text('${referential.pillars.length} piliers')),
-                Chip(label: Text('${referential.criteria.length} critères')),
-                Chip(label: Text('Référentiel ${referential.version}')),
-              ],
+            FutureBuilder<PackageInfo>(
+              future: packageInfoFuture,
+              builder: (context, snapshot) {
+                final info = snapshot.data;
+                final versionLabel = info == null
+                    ? 'Version en cours de chargement'
+                    : _formatPackageVersion(info);
+
+                return Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    Chip(label: Text('OpenIRN $versionLabel')),
+                    Chip(label: Text('${referential.pillars.length} piliers')),
+                    Chip(label: Text('${referential.criteria.length} critères')),
+                    Chip(label: Text('Référentiel ${referential.version}')),
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 16),
             const Text(
@@ -115,19 +142,25 @@ class _ReferentialCard extends StatelessWidget {
             _InfoRow(label: 'Identifiant', value: referential.id),
             _InfoRow(label: 'Version', value: referential.version),
             _InfoRow(
-                label: 'Source',
-                value: referential.sourceUrl,
-                selectable: true),
+              label: 'Source',
+              value: referential.sourceUrl,
+              selectable: true,
+            ),
             if (referential.source.projectPath.isNotEmpty)
               _InfoRow(
-                  label: 'Projet source',
-                  value: referential.source.projectPath),
+                label: 'Projet source',
+                value: referential.source.projectPath,
+              ),
             if (referential.source.defaultBranch.isNotEmpty)
               _InfoRow(
-                  label: 'Branche', value: referential.source.defaultBranch),
+                label: 'Branche',
+                value: referential.source.defaultBranch,
+              ),
             if (referential.source.filePath.isNotEmpty)
               _InfoRow(
-                  label: 'Fichier importé', value: referential.source.filePath),
+                label: 'Fichier importé',
+                value: referential.source.filePath,
+              ),
             if (referential.source.commitSha != null &&
                 referential.source.commitSha!.isNotEmpty)
               _InfoRow(
@@ -167,11 +200,15 @@ class _LicenseCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Licence et attribution',
-                style: Theme.of(context).textTheme.titleLarge),
+            Text(
+              'Licence et attribution',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
             const SizedBox(height: 12),
             _InfoRow(
-                label: 'Licence du référentiel', value: referential.license),
+              label: 'Licence du référentiel',
+              value: referential.license,
+            ),
             const SizedBox(height: 8),
             const Text(
               'Le référentiel IRN importé est attribué à l’aDRI / Digital Resilience Initiative. '
@@ -201,8 +238,10 @@ class _ImportWarningsCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Avertissements d’import',
-                style: Theme.of(context).textTheme.titleLarge),
+            Text(
+              'Avertissements d’import',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
             const SizedBox(height: 12),
             for (final warning in warnings)
               Padding(
@@ -250,4 +289,15 @@ class _InfoRow extends StatelessWidget {
       ),
     );
   }
+}
+
+String _formatPackageVersion(PackageInfo info) {
+  final version = info.version.trim();
+  final buildNumber = info.buildNumber.trim();
+
+  if (buildNumber.isEmpty) {
+    return version;
+  }
+
+  return '$version+$buildNumber';
 }

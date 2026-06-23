@@ -1,7 +1,8 @@
 name: openirn
 description: OpenIRN - application open source d’exploration et d’évaluation de l’Indice de Résilience Numérique.
 publish_to: 'none'
-version: 0.1.0+1
+
+version: 0.1.1+2
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -12,6 +13,7 @@ dependencies:
   flutter_riverpod: ^2.5.1
   shared_preferences: ^2.3.3
   file_selector: ^1.0.4
+  package_info_plus: ^8.3.0
 
 dev_dependencies:
   flutter_test:
