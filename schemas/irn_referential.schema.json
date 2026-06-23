@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/irn_referential.schema.json",
+  "title": "IRN Official Referential",
+  "type": "object",
+  "required": ["id", "source", "version", "pillars", "criteria"],
+  "properties": {
+    "id": { "type": "string" },
+    "version": { "type": "string" },
+    "importedAt": { "type": "string", "format": "date-time" },
+    "source": {
+      "type": "object",
+      "required": ["type", "url", "license"],
+      "properties": {
+        "type": { "const": "gitlab" },
+        "url": { "type": "string", "format": "uri" },
+        "projectPath": { "type": "string" },
+        "defaultBranch": { "type": "string" },
+        "filePath": { "type": "string" },
+        "commitSha": { "type": ["string", "null"] },
+        "checksumSha256": { "type": "string" },
+        "license": { "type": "string" }
+      }
+    },
+    "pillars": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": ["id", "code", "label"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^RES-[1-8]$" },
+          "code": { "type": "string", "pattern": "^RES-[1-8]$" },
+          "label": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "criteria": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "code", "pillarId", "label", "scope", "answerMode", "active"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^RES-[1-8]\\.[0-9]+$" },
+          "code": { "type": "string", "pattern": "^RES-[1-8]\\.[0-9]+$" },
+          "sourceCode": { "type": "string" },
+          "pillarId": { "type": "string", "pattern": "^RES-[1-8]$" },
+          "label": { "type": "string" },
+          "shortLabel": { "type": "string" },
+          "description": { "type": "string" },
+          "scope": { "enum": ["organization", "businessFunction", "criticalSystem", "asset", "unknown"] },
+          "sourceScope": { "type": "string" },
+          "answerMode": { "enum": ["R_NR"] },
+          "regulatoryReferences": { "type": "string" },
+          "recommendations": { "type": "string" },
+          "active": { "type": "boolean" },
+          "source": {
+            "type": "object",
+            "properties": {
+              "sheet": { "type": "string" },
+              "row": { "type": "integer" }
+            }
+          }
+        }
+      }
+    },
+    "importWarnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

@@ -1,0 +1,290 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag to create/update, for example v0.1.0'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark release as pre-release'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}-${{ github.event.inputs.tag_name }}
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: 'stable'
+  APP_NAME: openirn
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        working-directory: flutter
+        run: flutter pub get
+
+      - name: Check formatting
+        working-directory: flutter
+        run: dart format --set-exit-if-changed lib test
+
+      - name: Analyze
+        working-directory: flutter
+        run: flutter analyze
+
+      - name: Test
+        working-directory: flutter
+        run: flutter test
+
+      - name: Open source readiness
+        run: |
+          chmod +x tools/check_open_source_readiness.sh
+          ./tools/check_open_source_readiness.sh
+
+  android:
+    name: Android APK
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        working-directory: flutter
+        run: flutter pub get
+
+      - name: Build Android APK
+        working-directory: flutter
+        run: flutter build apk --release
+
+      - name: Prepare Android artifact
+        run: |
+          mkdir -p release_artifacts
+          cp flutter/build/app/outputs/flutter-apk/app-release.apk release_artifacts/openirn-android.apk
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openirn-android
+          path: release_artifacts/openirn-android.apk
+
+  macos:
+    name: macOS app
+    needs: validate
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        working-directory: flutter
+        run: flutter pub get
+
+      - name: Build macOS app
+        working-directory: flutter
+        run: flutter build macos --release
+
+      - name: Package macOS app
+        run: |
+          mkdir -p release_artifacts
+          ditto -c -k --sequesterRsrc --keepParent \
+            flutter/build/macos/Build/Products/Release/openirn.app \
+            release_artifacts/openirn-macos.zip
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openirn-macos
+          path: release_artifacts/openirn-macos.zip
+
+  windows:
+    name: Windows app
+    needs: validate
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        working-directory: flutter
+        run: flutter pub get
+
+      - name: Build Windows app
+        working-directory: flutter
+        run: flutter build windows --release
+
+      - name: Package Windows app
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release_artifacts | Out-Null
+          Compress-Archive -Path flutter/build/windows/x64/runner/Release/* -DestinationPath release_artifacts/openirn-windows.zip -Force
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openirn-windows
+          path: release_artifacts/openirn-windows.zip
+
+  ios:
+    name: iOS no-codesign
+    needs: validate
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        working-directory: flutter
+        run: flutter pub get
+
+      - name: Build iOS without code signing
+        working-directory: flutter
+        run: flutter build ios --release --no-codesign
+
+      - name: Package iOS build
+        run: |
+          mkdir -p release_artifacts
+          ditto -c -k --sequesterRsrc --keepParent \
+            flutter/build/ios/iphoneos \
+            release_artifacts/openirn-ios-no-codesign.zip
+
+      - name: Upload iOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openirn-ios-no-codesign
+          path: release_artifacts/openirn-ios-no-codesign.zip
+
+  publish:
+    name: Publish GitHub Release
+    needs:
+      - validate
+      - android
+      - macos
+      - windows
+      - ios
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve release metadata
+        id: metadata
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG_NAME="${{ github.event.inputs.tag_name }}"
+            PRERELEASE="${{ github.event.inputs.prerelease }}"
+          else
+            TAG_NAME="${GITHUB_REF_NAME}"
+            PRERELEASE="true"
+          fi
+          echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: downloaded_artifacts
+
+      - name: Flatten artifacts
+        run: |
+          mkdir -p release_artifacts
+          find downloaded_artifacts -type f -maxdepth 3 -print -exec cp {} release_artifacts/ \;
+          ls -lh release_artifacts
+
+      - name: Generate checksums
+        run: |
+          cd release_artifacts
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ steps.metadata.outputs.tag_name }}
+          PRERELEASE: ${{ steps.metadata.outputs.prerelease }}
+        run: |
+          NOTES_FILE="release_notes.md"
+          cat > "$NOTES_FILE" <<'EOF'
+          # OpenIRN release
+
+          This release contains automated build artifacts generated by GitHub Actions.
+
+          ## Artifacts
+
+          - `openirn-android.apk`: Android APK release build.
+          - `openirn-macos.zip`: macOS `.app` bundle, not yet signed/notarized.
+          - `openirn-windows.zip`: Windows release build archive.
+          - `openirn-ios-no-codesign.zip`: iOS release build without code signing.
+          - `SHA256SUMS.txt`: checksums for all release artifacts.
+
+          ## Important
+
+          These artifacts do not include the official aDRI IRN referential file or generated private campaign data.
+          EOF
+
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" release_artifacts/* --clobber
+          else
+            if [[ "$PRERELEASE" == "true" ]]; then
+              gh release create "$TAG_NAME" release_artifacts/* \
+                --title "OpenIRN ${TAG_NAME}" \
+                --notes-file "$NOTES_FILE" \
+                --prerelease
+            else
+              gh release create "$TAG_NAME" release_artifacts/* \
+                --title "OpenIRN ${TAG_NAME}" \
+                --notes-file "$NOTES_FILE"
+            fi
+          fi

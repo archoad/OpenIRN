@@ -1,0 +1,49 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+coverage/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Generated local IRN files
+Questionnaire_IRN_*.xlsx
+Questionnaire_IRN_*.ods
+canonical_irn_*.json
+validation_referential_report.json
+flutter/assets/referentials/*.json
+!flutter/assets/referentials/.gitkeep
+
+# Company / campaign data
+Evaluation IRN*.xlsx
+company_seed.json
+validation_report.json
+openirn_*.json
+*_campaign_export.json
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.mobileprovision

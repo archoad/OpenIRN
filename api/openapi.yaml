@@ -1,0 +1,120 @@
+openapi: 3.0.3
+info:
+  title: IRN API
+  version: 0.1.0
+  description: API du socle référentiel IRN. Les campagnes et évaluations entreprise seront ajoutées dans un lot ultérieur.
+servers:
+  - url: https://irn.example.local/api/v1
+paths:
+  /referentials:
+    get:
+      summary: Liste les versions de référentiel IRN disponibles
+      responses:
+        '200':
+          description: Liste des référentiels
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  referentials:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ReferentialSummary'
+  /referentials/{id}:
+    get:
+      summary: Récupère un référentiel IRN canonique
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Référentiel canonique
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IrnReferential'
+  /referentials/{id}/pillars:
+    get:
+      summary: Liste les piliers d'un référentiel
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+  /referentials/{id}/criteria:
+    get:
+      summary: Liste les critères d'un référentiel
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: pillarId
+          schema: { type: string }
+        - in: query
+          name: scope
+          schema:
+            type: string
+            enum: [organization, businessFunction, criticalSystem, asset, unknown]
+      responses:
+        '200': { description: OK }
+components:
+  schemas:
+    ReferentialSummary:
+      type: object
+      required: [id, version, pillars, criteria]
+      properties:
+        id: { type: string }
+        version: { type: string }
+        active: { type: boolean }
+        pillars: { type: integer }
+        criteria: { type: integer }
+        checksumSha256: { type: string }
+        license: { type: string }
+    IrnReferential:
+      type: object
+      required: [id, version, source, pillars, criteria]
+      properties:
+        id: { type: string }
+        version: { type: string }
+        source:
+          type: object
+          properties:
+            type: { type: string }
+            url: { type: string }
+            projectPath: { type: string }
+            defaultBranch: { type: string }
+            filePath: { type: string }
+            commitSha: { type: string, nullable: true }
+            checksumSha256: { type: string }
+            license: { type: string }
+        pillars:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              code: { type: string }
+              label: { type: string }
+        criteria:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              code: { type: string }
+              sourceCode: { type: string }
+              pillarId: { type: string }
+              label: { type: string }
+              description: { type: string }
+              scope:
+                type: string
+                enum: [organization, businessFunction, criticalSystem, asset, unknown]
+              answerMode: { type: string, enum: [R_NR] }
+              active: { type: boolean }

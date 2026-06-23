@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/irn_company.schema.json",
+  "title": "IRN Company Cartography",
+  "type": "object",
+  "required": ["entities", "businessFunctions", "criticalSystems", "technicalFunctions", "assets", "harmonizedAssets"],
+  "properties": {
+    "entities": { "type": "array", "items": { "$ref": "#/$defs/entity" } },
+    "businessFunctions": { "type": "array", "items": { "$ref": "#/$defs/businessFunction" } },
+    "criticalSystems": { "type": "array", "items": { "$ref": "#/$defs/criticalSystem" } },
+    "technicalFunctions": { "type": "array", "items": { "$ref": "#/$defs/technicalFunction" } },
+    "assets": { "type": "array", "items": { "$ref": "#/$defs/asset" } },
+    "harmonizedAssets": { "type": "array", "items": { "$ref": "#/$defs/harmonizedAsset" } }
+  },
+  "$defs": {
+    "entity": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": { "id": { "type": "string" }, "name": { "type": "string" } }
+    },
+    "businessFunction": {
+      "type": "object",
+      "required": ["id", "name", "entityId"],
+      "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "entityId": { "type": "string" } }
+    },
+    "criticalSystem": {
+      "type": "object",
+      "required": ["id", "name", "businessFunctionId"],
+      "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "businessFunctionId": { "type": "string" } }
+    },
+    "technicalFunction": {
+      "type": "object",
+      "required": ["id", "name", "criticalSystemId"],
+      "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "criticalSystemId": { "type": "string" } }
+    },
+    "asset": {
+      "type": "object",
+      "required": ["id", "name", "technicalFunctionId"],
+      "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "technicalFunctionId": { "type": "string" } }
+    },
+    "harmonizedAsset": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "sourceAssetIds": { "type": "array", "items": { "type": "string" } },
+        "criticalityWeight": { "type": "number", "default": 1 }
+      }
+    }
+  }
+}

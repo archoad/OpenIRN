@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/irn_campaign.schema.json",
+  "title": "IRN Campaign",
+  "type": "object",
+  "required": ["id", "name", "referentialId", "status", "assignments", "evaluations"],
+  "properties": {
+    "id": { "type": "string" },
+    "name": { "type": "string" },
+    "referentialId": { "type": "string" },
+    "status": { "enum": ["draft", "assignment", "assessment", "review", "validated", "archived"] },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "assignments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "campaignId", "targetType", "targetId", "criterionId", "assigneeId"],
+        "properties": {
+          "id": { "type": "string" },
+          "campaignId": { "type": "string" },
+          "targetType": { "enum": ["organization", "businessFunction", "criticalSystem", "asset"] },
+          "targetId": { "type": "string" },
+          "criterionId": { "type": "string" },
+          "assigneeId": { "type": "string" },
+          "status": { "enum": ["todo", "inProgress", "submitted", "validated", "rejected"] }
+        }
+      }
+    },
+    "evaluations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "campaignId", "targetType", "targetId", "criterionId", "status"],
+        "properties": {
+          "id": { "type": "string" },
+          "campaignId": { "type": "string" },
+          "targetType": { "enum": ["organization", "businessFunction", "criticalSystem", "asset"] },
+          "targetId": { "type": "string" },
+          "criterionId": { "type": "string" },
+          "officialAnswer": { "enum": ["R", "NR", "NC", null] },
+          "internalMaturityLevel": { "enum": ["NON_RESILIENT", "INTENTION", "MOYEN", "RESULTAT", "NC", null] },
+          "internalScore": { "type": ["number", "null"] },
+          "justification": { "type": "string" },
+          "confidence": { "enum": ["low", "medium", "high", null] },
+          "status": { "enum": ["draft", "submitted", "validated", "rejected"] },
+          "updatedAt": { "type": "string", "format": "date-time" },
+          "version": { "type": "integer", "minimum": 1 }
+        }
+      }
+    }
+  }
+}
