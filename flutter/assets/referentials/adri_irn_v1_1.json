@@ -1,0 +1,637 @@
+{
+  "id": "adri-irn-v1.1",
+  "version": "v1.1",
+  "importedAt": "2026-06-23T14:39:48.063726+00:00",
+  "source": {
+    "type": "gitlab",
+    "url": "https://gitlab.com/digitalresilienceinitiative/adri-irn",
+    "projectPath": "digitalresilienceinitiative/adri-irn",
+    "defaultBranch": "main",
+    "filePath": "Grille d'évaluation IRN (FR)/xlsx/Questionnaire_IRN_v.1.1.xlsx",
+    "commitSha": null,
+    "checksumSha256": "f8997cdec98a29c35b25190ba8756e8bd9470967ded2cab31e6c0b57c14e3047",
+    "license": "CC BY-NC-ND 4.0"
+  },
+  "pillars": [
+    {
+      "id": "RES-1",
+      "code": "RES-1",
+      "label": "Résilience stratégique"
+    },
+    {
+      "id": "RES-2",
+      "code": "RES-2",
+      "label": "Résilience économique et juridique"
+    },
+    {
+      "id": "RES-3",
+      "code": "RES-3",
+      "label": "Résilience Data & IA"
+    },
+    {
+      "id": "RES-4",
+      "code": "RES-4",
+      "label": "Résilience opérationnelle"
+    },
+    {
+      "id": "RES-5",
+      "code": "RES-5",
+      "label": "Résilience Supply-Chain"
+    },
+    {
+      "id": "RES-6",
+      "code": "RES-6",
+      "label": "Résilience Technologique"
+    },
+    {
+      "id": "RES-7",
+      "code": "RES-7",
+      "label": "Sécurité & Résilience"
+    },
+    {
+      "id": "RES-8",
+      "code": "RES-8",
+      "label": "Résilience Environnementale et énergétique"
+    }
+  ],
+  "criteria": [
+    {
+      "id": "RES-1.1",
+      "code": "RES-1.1",
+      "sourceCode": "RES-1.1",
+      "pillarId": "RES-1",
+      "label": "Une gouvernance du numérique efficace",
+      "shortLabel": "",
+      "description": "Une gouvernance du numérique à l’état de l'art formalisée et contrôlée pour pérenniser les actions de résilience",
+      "scope": "organization",
+      "sourceScope": "Fonction ou organisation",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "",
+      "recommendations": "Intention : La gouvernance du numérique est formalisée. Des instances de partage et d'arbitrage existent Moyens : La gouvernance du numérique est alignée sur les bonne pratiques, connue et mise en oeuvre par les partie prenantes avec implication du comex Résultats : La performance de la gouvernance (cf. Magnum) est mesurée. Les actions d'amélioration sont suivies en comex",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 5
+      }
+    },
+    {
+      "id": "RES-1.2",
+      "code": "RES-1.2",
+      "sourceCode": "RES-1.2",
+      "pillarId": "RES-1",
+      "label": "Sponsoring exécutif concernant la résilience et la dépendance numérique",
+      "shortLabel": "Sponsoring exécutif sur la dépendance numérique",
+      "description": "Mettre en place un sponsoring explicite et actif (COMEX / Conseil / CoRisk) sur la résilience et les dépendances numériques afin d’arbitrer, au bon niveau, les risques, les investissements et les choix d’architecture/sourcing liés aux services critiques.",
+      "scope": "organization",
+      "sourceScope": "Fonction ou organisation",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "Directive (EU) 2022/2555 (NIS2) Directive (EU) 2022/2557 (CER – Critical Entities Résilience) Régulation (EU) 2022/2554 (DORA)",
+      "recommendations": "Intention : La résilience et les dépendances numériques figurent à l’ordre du jour du COMEX/Conseil, comité d'audit, risque au moins une fois par an, avec des décisions formalisées. Moyens : Produire des reporting réguliers (cartographie des dépendances, KPIs, incidents, plans d’action), organiser des revues d’architecture/sourcing, test de résilience, et sensibiliser les dirigeants (formation, séminaire, expert externe). Résultats : La résilience numérique est intégrée aux priorités stratégiques et se traduit par des décisions d’investissement, de diversification, de désengagement ou de ré‑architecturation.",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 6
+      }
+    },
+    {
+      "id": "RES-1.3",
+      "code": "RES-1.3",
+      "sourceCode": "RES-1.3",
+      "pillarId": "RES-1",
+      "label": "Gouvernance des usages numériques en libre service",
+      "shortLabel": "Gouvernance du citizen AI",
+      "description": "Encadrer l'usage des outils en libre‑service (automatisations, modèles locaux) afin de permettre l’innovation tout en maîtrisant les risques (sécurité, qualité, conformité, shadow IT).",
+      "scope": "organization",
+      "sourceScope": "Fonction ou organisation",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "Regulation (EU) 2024/1689 (AI Act) Regulation (EU) 2016/679 (GDPR) Directive (EU) 2022/2555 (NIS2)",
+      "recommendations": "Intention : Définir un cadre clair pour les usages des outils en libre-service (automatisations, modèles ou analyses développés hors des équipes IT/DSI), en précisant les périmètres autorisés, les données et traitements éligibles, les niveaux de risque acceptables et les responsabilités des utilisateurs. Moyens : mettre à disposition des utilisateurs des outils référencés, sécurisés et adaptés aux usages usages des outils en libre-service (catalogue), déployer des garde-fous techniques (contrôles d’accès, DLP, environnements sandbox, MLOps simplifié le cas échéant), former les utilisateurs et organiser un processus de validation ou d’escalade pour les cas d’usage à risque ou sensibles. Résultats : les usages des outils en libre-service sont majoritairement réalisés via des solutions référencées et encadrées ; les usages non conformes ou hors cadre sont détectés et suivis ; les risques (sécurité, conformité, qualité des données) et les bénéfices (gain de productivité, innovation) sont mesurés et pilotés dans la durée.",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 7
+      }
+    },
+    {
+      "id": "RES-1.4",
+      "code": "RES-1.4",
+      "sourceCode": "RES-1.4",
+      "pillarId": "RES-1",
+      "label": "Gouvernance data et/ou IA",
+      "shortLabel": "Souveraineté de la stack IA",
+      "description": "Définir une gouvernance claire data et/ou IA (rôles, responsabilités, politiques, contrôles) pour assurer qualité, sécurité, conformité, traçabilité et alignement métier sur les cas d’usage critiques.",
+      "scope": "organization",
+      "sourceScope": "Fonction ou organisation",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "Regulation (EU) 2024/1689 (AI Act) Regulation (EU) 2016/679 (GDPR) Regulation (EU) 2022/868 (Data Governance Act) Directive (EU) 2022/2555 (NIS2)",
+      "recommendations": "Intention : Une gouvernance data/IA est formalisée (instances, RACI, politiques) et appliquée aux cas d’usage et plateformes critiques. Moyens : Mettre en place un référentiel (données, modèles, jeux d’entraînement), des contrôles de qualité et de sécurité, une gestion des accès, une documentation (data lineage, model cards), ainsi que des revues éthiques et de conformité. Résultats : Adoption facilitée par les métiers ; décisions et responsabilités traçables ; indicateurs de qualité/risque suivis et actions correctives pilotées.",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 8
+      }
+    },
+    {
+      "id": "RES-2.1",
+      "code": "RES-2.1",
+      "sourceCode": "RES-2.1",
+      "pillarId": "RES-2",
+      "label": "Localisation géographique et nationalité de la maison mère du fournisseur (interne ou externe)",
+      "shortLabel": "Localisation de l’autorité décisionnelle (territorialité et maison mère du fournisseur)",
+      "description": "S’assurer que l’autorité décisionnelle et l’entité juridique qui délivre le service (ou opère le produit) sont localisées et/ou soumises, dans/à une juridiction compatible avec les exigences de l’organisation (idéalement UE/EEE), afin de réduire les risques liés à la souveraineté, à la conformité et à la continuité.",
+      "scope": "asset",
+      "sourceScope": "Actif numérique",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "Directive (EU) 2022/2555 (NIS2) Directive (EU) 2022/2557 (CER – Critical Entities Resilience) Regulation (EU) 2016/679 (GDPR) Regulation (EU) 2022/2554 (DORA)",
+      "recommendations": "Intention : Cartographier, pour chaque service numérique critique, la localisation (pays) de la maison mère, des entités opérantes et des centres de décision. Moyens : Intégrer dans les politiques d’achats et les modèles contractuels des exigences de droit applicable, de localisation (UE/EEE si requis) et de notification en cas de changement de contrôle ou de localisation. Résultats : 100 % des services critiques sont pilotés depuis une juridiction acceptable ; toute dérogation est exceptionnelle, documentée, compensée (mesures techniques/contractuelles) et revue périodiquement.",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 9
+      }
+    },
+    {
+      "id": "RES-2.2",
+      "code": "RES-2.2",
+      "sourceCode": "RES-2.2",
+      "pillarId": "RES-2",
+      "label": "Conformité à la réglementation nationale (ou supranationale) de l'actif ou service numérique",
+      "shortLabel": "Conformité réglementaire européenne",
+      "description": "Vérifier et démontrer que les services numériques critiques respectent les obligations légales et réglementaires applicables (UE et nationales), et que cette conformité est maintenue dans le temps en prenant en compte les évolutions de texte ou de périmètre.",
+      "scope": "asset",
+      "sourceScope": "Actif numérique",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "Directive (EU) 2022/2555 (NIS2) Regulation (EU) 2022/2554 (DORA) Regulation (EU) 2016/679 (GDPR)",
+      "recommendations": "Intention : Identifier, pour chaque service critique, les exigences réglementaires pertinentes et les responsables de conformité associés. Moyens : Réaliser une analyse d’écart (gap analysis), définir des contrôles/mesures de conformité, conserver les preuves (politiques, logs, audits), et mettre en place une veille réglementaire avec revues lors des changements. Résultats : Démontrer la traçabilité de la conformité afin d’attester du respect des exigences à chaque changement réglementaire ou opérationnel significatif.",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 10
+      }
+    },
+    {
+      "id": "RES-2.3",
+      "code": "RES-2.3",
+      "sourceCode": "RES-2.3",
+      "pillarId": "RES-2",
+      "label": "Maitrise de l'exposition aux lois extraterritoriales au regard de mon organisation",
+      "shortLabel": "Exposition aux lois extraterritoriales extraterritorial. Différencier avec critère 2.1 et clarifier la formulation",
+      "description": "Réduire l’exposition de l’organisation à des lois extraterritoriales susceptibles d’imposer un accès aux données ou une contrainte opérationnelle incompatible (ex. demandes d’accès par autorités hors UE), en choisissant des architectures et leurs localisations ainsi qu'en maintenant une cartographie à jour de cette exposition ou en engageant contractuellement les fournisseurs concernés.",
+      "scope": "asset",
+      "sourceScope": "Actif numérique",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "Regulation (EU) 2016/679 (GDPR) Regulation (EU) 2023/2854 (Data Act) Directive (EU) 2022/2555 (NIS2)",
+      "recommendations": "Intention : Identifier pour chaque actif numérique les risques d'exposition à des lois extraterritoriales. Moyens : Les risques d’extraterritorialité sont évalués pour les actifs critiques et des actions de remédiation mises en œuvre (ex. renforcer les clauses contractuelles (contestation des demandes, transparence, notification) ; le chiffrement estmaîtrisé par l’organisation ; les transferts hors UE sont limités et les fournisseurs/entités sous juridiction UE/EEE sont privilégiés) Résultats : L’exposition résiduelle est acceptée et justifiée ; les choix technologiques et de fournisseurs sont documentés et, le cas échéant, différenciés par criticité.",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 11
+      }
+    },
+    {
+      "id": "RES-2.4",
+      "code": "RES-2.4",
+      "sourceCode": "RES-2.4",
+      "pillarId": "RES-2",
+      "label": "Poids du fournisseur dans les dépenses du système critique",
+      "shortLabel": "",
+      "description": "Limiter le risque de dépendance économique à un fournisseur unique du service numérique (éditeur/intégrateur/opérateur) en évitant une concentration excessive des dépenses sur le périmètre du système critique.",
+      "scope": "asset",
+      "sourceScope": "Actif numérique",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "Regulation (EU) 2022/2554 (DORA) Directive (EU) 2022/2555 (NIS2)",
+      "recommendations": "Intention : L’entreprise a défini une politique de diversification des approvisionnements pour les domaines critiques. Les domaines critiques sont définis. La mesure de la concentration des dépenses des fournisseurs au sein de l'actif ou du système critique est effectuée Moyens : La politique est partagée et déclinée en phase de conception et/ou d’appel d’offres. Des seuils imposant la diversification sont appliqués (par exemple ≤ 50 % - le seuil fixé dépend du contexte de l'entreprise). Mettre en place des mécanismes de mise en concurrence et de diversification (second sourcing, solutions de repli), et piloter des plans de réduction de dépendance lorsque les seuils sont dépassés Résultats : Aucun fournisseur ne dépasse le seuil défini sur le périmètre critique ; les exceptions et les écarts sont justifiés et acceptés le cas échéant ; des plans de remédiation sont pilotés.",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 12
+      }
+    },
+    {
+      "id": "RES-2.5",
+      "code": "RES-2.5",
+      "sourceCode": "RES-2.5",
+      "pillarId": "RES-2",
+      "label": "Pouvoir de négociation contractuelle",
+      "shortLabel": "Pouvoir de négociation contractuelle cf. Data Act Remédiation",
+      "description": "S’assurer que l’organisation dispose d’un pouvoir de négociation suffisant pour imposer des clauses clés (audit, sécurité, réversibilité, SLA, changement de contrôle)",
+      "scope": "organization",
+      "sourceScope": "Fonction ou organisation",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "Regulation (EU) 2022/2554 (DORA) Regulation (EU) 2023/2854 (Data Act) Regulation (EU) 2016/679 (GDPR) Directive (EU) 2022/2555 (NIS2)",
+      "recommendations": "Intention : Rédiger et faire valider, par les fonctions risques et juridiques, un socle de clauses non négociables applicables aux actifs et systèmes critiques. Moyens : Décliner ce socle dans les contrats des actifs/systèmes critiques, en définissant des clauses types (audit, gestion des vulnérabilités, réversibilité, assistance à la migration, pénalités) et en mobilisant des leviers de négociation (volumes, mutualisation des achats, groupements). Résultats : Le taux de couverture contractuel est mesuré, les écarts sont identifiés, justifiés et/ou donnent lieux à la construction de plans alternatifs.",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 13
+      }
+    },
+    {
+      "id": "RES-3.1",
+      "code": "RES-3.1",
+      "sourceCode": "RES-3.1",
+      "pillarId": "RES-3",
+      "label": "Localisation géographique des données et/ou des opérations de traitements associées",
+      "shortLabel": "Localisation régionale des traitements",
+      "description": "Maîtriser la localisation des données (notamment personnelles et sensibles) et des traitements associées afin de respecter les exigences légales, de réduire les risques de transfert hors juridiction et de garantir la disponibilité et la souveraineté des données critiques.",
+      "scope": "asset",
+      "sourceScope": "Actif numérique",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "Regulation (EU) 2016/679 (GDPR) Regulation (EU) 2022/868 (Data Governance Act) Regulation (EU) 2023/2854 (Data Act) Directive (EU) 2022/2555 (NIS2)",
+      "recommendations": "Intention : Définir des règles de résidence des données par niveau de sensibilité Moyens : Cartographier les données et traitements (où sont stockées/traitées les données, par qui, et dans quel pays), contrôler les flux (y compris sous‑traitants), encadrer les transferts internationaux (clauses, mesures supplémentaires), et auditer la conformité des localisations. Résultats : Les traitements hors juridiction sont exceptionnels, justifiés et encadrés ; la localisation réelle est connue, tracée et revue.",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 14
+      }
+    },
+    {
+      "id": "RES-3.2",
+      "code": "RES-3.2",
+      "sourceCode": "RES-3.2",
+      "pillarId": "RES-3",
+      "label": "Cartographie des données et des usages",
+      "shortLabel": "",
+      "description": "Cartographier les données, leurs usages, leurs importances pour les fonctions ainsi que les obligation réglementaires applicables",
+      "scope": "organization",
+      "sourceScope": "Fonction ou organisation",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "",
+      "recommendations": "Intention : Les données critiques, les traitements, les règlementations applicables, la classification et les SLAs sont formalisés et partagés Moyens : La cartographie est tenue à jour et les politiques (ci-dessus) sont connues et appliquées Résultats : L'application des politiques relatives à la données est contrôlée, les écarts identifiés et les plans d'amélioration sont pilotés",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 15
+      }
+    },
+    {
+      "id": "RES-3.3",
+      "code": "RES-3.3",
+      "sourceCode": "RES-3-3",
+      "pillarId": "RES-3",
+      "label": "Portabilité des données et des traitements",
+      "shortLabel": "Réversibilité et portabilité des workloads",
+      "description": "Maintien de la portabilité des traitements et des données (migration, extraction, effacement, transfert) sans interruption excessive, avec des délais et coûts maîtrisés.",
+      "scope": "asset",
+      "sourceScope": "Actif numérique",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "Regulation (EU) 2023/2854 (Data Act) Regulation (EU) 2016/679 (GDPR) Regulation (EU) 2022/2554 (DORA)",
+      "recommendations": "Intention : Disposer d’exigences formalisées de portabilité des données et des traitements pour les services critiques, en prévoyant explicitement les cas où une migration vers un autre fournisseur n’est pas réaliste et nécessite la mise en place d’une solution alternative Moyens : Intégrer des clauses de portabilité et d’assistance à la migration, définir les formats d'export et d'échanges, documenter les modalités d’extraction et maintenir à jour les scripts et outils d'export Résultats : La portabilité est démontrée notamment par des tests réguliers des scenarios de portabilité. Soit les traitements et données peuvent être portés vers une autre solution dans des conditions maîtrisées, soit une alternative opérationnelle est effectivement disponible ; dans tous les cas, les délais, coûts, dépendances et impacts sont connus et la continuité des services critiques peut être assurée sans blocage majeur dans des délais maitrisés et acceptés.",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 16
+      }
+    },
+    {
+      "id": "RES-3.4",
+      "code": "RES-3.4",
+      "sourceCode": "RES-3-4",
+      "pillarId": "RES-3",
+      "label": "Assurer la disponibilité des données en cas de disruption majeure",
+      "shortLabel": "",
+      "description": "Concevoir et mettre en œuvre des solutions de sauvegarde et de réplication des données adaptées à la criticité de la donnée afin de garantir sa disponibilité de cas de disruption majeure",
+      "scope": "asset",
+      "sourceScope": "Actif numérique",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "",
+      "recommendations": "Intention : Définir des politiques de sauvegarde et de réplication des données adaptées au niveau de criticité et de classification des données Moyens : Mettre en place les solutions de sauvegarde adaptées (locales, externalisées et déconnectées, diversification des supports, réduction de la dépendance aux solutions de sauvegardes). Mettre en place une réplication des données pour maintenir l'accès aux données indépendamment des traitements (BI, data Lake...). Conception et documentation des scénarios de fonctionnement en mode dégradé Résultats : Restauration testée régulièrement ; fonctionnement en mode dégradé testé régulièrement; REX documentés et plans d'amélioration pilotés",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 17
+      }
+    },
+    {
+      "id": "RES-3.5",
+      "code": "RES-3.5",
+      "sourceCode": "RES-3-5",
+      "pillarId": "RES-3",
+      "label": "Maîtrise de l'exploitation de données par l'IA en support des objectifs stratégiques",
+      "shortLabel": "",
+      "description": "Concevoir et mettre en œuvre une doctrine IA accompagnée du maintien d'une cartographie des usages et des vulnérabilités et risques induits",
+      "scope": "organization",
+      "sourceScope": "Fonction ou organisation",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "",
+      "recommendations": "Intention : Une politique concernant l'usage de l'IA (notamment générative et agentique) est établie et ses principes sont partagés Moyens : Une animation des usages est en place. Elle permet d'établir la cartographie des usages et d'identifier les risques en matière d'autonomie technologique et opérationnelle et en matière de conformité. Résultats : La politique est régulièrement mise à jour au rythme de l'évolution des technologies, des réglementations et des risques. Les usages non conformes sont détectés et les actions correctives, de sensibilisation et de conduite de changement sont réelles et pilotées",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 18
+      }
+    },
+    {
+      "id": "RES-4.1",
+      "code": "RES-4.1",
+      "sourceCode": "RES-4.1",
+      "pillarId": "RES-4",
+      "label": "Capacité à opérer l'actif/système critique en autonomie",
+      "shortLabel": "Autonomie opérationnelle",
+      "description": "Assurer la capacité à opérer l'actif/système critique sans dépendance bloquante (ressources humaines, techniques et externes), y compris en situation de crise ou de rupture contractuelle.",
+      "scope": "asset",
+      "sourceScope": "Actif numérique",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "Directive (EU) 2022/2555 (NIS2) Regulation (EU) 2022/2554 (DORA) Directive (EU) 2022/2557 (CER – Critical Entities Resilience)",
+      "recommendations": "Intention : Identifier les fonctions opérationnelles essentielles et les dépendances aux ressources humaines, techniques, externes associées pour opérer l'actif/système critique. Moyens : documenter les procédures (runbooks), mettre en place une astreinte interne, organiser le transfert de connaissance, définir des niveaux de service et des plans de continuité, et disposer d’accès/administration maîtrisés. Résultats : L’organisation peut maintenir l’exploitation et le support des actifs/systèmes critiques, y compris en cas de rupture avec un prestataire ; la capacité est démontrée par exercices ou incidents réels.",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 19
+      }
+    },
+    {
+      "id": "RES-4.2",
+      "code": "RES-4.2",
+      "sourceCode": "RES-4.2",
+      "pillarId": "RES-4",
+      "label": "Disponibilité des compétences (interne, prestataire et marché territorial)",
+      "shortLabel": "Disponibilité de compétences régionales (interne, externe et marché)",
+      "description": "Garantir la disponibilité des compétences critiques (interne, prestataires, marché local) sur la durée : recrutement, formation, rétention et gestion des risques de départ pour éviter toute rupture opérationnelle.",
+      "scope": "asset",
+      "sourceScope": "Actif numérique",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "Directive (EU) 2022/2555 (NIS2) Regulation (EU) 2022/2554 (DORA)",
+      "recommendations": "Intention : Disposer d’une cartographie des compétences critiques et des postes clés (single point of failure) nécessaires aux opérations de l'actif critique Moyens : Déploiement d'un plan d'action de maîtrise des compétences, y compris celles externalisées : plans de formation et de certification, binôme et rotation, documentation, clauses de continuité côté prestataires, gestion de capacité, et surveillance des risques RH (turnover, obsolescence). Résultats : Les fournisseurs des opérations critiques sont audités pour s'assurer de l'efficacité des plans d'action. Les départs ou indisponibilités n’entraînent pas de rupture majeure ; les délais de remplacement et de montée en compétence sont maîtrisés.",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 20
+      }
+    },
+    {
+      "id": "RES-4.3",
+      "code": "RES-4.3",
+      "sourceCode": "RES-4.3",
+      "pillarId": "RES-4",
+      "label": "Continuité d'activité face à l'interruption du service",
+      "shortLabel": "",
+      "description": "Concevoir les architectures, contrats et plans de continuité (PCA/PRA) pour réagir face à une disruption de l'actif critique (fournisseur défaillant, suspension légale, incident majeur) et permettre de retrouver une situation nominale",
+      "scope": "asset",
+      "sourceScope": "Actif numérique",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "DORA Art. 11",
+      "recommendations": "Intention : Définir des scénarios de disruption (technique, juridique, opérationnel, sécurité, environnement) et des objectifs de délais et périmètres de reprise (RTO/RPO) conformes à la criticité de l'actif. Moyens : Définir et mettre en place des actions de résilience adéquates : architectures résilientes (redondance, multizone), sauvegardes et restauration testées, clauses de continuité, procédures de gestion de crise et PCA/PRA conçus et mis en œuvre. Résultats : Simulations de crise et PCA/PRA testés régulièrement ; REX documentés et plans d'amélioration des PCA/PRA pilotés",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 21
+      }
+    },
+    {
+      "id": "RES-5.1",
+      "code": "RES-5.1",
+      "sourceCode": "RES-5.1",
+      "pillarId": "RES-5",
+      "label": "Dépendance à la supply chain extraterritoriale",
+      "shortLabel": "Dépendance à la supply chain extraterritorial",
+      "description": "Réduire la dépendance à une supply chain extraterritoriale (matériels, logiciels, support, pièces, services) susceptible d’être interrompue par des restrictions géopolitiques, réglementaires ou logistiques.",
+      "scope": "asset",
+      "sourceScope": "Actif numérique",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "Directive (EU) 2022/2555 (NIS2) Directive (EU) 2022/2557 (CER – Critical Entities Resilience) Regulation (EU) 2022/2554 (DORA) Directive (EU) 2022/2464 (CSRD)",
+      "recommendations": "Intention : Cartographier la supply chain des composants et services (niveaux 1 à n) de l'actif critique et les pays de dépendance. Moyens : Qualifier des alternatives (fournisseurs UE/EEE ou multi‑région), constituer des stocks/contrats de secours si pertinent, intégrer des clauses de continuité et de transparence sur la chaîne, et suivre les risques géopolitiques. Résultats : Dépendances extraterritoriales critiques identifiées, réduites ou acceptées ; plans de mitigation en place pour les points de rupture majeurs.",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 22
+      }
+    },
+    {
+      "id": "RES-5.2",
+      "code": "RES-5.2",
+      "sourceCode": "RES-5.2",
+      "pillarId": "RES-5",
+      "label": "Transparence maîtrisée de la supply chain",
+      "shortLabel": "",
+      "description": "Obtenir une transparence suffisante de la supply chain (opérations et technologies) permettant d'identifier les maillons faibles et les risques de rupture",
+      "scope": "asset",
+      "sourceScope": "Actif numérique",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "",
+      "recommendations": "Intention : Les exigences de transparence de la supply chain relatives aux actifs critiques sont formalisées et déclinées sous forme de clauses contractuelles Moyens : Ces exigences font partie des contrats majeurs et sont accompagnées d'obligations de communication des changements et des possibilités d'audits Résultats : Les contrats majeurs sont audités; la maîtrise de la supply chain fait partie de l'agenda des comités de pilotage des contrats avec les fournisseurs; des plans de sécurisation sont lancés et pilotés avec les fournisseurs",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 23
+      }
+    },
+    {
+      "id": "RES-6.1",
+      "code": "RES-6.1",
+      "sourceCode": "RES-6.1",
+      "pillarId": "RES-6",
+      "label": "Interopérabilité de la solution",
+      "shortLabel": "Interopérabilité et standards ouverts",
+      "description": "Garantir, par l'architecture, l’interopérabilité et l'évolutivité de la solution (données, API, formats, protocoles) afin de faciliter l’intégration, réduire l’enfermement propriétaire (vendor lock‑in) et accélérer la réversibilité si nécessaire.",
+      "scope": "asset",
+      "sourceScope": "Actif numérique",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "Regulation (EU) 2023/2854 (Data Act) Directive (EU) 2022/2555 (NIS2)",
+      "recommendations": "Intention : Exiger l’usage de standards ouverts et documentés lorsque disponibles. Moyens : Privilégier des API publiques, formats standard, documentation à jour, et limiter les dépendances à des composants propriétaires non remplaçables ; prévoir des tests d’intégration et de portabilité. Résultats : Les intégrations reposent sur des interfaces standardisées et/ou maîtrisées ; les changements de composants/fournisseurs restent réalisables avec un effort et un délai connus et maitrisés",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 24
+      }
+    },
+    {
+      "id": "RES-6.2",
+      "code": "RES-6.2",
+      "sourceCode": "RES-6.2",
+      "pillarId": "RES-6",
+      "label": "Portabilité des solutions et des technologies",
+      "shortLabel": "Réversibilité et portabilité des workloads",
+      "description": "Assurer par l'architecture et par l'innovation et l'exploration le maintien des possibilités de portabilité pour réduire les risques de dépendance",
+      "scope": "asset",
+      "sourceScope": "Actif numérique",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "Regulation (EU) 2023/2854 (Data Act) Regulation (EU) 2016/679 (GDPR) Regulation (EU) 2022/2554 (DORA)",
+      "recommendations": "Intention : Définir une politique architecturale favorisant l'adaptabilité et la résilience (APIsation, best of breed, standardisation des échanges...) Moyens : Déclinaison effective de la politique architecturale accompagnée de l'identification et du maintien de listes des alternatives pour chaque actif numérique critique Résultats : Les projets sont audités pour vérifier la résilience by design. Les alternatives sont validées par la conduites de proof of value notamment. La liste des alternatives est régulièrement mise à jour",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 25
+      }
+    },
+    {
+      "id": "RES-6.3",
+      "code": "RES-6.3",
+      "sourceCode": "RES-6.3",
+      "pillarId": "RES-6",
+      "label": "Ouverture du code et maîtrise des licences",
+      "shortLabel": "Ouverture du code et des licences",
+      "description": "Maîtriser les risques liés aux licences et à l’ouverture du code (open source ou propriétaire) afin d’assurer pérennité, audibilité, sécurité et capacité de maintenance/évolution sur le long terme.",
+      "scope": "asset",
+      "sourceScope": "Actif numérique",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "Regulation (EU) 2024/2847 (Cyber Resilience Act) Directive (EU) 2022/2555 (NIS2) Regulation (EU) 2019/881 (EU Cybersecurity Act)",
+      "recommendations": "Intention : Connaître et gouverner les licences, propriété intellectuelle, les exigences des licences open source, les dépendances et composants logiciels utilisés dans les actifs critiques. Moyens : Définir la politique de contribution open source, tenir un inventaire (liste exhaustive et structurée de tous les composants logiciels qui entrent dans la composition d'une application), analyser la conformité des licences, sécuriser la chaîne de build (CI/CD) et prévoir une capacité de maintenance interne ou via un tiers. Résultats : Les risques de licence et de dépendance sont maîtrisés ; la correction de vulnérabilités et la maintenance sont possibles sans blocage juridique ou technique.",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 26
+      }
+    },
+    {
+      "id": "RES-6.4",
+      "code": "RES-6.4",
+      "sourceCode": "RES-6.4",
+      "pillarId": "RES-6",
+      "label": "Transparence maîtrisée de l'architecture du service critique ou de l'actif numérique (si haut niveau de protection)",
+      "shortLabel": "Transparence architecturale et dépendances. WARNING! Vérifier redondance avec critère 5.5",
+      "description": "Obtenir une transparence suffisante sur l’architecture (composants, dépendances, localisation, flux, responsabilités), compatible avec la protection du secret industriel des fournisseurs et des informations sensibles de l'entreprise et la sécurité du système, afin de permettre l'évaluation des risques, auditer la sécurité et planifier la continuité/réversibilité.",
+      "scope": "asset",
+      "sourceScope": "Actif numérique",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "Regulation (EU) 2024/2847 (Cyber Resilience Act) Directive (EU) 2022/2555 (NIS2) Regulation (EU) 2022/2554 (DORA)",
+      "recommendations": "Intention : Définir le niveau de transparence d’architecture requis pour le service critique, proportionné au modèle de service (on-prem, IaaS, PaaS, SaaS), et formalisant les informations minimales nécessaires à la maîtrise des risques (composants, dépendances critiques, flux, localisations, responsabilités). Moyens : Documentation détaillée (schémas, dépendances, flux de données, responsabilités, sous‑traitants), exigences de sécurité et protection sont documentées, et revues d’architecture périodiques incluant risques et conformité. Résultats : L’architecture est comprise et traçable ; les changements sont maîtrisés ; les analyses de risque, audits et plans de continuité s’appuient sur une information fiable.",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 27
+      }
+    },
+    {
+      "id": "RES-6.5",
+      "code": "RES-6.5",
+      "sourceCode": "RES-6.5",
+      "pillarId": "RES-6",
+      "label": "Télécommunications et connectivité critique",
+      "shortLabel": "",
+      "description": "Assurer la disponibilité et la continuité des services de télécommunications et de connectivité (liens réseau, accès Internet, interconnexions, sites et accès distants) nécessaires au fonctionnement des services critiques, y compris en cas de défaillance d’un opérateur, d’un lien ou d’une infrastructure.",
+      "scope": "organization",
+      "sourceScope": "Fonction ou organisation",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "DORA 11.6 DORA 9",
+      "recommendations": "Intention : Identifier les dépendances télécoms critiques (opérateurs, liens, sites, points d’interconnexion) et définir le niveau de résilience attendu afin de garantir la continuité d’exploitation des services critiques. Moyens : Mettre en place des dispositifs adaptés (redondance de liens et d’opérateurs, diversité géographique et technologique, niveaux de service contractuels, supervision et procédures de bascule), et formaliser des scénarios de défaillance télécom. Résultats : Le service critique reste accessible en cas de défaillance d’un lien ou d’un opérateur ; les mécanismes de bascule fonctionnent de manière effective et maîtrisée ; la continuité de la connectivité est démontrée par des tests, des incidents réels ou des indicateurs de disponibilité.",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 28
+      }
+    },
+    {
+      "id": "RES-6.6",
+      "code": "RES-6.6",
+      "sourceCode": "RES-6.6",
+      "pillarId": "RES-6",
+      "label": "Maitrise de l'obsolescence technologique",
+      "shortLabel": "",
+      "description": "Le risque d'obsolescence est identifié, partagé et géré",
+      "scope": "asset",
+      "sourceScope": "Actif numérique",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "",
+      "recommendations": "Intention : Une politique de gestion de l'obsolescence est définie au sein de l'entreprise. Le risque d'obsolescence est identifié et partagé. La dépendance de l'actif critique à des composants obsolètes est formalisée et partagée Moyens : Le cycle de vie de l'actif et de ses composants est géré. Le risque induit par l'obsolescence est géré, réévalué régulièrement et donne lieu à des plans de mitigation Résultats : Les plans de mitigation sont conduits. Le risque induit par l'obsolescence est réduit et/ou assumé et expliqué",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 29
+      }
+    },
+    {
+      "id": "RES-7.1",
+      "code": "RES-7.1",
+      "sourceCode": "RES-7.1",
+      "pillarId": "RES-7",
+      "label": "Certification sécurité et conformité",
+      "shortLabel": "Ouverture du code et des licences (réversibilité technique)",
+      "description": "S’assurer que les fournisseurs de services critiques disposent de certifications et d’attestations de conformité sécurité pertinentes (selon le risque) et que celles‑ci sont à jour et couvrent le périmètre réellement utilisé.",
+      "scope": "asset",
+      "sourceScope": "Actif numérique",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "Regulation (EU) 2019/881 (EU Cybersecurity Act) Directive (EU) 2022/2555 (NIS2) Regulation (EU) 2022/2554 (DORA) Regulation (EU) 2024/2847 (Cyber Resilience Act) Cloud sovreinety framework Secnumcloud",
+      "recommendations": "Intention : Définir, par type de service et niveau de criticité, les certifications attendues (ex. ISO 27001, SOC 2, Seccnum cloud, schémas UE le cas échéant). Moyens : Exiger les rapports/certificats, vérifier le périmètre, suivre les dates de validité et les plans d’action, et compléter par des audits/évaluations ciblées. Résultats : Les fournisseurs des services critiques sont certifiés pour le périmètre concerné ; les écarts identifiés sont suivis et compensés ; les preuves sont disponibles et revues périodiquement.",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 30
+      }
+    },
+    {
+      "id": "RES-7.2",
+      "code": "RES-7.2",
+      "sourceCode": "RES-7.2",
+      "pillarId": "RES-7",
+      "label": "Autonomie de gestion des vulnérabilités et patchs",
+      "shortLabel": "Contrôle européen des SOC et journaux",
+      "description": "Garantir une maitrise autonome et réactive des vulnérabilités et des correctifs : transparence des fournisseurs, capacité à évaluer l’impact, à tester et à déployer des patchs dans des délais compatibles avec le risque.",
+      "scope": "asset",
+      "sourceScope": "Actif numérique",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "Regulation (EU) 2024/2847 (Cyber Resilience Act) Directive (EU) 2022/2555 (NIS2) Regulation (EU) 2022/2554 (DORA)",
+      "recommendations": "Intention : Disposer d’exigences formalisées de divulgation des vulnérabilités et de délais de correction (SLA) pour les services critiques. Moyens : Inclure des clauses de notification, d’accès aux informations techniques (CVE, versions, correctifs), définir une politique de gestion des vulnérabilité et de patch management applicable aussi aux fournisseurs et des plans d’audit basés sur les risques. Résultats : Des audits/contrôles sont régulièrement menés; les vulnérabilités sont traitées dans les délais ; les plans d’actions sont suivis et les preuves de correction sont conservées.",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 31
+      }
+    },
+    {
+      "id": "RES-7.3",
+      "code": "RES-7.3",
+      "sourceCode": "RES-7.3",
+      "pillarId": "RES-7",
+      "label": "Contrôle régional des SOC et journaux",
+      "shortLabel": "Certification sécurité et conformité",
+      "description": "Garantir que la collecte et la conservation des journaux (opérationnels et réglementaires) et les données associées ainsi que les opérations de sécurité (SOC), sont maîtrisées dans une zone géographique conforme aux exigences (UE/EEE si requis), avec des délais d’accès compatibles avec les obligations et le risque.",
+      "scope": "asset",
+      "sourceScope": "Actif numérique",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "Directive (EU) 2022/2555 (NIS2) Regulation (EU) 2022/2554 (DORA) Regulation (EU) 2016/679 (GDPR)",
+      "recommendations": "Intention : Définir des exigences de localisation et d’accès aux journaux opérationnels et aux sources du SOC pour les services critiques. Moyens : Imposer des exigences de localisation/traitement dans les contrats et architectures (SIEM, stockage), contrôler l’accès des prestataires, et vérifier la disponibilité des journaux (durée de rétention, intégrité, horodatage) ainsi que les délais d’extraction. Résultats : Les logs des services critiques sont collectés, conservés et exploitables dans les délais requis ; l’accès et la localisation sont audités et conformes aux exigences.",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 32
+      }
+    },
+    {
+      "id": "RES-8.1",
+      "code": "RES-8.1",
+      "sourceCode": "RES-8.1",
+      "pillarId": "RES-8",
+      "label": "Maîtrise des dépendances énergétiques et de la continuité des data center",
+      "shortLabel": "",
+      "description": "Assurer la disponibilité énergétique et la continuité de fonctionnement des datacenters nécessaires au fonctionnement des actifs critiques",
+      "scope": "organization",
+      "sourceScope": "Fonction ou organisation",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "",
+      "recommendations": "Intention : Identifier les dépendances énergétiques (opérateurs, architecture) et les dépendances nécessaires au fonctionnement des datacenters afin de garantir la continuité des services critiques dans le respect des exigences environnementales Moyens : Mettre en place des dispositifs adaptés (hybridation, redondances, multisourcing). Conduire des stress test et tester les PRA d'infrastructures Résultats : Les tests de PRA/PCA dédiés DC et Energie sont réalisés régulièrement. Les REX sont documentés et donnent lieu à des plans d'amélioration pilotés",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 33
+      }
+    },
+    {
+      "id": "RES-8.2",
+      "code": "RES-8.2",
+      "sourceCode": "RES-8.2",
+      "pillarId": "RES-8",
+      "label": "Continuité d'activité en cas d'aléas environnementaux",
+      "shortLabel": "Continuité d'activité en cas d'aléas climatiques",
+      "description": "Intégrer les aléas environnementaux (inondations, canicules, stress hydrique, tempêtes, feux, séisme) dans la continuité d’activité des services critiques afin d’anticiper les impacts sur les sites, fournisseurs, infrastructures et personnels.",
+      "scope": "organization",
+      "sourceScope": "Fonction ou organisation",
+      "answerMode": "R_NR",
+      "regulatoryReferences": "Directive (EU) 2022/2557 (CER – Critical Entities Resilience) Directive (EU) 2022/2464 (CSRD) Directive (EU) 2022/2555 (NIS2)",
+      "recommendations": "Intention : Identifier les risques environnementaux pertinents et les actifs/externalisations exposés. Moyens : Évaluer les risques physiques sur les sites (logistiques, production...) et data centers (internes et fournisseurs), exiger des preuves de plans de continuité climatiques, diversifier les localisations, et tester des scénarios (perte de site, rupture énergie/eau/transport). Résultats : Les risques environnementaux sont intégrés au PCA/PRA ; les mesures de prévention/mitigation sont priorisées et suivies ; la capacité de reprise est démontrée.",
+      "active": true,
+      "source": {
+        "sheet": "Référentiel v1",
+        "row": 34
+      }
+    }
+  ],
+  "importWarnings": [
+    "Ne pas modifier le contenu du référentiel officiel dans l'application.",
+    "Le JSON canonique sert à l'indexation et à la synchronisation interne.",
+    "Ligne 16: identifiant normalisé 'RES-3-3' -> 'RES-3.3'",
+    "Ligne 17: identifiant normalisé 'RES-3-4' -> 'RES-3.4'",
+    "Ligne 18: identifiant normalisé 'RES-3-5' -> 'RES-3.5'",
+    "Ligne 23: dimension invalide 'RES 5' pour RES-5.2"
+  ]
+}

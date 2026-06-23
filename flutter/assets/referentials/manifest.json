@@ -1,0 +1,25 @@
+{
+  "generatedAt": "2026-06-23T14:39:49.244885+00:00",
+  "activeReferentialId": "adri-irn-v1.1",
+  "referentials": [
+    {
+      "id": "adri-irn-v1.1",
+      "version": "v1.1",
+      "filename": "adri_irn_v1_1.json",
+      "assetPath": "assets/referentials/adri_irn_v1_1.json",
+      "checksumSha256": "fb5bf5218d33c1e31f886b979e3a80fd28d3f966f5707e323b63c8c0a351e264",
+      "pillars": 8,
+      "criteria": 30,
+      "source": {
+        "type": "gitlab",
+        "url": "https://gitlab.com/digitalresilienceinitiative/adri-irn",
+        "projectPath": "digitalresilienceinitiative/adri-irn",
+        "defaultBranch": "main",
+        "filePath": "Grille d'évaluation IRN (FR)/xlsx/Questionnaire_IRN_v.1.1.xlsx",
+        "commitSha": null,
+        "checksumSha256": "f8997cdec98a29c35b25190ba8756e8bd9470967ded2cab31e6c0b57c14e3047",
+        "license": "CC BY-NC-ND 4.0"
+      }
+    }
+  ]
+}

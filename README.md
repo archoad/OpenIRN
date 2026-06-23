@@ -44,15 +44,18 @@ Fonctionnalités prévues :
 
 Le code OpenIRN est distinct du référentiel IRN officiel.
 
-Le référentiel IRN est publié par l’aDRI / Digital Resilience Initiative sous sa propre licence. OpenIRN ne doit pas embarquer directement dans GitHub une copie modifiée ou dérivée du référentiel officiel.
+Le référentiel IRN est publié par l’aDRI / Digital Resilience Initiative sous sa propre licence Creative Commons. OpenIRN embarque un bundle JSON runtime du référentiel officiel dans les assets Flutter afin que les builds publiés fonctionnent immédiatement hors ligne.
 
-La bonne pratique retenue par le projet est :
+Le bundle embarqué conserve les métadonnées d’attribution nécessaires :
 
-1. télécharger le fichier officiel depuis la source aDRI ;
-2. l’importer localement ;
-3. générer un JSON canonique local ;
-4. conserver la source, la version, la licence et le checksum ;
-5. ne pas versionner les fichiers générés contenant le référentiel officiel.
+- source officielle ;
+- version ;
+- fichier source ;
+- licence ;
+- checksum SHA-256 ;
+- avertissements d’import.
+
+Le dépôt ne versionne pas les fichiers de travail utilisés pour régénérer le bundle (`Questionnaire_IRN_*.xlsx`, `canonical_irn_*.json`, rapports de validation).
 
 Voir aussi : [`NOTICE.md`](NOTICE.md).
 
@@ -74,34 +77,18 @@ OpenIRN/
 └── CODE_OF_CONDUCT.md
 ```
 
-## Préparer le référentiel local
+## Référentiel embarqué
 
-Depuis la racine du dépôt :
+Le bundle JSON du référentiel officiel est versionné dans :
 
-```bash
-curl -L \
-  -o Questionnaire_IRN_v.1.1.xlsx \
-  "https://gitlab.com/digitalresilienceinitiative/adri-irn/-/raw/main/Grille%20d%27%C3%A9valuation%20IRN%20%28FR%29/xlsx/Questionnaire_IRN_v.1.1.xlsx"
-
-python3 -m venv .venv
-source .venv/bin/activate
-pip install openpyxl
-
-python server/scripts/import_adri_referential.py \
-  --input Questionnaire_IRN_v.1.1.xlsx \
-  --output canonical_irn_v1_1.json \
-  --version v1.1
-
-python server/scripts/validate_adri_referential.py \
-  --input canonical_irn_v1_1.json \
-  --output validation_referential_report.json
-
-python server/scripts/build_referential_bundle.py \
-  --input canonical_irn_v1_1.json \
-  --output-dir flutter/assets/referentials
+```text
+flutter/assets/referentials/adri_irn_v1_1.json
+flutter/assets/referentials/manifest.json
 ```
 
-Les fichiers générés ne sont pas destinés à être commités dans le dépôt public.
+Ces fichiers sont nécessaires au fonctionnement hors ligne de l’application et sont inclus dans les artefacts de release.
+
+Pour régénérer le bundle depuis le fichier officiel aDRI, voir [`docs/34_referentiel_embarque_assets.md`](docs/34_referentiel_embarque_assets.md).
 
 ## Lancer OpenIRN
 
@@ -129,7 +116,7 @@ chmod +x tools/check_open_source_readiness.sh
 ./tools/check_open_source_readiness.sh
 ```
 
-Le script vérifie notamment que les fichiers sensibles ou générés ne sont pas présents dans le futur commit.
+Le script vérifie notamment que les fichiers sensibles ou de travail ne sont pas présents, et que le bundle référentiel embarqué est cohérent.
 
 ## Licence du code
 
