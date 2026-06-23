@@ -25,13 +25,11 @@ coverage/
 .vscode/
 *.iml
 
-# Generated local IRN files
+# Local IRN import work files
 Questionnaire_IRN_*.xlsx
 Questionnaire_IRN_*.ods
 canonical_irn_*.json
 validation_referential_report.json
-flutter/assets/referentials/*.json
-!flutter/assets/referentials/.gitkeep
 
 # Company / campaign data
 Evaluation IRN*.xlsx

@@ -271,7 +271,7 @@ jobs:
 
           ## Important
 
-          These artifacts do not include the official aDRI IRN referential file or generated private campaign data.
+          These artifacts include the OpenIRN runtime JSON bundle derived from the official aDRI IRN referential, with attribution metadata embedded in the application. They do not include private campaign data.
           EOF
 
           if gh release view "$TAG_NAME" >/dev/null 2>&1; then
