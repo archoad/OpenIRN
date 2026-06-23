@@ -1,0 +1,141 @@
+name: Build OpenIRN artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  android-apk:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter pub get
+        working-directory: flutter
+        run: flutter pub get
+
+      - name: Build APK
+        working-directory: flutter
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: openirn-android-apk
+          path: flutter/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+  macos-app:
+    name: macOS app
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter pub get
+        working-directory: flutter
+        run: flutter pub get
+
+      - name: Enable macOS desktop
+        working-directory: flutter
+        run: flutter config --enable-macos-desktop
+
+      - name: Build macOS app
+        working-directory: flutter
+        run: flutter build macos --release
+
+      - name: Package macOS app
+        run: |
+          cd flutter/build/macos/Build/Products/Release
+          ditto -c -k --sequesterRsrc --keepParent openirn.app openirn-macos.zip
+
+      - name: Upload macOS app
+        uses: actions/upload-artifact@v4
+        with:
+          name: openirn-macos
+          path: flutter/build/macos/Build/Products/Release/openirn-macos.zip
+          if-no-files-found: error
+
+  windows-app:
+    name: Windows app
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter pub get
+        working-directory: flutter
+        run: flutter pub get
+
+      - name: Enable Windows desktop
+        working-directory: flutter
+        run: flutter config --enable-windows-desktop
+
+      - name: Build Windows app
+        working-directory: flutter
+        run: flutter build windows --release
+
+      - name: Package Windows app
+        shell: pwsh
+        run: |
+          Compress-Archive -Path flutter\build\windows\x64\runner\Release\* -DestinationPath openirn-windows.zip -Force
+
+      - name: Upload Windows app
+        uses: actions/upload-artifact@v4
+        with:
+          name: openirn-windows
+          path: openirn-windows.zip
+          if-no-files-found: error
+
+  ios-no-codesign:
+    name: iOS no-codesign build
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter pub get
+        working-directory: flutter
+        run: flutter pub get
+
+      - name: Build iOS without code signing
+        working-directory: flutter
+        run: flutter build ios --release --no-codesign
+
+      - name: Upload iOS build folder
+        uses: actions/upload-artifact@v4
+        with:
+          name: openirn-ios-no-codesign
+          path: flutter/build/ios/iphoneos
+          if-no-files-found: error

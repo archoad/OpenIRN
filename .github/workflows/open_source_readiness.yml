@@ -1,0 +1,25 @@
+name: Open source readiness
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+permissions:
+  contents: read
+
+jobs:
+  readiness:
+    name: Check repository content
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Ensure readiness script is executable
+        run: chmod +x tools/check_open_source_readiness.sh
+
+      - name: Run readiness checks
+        run: ./tools/check_open_source_readiness.sh
