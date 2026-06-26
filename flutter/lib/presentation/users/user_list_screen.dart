@@ -30,7 +30,8 @@ class _UserListScreenState extends State<UserListScreen> {
   Future<_UserListStateData> _loadUsers() async {
     final localUsers = await _repository.ensureDefaultUsers();
     final activeUser = await _sessionRepository.getActiveUser();
-    final configuration = await _syncConfigurationRepository.loadConfiguration();
+    final configuration =
+        await _syncConfigurationRepository.loadConfiguration();
 
     if (configuration.isConfigured) {
       final centralUsers = await _apiClient.loadUsers(
@@ -70,7 +71,8 @@ class _UserListScreenState extends State<UserListScreen> {
       activeUser: activeUser,
       serverAvailable: false,
       sourceLabel: 'Mode hors ligne',
-      sourceMessage: 'La synchronisation API n’est pas configurée. Les codes centraux ne peuvent pas être modifiés depuis ce terminal.',
+      sourceMessage:
+          'La synchronisation API n’est pas configurée. Les codes centraux ne peuvent pas être modifiés depuis ce terminal.',
     );
   }
 
@@ -82,7 +84,9 @@ class _UserListScreenState extends State<UserListScreen> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Session de ce terminal active : ${user.displayName}')),
+        SnackBar(
+          content: Text('Session de ce terminal active : ${user.displayName}'),
+        ),
       );
     } catch (error) {
       if (!mounted) {
@@ -122,15 +126,19 @@ class _UserListScreenState extends State<UserListScreen> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Utilisateur ajouté localement. Lance une synchronisation pour l’envoyer au serveur.')),
+        const SnackBar(
+          content: Text(
+            'Utilisateur ajouté localement. Lance une synchronisation pour l’envoyer au serveur.',
+          ),
+        ),
       );
     } catch (error) {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Création impossible : $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Création impossible : $error')));
     }
   }
 
@@ -148,7 +156,9 @@ class _UserListScreenState extends State<UserListScreen> {
         firstName: result.firstName,
         lastName: result.lastName,
         email: result.email,
-        role: user.isDefaultAdministrator ? AppUserRole.administrator : result.role,
+        role: user.isDefaultAdministrator
+            ? AppUserRole.administrator
+            : result.role,
         active: result.active,
       ),
     );
@@ -156,10 +166,14 @@ class _UserListScreenState extends State<UserListScreen> {
   }
 
   Future<void> _changeUserPin(AppUser user, _UserListStateData state) async {
-    if (!state.serverAvailable || state.apiToken.trim().isEmpty || state.tenantId.trim().isEmpty) {
+    if (!state.serverAvailable ||
+        state.apiToken.trim().isEmpty ||
+        state.tenantId.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Modification impossible : base centrale indisponible ou synchronisation API non configurée.'),
+          content: Text(
+            'Modification impossible : base centrale indisponible ou synchronisation API non configurée.',
+          ),
         ),
       );
       return;
@@ -196,7 +210,9 @@ class _UserListScreenState extends State<UserListScreen> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Supprimer l’utilisateur ?'),
-        content: Text('L’utilisateur « ${user.displayName} » sera retiré de l’annuaire local. La base centrale sera réalignée au prochain push de l’administrateur.'),
+        content: Text(
+          'L’utilisateur « ${user.displayName} » sera retiré de l’annuaire local. La base centrale sera réalignée au prochain push de l’administrateur.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -254,7 +270,9 @@ class _UserListScreenState extends State<UserListScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return Center(child: Text('Chargement impossible : ${snapshot.error}'));
+            return Center(
+              child: Text('Chargement impossible : ${snapshot.error}'),
+            );
           }
           final state = snapshot.data;
           final users = state?.users ?? const <AppUser>[];
@@ -277,8 +295,12 @@ class _UserListScreenState extends State<UserListScreen> {
                     centralPinsAvailable: state?.serverAvailable ?? false,
                     onActivate: user.active ? () => _setActiveUser(user) : null,
                     onEdit: () => _editUser(user),
-                    onChangePin: state == null ? null : () => _changeUserPin(user, state),
-                    onDelete: user.isDefaultAdministrator ? null : () => _deleteUser(user),
+                    onChangePin: state == null
+                        ? null
+                        : () => _changeUserPin(user, state),
+                    onDelete: user.isDefaultAdministrator
+                        ? null
+                        : () => _deleteUser(user),
                   );
                 },
               ),
@@ -327,7 +349,10 @@ class _IntroCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Annuaire et codes utilisateurs', style: theme.textTheme.titleLarge),
+            Text(
+              'Annuaire et codes utilisateurs',
+              style: theme.textTheme.titleLarge,
+            ),
             const SizedBox(height: 6),
             const Text(
               'Les administrateurs et pilotes IRN peuvent modifier ici les codes personnels utilisés à l’ouverture d’une campagne.',
@@ -338,7 +363,12 @@ class _IntroCard extends StatelessWidget {
               runSpacing: 8,
               children: [
                 Chip(
-                  avatar: Icon(serverAvailable ? Icons.cloud_done_outlined : Icons.cloud_off_outlined, size: 18),
+                  avatar: Icon(
+                    serverAvailable
+                        ? Icons.cloud_done_outlined
+                        : Icons.cloud_off_outlined,
+                    size: 18,
+                  ),
                   label: Text(state?.sourceLabel ?? 'Chargement'),
                 ),
                 Chip(
@@ -396,7 +426,11 @@ class _UserCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 CircleAvatar(
-                  child: Icon(user.active ? Icons.person_outline : Icons.person_off_outlined),
+                  child: Icon(
+                    user.active
+                        ? Icons.person_outline
+                        : Icons.person_off_outlined,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -496,11 +530,7 @@ class _UserCard extends StatelessWidget {
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      header,
-                      const SizedBox(height: 12),
-                      chips,
-                    ],
+                    children: [header, const SizedBox(height: 12), chips],
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -597,7 +627,9 @@ class _UserDialogState extends State<_UserDialog> {
           labelText: 'Prénom',
           border: OutlineInputBorder(),
         ),
-        validator: (value) => value == null || value.trim().isEmpty ? 'Prénom obligatoire.' : null,
+        validator: (value) => value == null || value.trim().isEmpty
+            ? 'Prénom obligatoire.'
+            : null,
       );
     }
 
@@ -608,13 +640,16 @@ class _UserDialogState extends State<_UserDialog> {
           labelText: 'Nom',
           border: OutlineInputBorder(),
         ),
-        validator: (value) => value == null || value.trim().isEmpty ? 'Nom obligatoire.' : null,
+        validator: (value) =>
+            value == null || value.trim().isEmpty ? 'Nom obligatoire.' : null,
       );
     }
 
     return AlertDialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-      title: Text(widget.user == null ? 'Nouvel utilisateur' : 'Modifier l’utilisateur'),
+      title: Text(
+        widget.user == null ? 'Nouvel utilisateur' : 'Modifier l’utilisateur',
+      ),
       content: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 620),
         child: Form(
@@ -673,14 +708,18 @@ class _UserDialogState extends State<_UserDialog> {
                         ),
                       ),
                   ],
-                  onChanged: isDefaultAdmin ? null : (role) => setState(() => _role = role ?? _role),
+                  onChanged: isDefaultAdmin
+                      ? null
+                      : (role) => setState(() => _role = role ?? _role),
                 ),
                 const SizedBox(height: 8),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Utilisateur actif'),
                   value: _active,
-                  onChanged: isDefaultAdmin ? null : (value) => setState(() => _active = value),
+                  onChanged: isDefaultAdmin
+                      ? null
+                      : (value) => setState(() => _active = value),
                 ),
               ],
             ),
@@ -692,10 +731,7 @@ class _UserDialogState extends State<_UserDialog> {
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Annuler'),
         ),
-        FilledButton(
-          onPressed: _submit,
-          child: const Text('Enregistrer'),
-        ),
+        FilledButton(onPressed: _submit, child: const Text('Enregistrer')),
       ],
     );
   }
@@ -732,7 +768,9 @@ class _UserPinDialogState extends State<_UserPinDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final displayName = widget.user.displayName.isNotEmpty ? widget.user.displayName : widget.user.email;
+    final displayName = widget.user.displayName.isNotEmpty
+        ? widget.user.displayName
+        : widget.user.email;
     return AlertDialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       title: const Text('Modifier le code utilisateur'),
@@ -765,7 +803,11 @@ class _UserPinDialogState extends State<_UserPinDialog> {
                   suffixIcon: IconButton(
                     tooltip: _obscurePin ? 'Afficher' : 'Masquer',
                     onPressed: () => setState(() => _obscurePin = !_obscurePin),
-                    icon: Icon(_obscurePin ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+                    icon: Icon(
+                      _obscurePin
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                    ),
                   ),
                 ),
                 validator: (value) {

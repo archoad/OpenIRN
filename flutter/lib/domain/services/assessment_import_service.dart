@@ -18,7 +18,8 @@ class AssessmentImportService {
     final schemaVersion = _asInt(decoded['schemaVersion']);
     if (schemaVersion == null || schemaVersion < 1) {
       throw const AssessmentImportException(
-          'Le JSON ne contient pas de schemaVersion OpenIRN valide.');
+        'Le JSON ne contient pas de schemaVersion OpenIRN valide.',
+      );
     }
 
     final type = _asString(decoded['type']);
@@ -81,7 +82,8 @@ class AssessmentImportService {
       final decoded = jsonDecode(rawJson);
       if (decoded is! Map<String, dynamic>) {
         throw const AssessmentImportException(
-            'Le JSON doit contenir un objet racine.');
+          'Le JSON doit contenir un objet racine.',
+        );
       }
       return decoded;
     } on FormatException catch (error) {
@@ -95,13 +97,17 @@ class AssessmentImportService {
     required DateTime importedAt,
   }) {
     final campaignPayload = _asMap(decoded['campaign']);
-    final exportedName =
-        _asString(campaignPayload['name'], fallback: 'Évaluation IRN');
+    final exportedName = _asString(
+      campaignPayload['name'],
+      fallback: 'Évaluation IRN',
+    );
     final exportedDescription = _asString(campaignPayload['description']);
     final information = _campaignInformationFromPayload(campaignPayload);
     final importedLabel = _formatCompactDate(importedAt);
-    final safeTimestamp =
-        importedAt.toIso8601String().replaceAll(RegExp(r'[^0-9]'), '');
+    final safeTimestamp = importedAt.toIso8601String().replaceAll(
+          RegExp(r'[^0-9]'),
+          '',
+        );
     final safeReferentialId = _safeIdPart(referential.id);
 
     return LocalCampaign(
@@ -120,7 +126,8 @@ class AssessmentImportService {
   }
 
   CampaignInformation _campaignInformationFromPayload(
-      Map<String, dynamic> campaignPayload) {
+    Map<String, dynamic> campaignPayload,
+  ) {
     final system = _asMap(campaignPayload['system']);
     final projectDirector = _asMap(campaignPayload['projectDirector']);
     final legacyInformation = _asMap(campaignPayload['information']);
@@ -162,7 +169,8 @@ class AssessmentImportService {
     final rawAnswers = decoded['answers'];
     if (rawAnswers is! List) {
       throw const AssessmentImportException(
-          'Le JSON ne contient pas de liste answers valide.');
+        'Le JSON ne contient pas de liste answers valide.',
+      );
     }
 
     final activeCriterionIds = <String>{
@@ -184,7 +192,8 @@ class AssessmentImportService {
       }
       if (!activeCriterionIds.contains(criterionId)) {
         warnings.add(
-            'Le critère $criterionId n’existe pas dans le référentiel actif et a été ignoré.');
+          'Le critère $criterionId n’existe pas dans le référentiel actif et a été ignoré.',
+        );
         continue;
       }
 
@@ -192,7 +201,8 @@ class AssessmentImportService {
       var justification = _asString(answerPayload['justification']);
       if (answer == IrnAnswer.notAnswered && justification.isNotEmpty) {
         warnings.add(
-            'La justification du critère $criterionId a été ignorée car la réponse est N.C.');
+          'La justification du critère $criterionId a été ignorée car la réponse est N.C.',
+        );
         justification = '';
       }
 
@@ -235,7 +245,8 @@ class AssessmentImportService {
     }
     if (rawEvents is! List) {
       warnings.add(
-          'Le journal d’activité exporté a été ignoré car son format est invalide.');
+        'Le journal d’activité exporté a été ignoré car son format est invalide.',
+      );
       return events;
     }
 
@@ -244,13 +255,16 @@ class AssessmentImportService {
       index += 1;
       if (rawEvent is! Map) {
         warnings.add(
-            'Un évènement du journal a été ignoré car son format est invalide.');
+          'Un évènement du journal a été ignoré car son format est invalide.',
+        );
         continue;
       }
       final eventPayload = _asMap(rawEvent);
       final createdAt = _asDate(eventPayload['createdAt']) ?? importedAt;
-      final safeTimestamp =
-          createdAt.toIso8601String().replaceAll(RegExp(r'[^0-9]'), '');
+      final safeTimestamp = createdAt.toIso8601String().replaceAll(
+            RegExp(r'[^0-9]'),
+            '',
+          );
       final type = LocalActivityType.fromJson(eventPayload['type']);
 
       events.add(
@@ -348,8 +362,10 @@ class AssessmentImportService {
   }
 
   String _safeIdPart(String value) {
-    final normalized =
-        value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-');
+    final normalized = value.toLowerCase().replaceAll(
+          RegExp(r'[^a-z0-9]+'),
+          '-',
+        );
     return normalized.replaceAll(RegExp(r'^-+|-+$'), '');
   }
 

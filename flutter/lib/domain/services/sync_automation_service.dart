@@ -39,7 +39,9 @@ class SyncAutomationResult {
     this.campaignCount,
   });
 
-  bool get isOnline => outcome != SyncAutomationOutcome.localOnly && outcome != SyncAutomationOutcome.offline;
+  bool get isOnline =>
+      outcome != SyncAutomationOutcome.localOnly &&
+      outcome != SyncAutomationOutcome.offline;
   bool get importedRemoteSnapshot => outcome == SyncAutomationOutcome.imported;
   bool get pushedLocalSnapshot => outcome == SyncAutomationOutcome.pushed;
 }
@@ -84,7 +86,10 @@ class SyncAutomationService {
         return pullResult;
       case SyncAutomationOutcome.upToDate:
       case SyncAutomationOutcome.pushed:
-        return pushLocalSnapshot(referential: referential, activeUser: activeUser);
+        return pushLocalSnapshot(
+          referential: referential,
+          activeUser: activeUser,
+        );
     }
   }
 
@@ -107,7 +112,9 @@ class SyncAutomationService {
     );
     await _appendLog(
       configuration: configuration,
-      type: status.isAvailable ? SyncLogEventType.pullSucceeded : SyncLogEventType.pullFailed,
+      type: status.isAvailable
+          ? SyncLogEventType.pullSucceeded
+          : SyncLogEventType.pullFailed,
       title: 'Contrôle automatique serveur : ${status.title}',
       message: status.message,
       statusCode: status.statusCode,
@@ -139,9 +146,11 @@ class SyncAutomationService {
     final knownLocally = syncEvents.any(
       (event) =>
           event.serverSyncId == latestServerSyncId &&
-          (event.type == SyncLogEventType.pushSucceeded || event.type == SyncLogEventType.importSucceeded),
+          (event.type == SyncLogEventType.pushSucceeded ||
+              event.type == SyncLogEventType.importSucceeded),
     );
-    final comesFromThisDevice = latest.deviceId.trim().isNotEmpty && latest.deviceId.trim() == configuration.deviceId.trim();
+    final comesFromThisDevice = latest.deviceId.trim().isNotEmpty &&
+        latest.deviceId.trim() == configuration.deviceId.trim();
 
     if (knownLocally || comesFromThisDevice) {
       return SyncAutomationResult(
@@ -161,19 +170,28 @@ class SyncAutomationService {
     );
     await _appendLog(
       configuration: configuration,
-      type: pull.status == OpenIrnApiPullStatus.available ? SyncLogEventType.pullSucceeded : SyncLogEventType.pullFailed,
+      type: pull.status == OpenIrnApiPullStatus.available
+          ? SyncLogEventType.pullSucceeded
+          : SyncLogEventType.pullFailed,
       title: 'Récupération automatique : ${pull.title}',
       message: pull.message,
       statusCode: pull.statusCode,
       snapshotCount: pull.snapshots.length,
-      campaignCount: pull.snapshots.fold<int>(0, (total, snapshot) => total + snapshot.campaignCount),
-      serverSyncId: pull.snapshots.isEmpty ? null : pull.snapshots.first.serverSyncId,
-      sourceDeviceId: pull.snapshots.isEmpty ? null : pull.snapshots.first.deviceId,
+      campaignCount: pull.snapshots.fold<int>(
+        0,
+        (total, snapshot) => total + snapshot.campaignCount,
+      ),
+      serverSyncId:
+          pull.snapshots.isEmpty ? null : pull.snapshots.first.serverSyncId,
+      sourceDeviceId:
+          pull.snapshots.isEmpty ? null : pull.snapshots.first.deviceId,
     );
 
     if (!pull.hasSnapshots) {
       return SyncAutomationResult(
-        outcome: pull.status == OpenIrnApiPullStatus.unreachable ? SyncAutomationOutcome.offline : SyncAutomationOutcome.failed,
+        outcome: pull.status == OpenIrnApiPullStatus.unreachable
+            ? SyncAutomationOutcome.offline
+            : SyncAutomationOutcome.failed,
         title: pull.title,
         message: pull.message,
       );
@@ -186,7 +204,9 @@ class SyncAutomationService {
     );
   }
 
-  Stream<OpenIrnSyncEvent> watchRemoteEvents({String? sinceServerSyncId}) async* {
+  Stream<OpenIrnSyncEvent> watchRemoteEvents({
+    String? sinceServerSyncId,
+  }) async* {
     final configuration = await configurationRepository.loadConfiguration();
     if (!configuration.isConfigured) {
       return;
@@ -219,7 +239,10 @@ class SyncAutomationService {
       referentialId: referential.id,
       referentialVersion: referential.version,
     );
-    final snapshots = await _loadCampaignSnapshots(referential: referential, campaigns: campaigns);
+    final snapshots = await _loadCampaignSnapshots(
+      referential: referential,
+      campaigns: campaigns,
+    );
     final payload = payloadService.buildPushPayload(
       referential: referential,
       configuration: configuration,
@@ -236,7 +259,9 @@ class SyncAutomationService {
     final serverSyncId = push.responseBody?['serverSyncId']?.toString();
     await _appendLog(
       configuration: configuration,
-      type: push.isAccepted ? SyncLogEventType.pushSucceeded : SyncLogEventType.pushFailed,
+      type: push.isAccepted
+          ? SyncLogEventType.pushSucceeded
+          : SyncLogEventType.pushFailed,
       title: 'Push automatique : ${push.title}',
       message: push.message,
       statusCode: push.statusCode,
@@ -246,7 +271,9 @@ class SyncAutomationService {
 
     if (!push.isAccepted) {
       return SyncAutomationResult(
-        outcome: push.status == OpenIrnApiPushStatus.unreachable ? SyncAutomationOutcome.offline : SyncAutomationOutcome.failed,
+        outcome: push.status == OpenIrnApiPushStatus.unreachable
+            ? SyncAutomationOutcome.offline
+            : SyncAutomationOutcome.failed,
         title: push.title,
         message: push.message,
         serverSyncId: serverSyncId,
@@ -329,7 +356,9 @@ class SyncAutomationService {
       await _mergeImportedUsers(result.users);
       await campaignRepository.saveCampaigns(
         referentialId: referential.id,
-        campaigns: result.campaigns.map((campaign) => campaign.campaign).toList(growable: false),
+        campaigns: result.campaigns
+            .map((campaign) => campaign.campaign)
+            .toList(growable: false),
       );
       for (final campaign in result.campaigns) {
         await assessmentRepository.saveCriterionAnswers(
@@ -353,7 +382,8 @@ class SyncAutomationService {
         configuration: configuration,
         type: SyncLogEventType.importSucceeded,
         title: 'Snapshot distant appliqué automatiquement',
-        message: '${result.campaignCount} campagne(s) remplacée(s) par la version serveur.',
+        message:
+            '${result.campaignCount} campagne(s) remplacée(s) par la version serveur.',
         serverSyncId: snapshot.serverSyncId,
         sourceDeviceId: snapshot.deviceId,
         campaignCount: result.campaignCount,
@@ -362,7 +392,8 @@ class SyncAutomationService {
       return SyncAutomationResult(
         outcome: SyncAutomationOutcome.imported,
         title: 'Version serveur appliquée',
-        message: '${result.campaignCount} campagne(s) remplacée(s) par la dernière version serveur.',
+        message:
+            '${result.campaignCount} campagne(s) remplacée(s) par la dernière version serveur.',
         serverSyncId: snapshot.serverSyncId,
         campaignCount: result.campaignCount,
       );

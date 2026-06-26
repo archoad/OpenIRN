@@ -34,7 +34,8 @@ class SyncConfiguration {
   bool get hasDeviceId => deviceId.trim().isNotEmpty;
   bool get hasApiToken => apiToken.trim().isNotEmpty;
 
-  bool get isConfigured => enabled && hasApiBaseUrl && hasTenantId && hasDeviceId && hasApiToken;
+  bool get isConfigured =>
+      enabled && hasApiBaseUrl && hasTenantId && hasDeviceId && hasApiToken;
 
   String get maskedApiToken {
     final token = apiToken.trim();
@@ -74,7 +75,8 @@ class SyncConfiguration {
       deviceId: json['deviceId']?.toString().trim() ?? '',
       enabled: json['enabled'] is bool ? json['enabled'] as bool : false,
       apiToken: json['apiToken']?.toString().trim() ?? '',
-      updatedAt: _parseDate(json['updatedAt']) ?? DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+      updatedAt: _parseDate(json['updatedAt']) ??
+          DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
     );
   }
 

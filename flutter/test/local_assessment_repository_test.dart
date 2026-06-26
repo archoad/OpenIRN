@@ -23,8 +23,9 @@ void main() {
         },
       );
 
-      final restored =
-          await repository.loadAnswers(referentialId: 'adri-irn-v1.1');
+      final restored = await repository.loadAnswers(
+        referentialId: 'adri-irn-v1.1',
+      );
 
       expect(restored, hasLength(2));
       expect(restored['RES-1.1'], IrnAnswer.resilient);
@@ -59,8 +60,10 @@ void main() {
 
       expect(restored, hasLength(2));
       expect(restored['RES-2.1']?.answer, IrnAnswer.resilient);
-      expect(restored['RES-2.1']?.justification,
-          'Contrat et clauses revus par le juridique.');
+      expect(
+        restored['RES-2.1']?.justification,
+        'Contrat et clauses revus par le juridique.',
+      );
       expect(restored['RES-2.2']?.answer, IrnAnswer.notAnswered);
       expect(restored['RES-2.2']?.justification, 'À vérifier avec les achats.');
     });
@@ -70,15 +73,14 @@ void main() {
 
       await repository.saveAnswers(
         referentialId: 'adri-irn-v1.1',
-        answers: const <String, IrnAnswer>{
-          'RES-2.1': IrnAnswer.resilient,
-        },
+        answers: const <String, IrnAnswer>{'RES-2.1': IrnAnswer.resilient},
       );
 
       await repository.clearAnswers(referentialId: 'adri-irn-v1.1');
 
-      final restored =
-          await repository.loadAnswers(referentialId: 'adri-irn-v1.1');
+      final restored = await repository.loadAnswers(
+        referentialId: 'adri-irn-v1.1',
+      );
       expect(restored, isEmpty);
     });
 
@@ -88,16 +90,12 @@ void main() {
       await repository.saveAnswers(
         referentialId: 'adri-irn-v1.1',
         campaignId: 'campaign-a',
-        answers: const <String, IrnAnswer>{
-          'RES-1.1': IrnAnswer.resilient,
-        },
+        answers: const <String, IrnAnswer>{'RES-1.1': IrnAnswer.resilient},
       );
       await repository.saveAnswers(
         referentialId: 'adri-irn-v1.1',
         campaignId: 'campaign-b',
-        answers: const <String, IrnAnswer>{
-          'RES-1.1': IrnAnswer.nonResilient,
-        },
+        answers: const <String, IrnAnswer>{'RES-1.1': IrnAnswer.nonResilient},
       );
 
       final first = await repository.loadAnswers(

@@ -8,10 +8,7 @@ class LocalJsonFile {
   final String name;
   final String content;
 
-  const LocalJsonFile({
-    required this.name,
-    required this.content,
-  });
+  const LocalJsonFile({required this.name, required this.content});
 }
 
 class LocalJsonFileService {
@@ -76,10 +73,7 @@ class LocalJsonFileService {
 
     debugPrint('[OpenIRN] Reading JSON file ${file.name}');
     final content = await file.readAsString();
-    return LocalJsonFile(
-      name: file.name,
-      content: content,
-    );
+    return LocalJsonFile(name: file.name, content: content);
   }
 
   String buildExportFileName({
@@ -89,8 +83,10 @@ class LocalJsonFileService {
   }) {
     final timestamp = _compactTimestamp((now ?? DateTime.now()).toLocal());
     final safeCampaignName = _safeFilePart(campaignName, fallback: 'campagne');
-    final safeVersion =
-        _safeFilePart(referentialVersion, fallback: 'referentiel');
+    final safeVersion = _safeFilePart(
+      referentialVersion,
+      fallback: 'referentiel',
+    );
     return 'openirn_${safeCampaignName}_${safeVersion}_$timestamp.json';
   }
 

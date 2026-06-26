@@ -41,10 +41,7 @@ class CriterionAnswer {
 
   bool get hasJustification => justification.trim().isNotEmpty;
 
-  CriterionAnswer copyWith({
-    IrnAnswer? answer,
-    String? justification,
-  }) {
+  CriterionAnswer copyWith({IrnAnswer? answer, String? justification}) {
     return CriterionAnswer(
       criterionId: criterionId,
       answer: answer ?? this.answer,

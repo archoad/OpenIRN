@@ -81,20 +81,30 @@ void main() {
       expect(result.campaign.status, LocalCampaignStatus.readyForReview);
       expect(result.campaign.information.systemName, 'SI Paiement');
       expect(
-          result.campaign.information.projectDirectorFullName, 'Bruno Durand');
-      expect(result.campaign.information.projectDirectorEmail,
-          'bruno.durand@example.test');
+        result.campaign.information.projectDirectorFullName,
+        'Bruno Durand',
+      );
+      expect(
+        result.campaign.information.projectDirectorEmail,
+        'bruno.durand@example.test',
+      );
       expect(result.criterionAnswers, hasLength(2));
       expect(result.criterionAnswers['RES-1.1']!.answer, IrnAnswer.resilient);
-      expect(result.criterionAnswers['RES-1.1']!.justification,
-          'Gouvernance documentée.');
       expect(
-          result.criterionAnswers['RES-2.1']!.answer, IrnAnswer.nonResilient);
+        result.criterionAnswers['RES-1.1']!.justification,
+        'Gouvernance documentée.',
+      );
+      expect(
+        result.criterionAnswers['RES-2.1']!.answer,
+        IrnAnswer.nonResilient,
+      );
       expect(result.activityEvents.length, 2);
       expect(
-          result.activityEvents
-              .every((event) => event.campaignId == result.campaign.id),
-          isTrue);
+        result.activityEvents.every(
+          (event) => event.campaignId == result.campaign.id,
+        ),
+        isTrue,
+      );
       expect(result.warnings.single, contains('RES-9.9'));
     });
 

@@ -11,13 +11,11 @@ import 'criterion_detail_screen.dart';
 class ReferentialOverviewScreen extends StatefulWidget {
   final IrnReferentialRepository repository;
 
-  const ReferentialOverviewScreen({
-    required this.repository,
-    super.key,
-  });
+  const ReferentialOverviewScreen({required this.repository, super.key});
 
   @override
-  State<ReferentialOverviewScreen> createState() => _ReferentialOverviewScreenState();
+  State<ReferentialOverviewScreen> createState() =>
+      _ReferentialOverviewScreenState();
 }
 
 class _ReferentialOverviewScreenState extends State<ReferentialOverviewScreen> {
@@ -104,11 +102,13 @@ class _HomeContent extends StatelessWidget {
             _HomeActionCard(
               icon: Icons.manage_search_outlined,
               title: 'Référentiel aDRI IRN',
-              subtitle: 'Présentation et moteur de recherche du référentiel IRN',
+              subtitle:
+                  'Présentation et moteur de recherche du référentiel IRN',
               buttonLabel: 'Accéder',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute<void>(
-                  builder: (_) => ReferentialCatalogScreen(referential: referential),
+                  builder: (_) =>
+                      ReferentialCatalogScreen(referential: referential),
                 ),
               ),
             ),
@@ -190,13 +190,11 @@ class _HomeActionCard extends StatelessWidget {
 class ReferentialCatalogScreen extends StatefulWidget {
   final IrnReferential referential;
 
-  const ReferentialCatalogScreen({
-    required this.referential,
-    super.key,
-  });
+  const ReferentialCatalogScreen({required this.referential, super.key});
 
   @override
-  State<ReferentialCatalogScreen> createState() => _ReferentialCatalogScreenState();
+  State<ReferentialCatalogScreen> createState() =>
+      _ReferentialCatalogScreenState();
 }
 
 class _ReferentialCatalogScreenState extends State<ReferentialCatalogScreen> {
@@ -284,7 +282,11 @@ class _ReferentialContent extends StatelessWidget {
             for (final pillar in referential.pillars)
               _PillarExpansionTile(
                 pillar: pillar,
-                criteria: service.criteriaForPillar(referential, pillar.id, query: query),
+                criteria: service.criteriaForPillar(
+                  referential,
+                  pillar.id,
+                  query: query,
+                ),
                 initiallyExpanded: query.trim().isNotEmpty,
               ),
           ],
@@ -309,9 +311,14 @@ class _HeaderCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('aDRI IRN ${referential.version}', style: textTheme.headlineSmall),
+            Text(
+              'aDRI IRN ${referential.version}',
+              style: textTheme.headlineSmall,
+            ),
             const SizedBox(height: 8),
-            Text('${referential.pillars.length} piliers · ${referential.criteria.length} critères'),
+            Text(
+              '${referential.pillars.length} piliers · ${referential.criteria.length} critères',
+            ),
             const SizedBox(height: 8),
             SelectableText('Source : ${referential.sourceUrl}'),
             const SizedBox(height: 4),
@@ -320,7 +327,8 @@ class _HeaderCard extends StatelessWidget {
               const SizedBox(height: 4),
               Text('Fichier : ${referential.source.filePath}'),
             ],
-            if (referential.checksumSha256 != null && referential.checksumSha256!.isNotEmpty) ...[
+            if (referential.checksumSha256 != null &&
+                referential.checksumSha256!.isNotEmpty) ...[
               const SizedBox(height: 4),
               SelectableText('SHA-256 : ${referential.checksumSha256}'),
             ],
@@ -369,12 +377,16 @@ class _PillarExpansionTile extends StatelessWidget {
       child: ExpansionTile(
         initiallyExpanded: initiallyExpanded && criteria.isNotEmpty,
         title: Text('${pillar.code} — ${pillar.label}'),
-        subtitle: Text('${criteria.length} critère${criteria.length > 1 ? 's' : ''}'),
+        subtitle: Text(
+          '${criteria.length} critère${criteria.length > 1 ? 's' : ''}',
+        ),
         children: [
           if (criteria.isEmpty)
             const ListTile(
               leading: Icon(Icons.info_outline),
-              title: Text('Aucun critère ne correspond à la recherche dans ce pilier.'),
+              title: Text(
+                'Aucun critère ne correspond à la recherche dans ce pilier.',
+              ),
             ),
           for (final criterion in criteria)
             ListTile(
@@ -382,7 +394,9 @@ class _PillarExpansionTile extends StatelessWidget {
                 child: Text(criterion.code.split('.').last),
               ),
               title: Text('${criterion.code} — ${criterion.label}'),
-              subtitle: Text('Portée : ${criterion.scope.label} · Réponse : ${criterion.answerMode}'),
+              subtitle: Text(
+                'Portée : ${criterion.scope.label} · Réponse : ${criterion.answerMode}',
+              ),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute<void>(

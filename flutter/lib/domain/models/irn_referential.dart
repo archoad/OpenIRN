@@ -196,8 +196,10 @@ class IrnCriterion {
     return IrnCriterion(
       id: _asString(json['id']),
       code: _asString(json['code']),
-      sourceCode:
-          _asString(json['sourceCode'], fallback: _asString(json['code'])),
+      sourceCode: _asString(
+        json['sourceCode'],
+        fallback: _asString(json['code']),
+      ),
       pillarId: _asString(json['pillarId']),
       label: _asString(json['label']),
       shortLabel: _asString(json['shortLabel']),
@@ -231,10 +233,7 @@ class CriterionSourceLocation {
   final String sheet;
   final int? row;
 
-  const CriterionSourceLocation({
-    this.sheet = '',
-    this.row,
-  });
+  const CriterionSourceLocation({this.sheet = '', this.row});
 
   factory CriterionSourceLocation.fromJson(Map<String, dynamic> json) {
     final rowValue = json['row'];

@@ -10,8 +10,11 @@ class BusinessFunction {
   final String name;
   final String entityId;
 
-  const BusinessFunction(
-      {required this.id, required this.name, required this.entityId});
+  const BusinessFunction({
+    required this.id,
+    required this.name,
+    required this.entityId,
+  });
 }
 
 class CriticalSystem {
@@ -19,8 +22,11 @@ class CriticalSystem {
   final String name;
   final String businessFunctionId;
 
-  const CriticalSystem(
-      {required this.id, required this.name, required this.businessFunctionId});
+  const CriticalSystem({
+    required this.id,
+    required this.name,
+    required this.businessFunctionId,
+  });
 }
 
 class TechnicalFunction {
@@ -28,8 +34,11 @@ class TechnicalFunction {
   final String name;
   final String criticalSystemId;
 
-  const TechnicalFunction(
-      {required this.id, required this.name, required this.criticalSystemId});
+  const TechnicalFunction({
+    required this.id,
+    required this.name,
+    required this.criticalSystemId,
+  });
 }
 
 class Asset {
@@ -37,10 +46,11 @@ class Asset {
   final String name;
   final String technicalFunctionId;
 
-  const Asset(
-      {required this.id,
-      required this.name,
-      required this.technicalFunctionId});
+  const Asset({
+    required this.id,
+    required this.name,
+    required this.technicalFunctionId,
+  });
 }
 
 class HarmonizedAsset {

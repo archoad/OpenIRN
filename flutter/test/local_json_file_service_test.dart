@@ -11,7 +11,9 @@ void main() {
       now: DateTime(2026, 6, 22, 16, 45),
     );
 
-    expect(fileName,
-        'openirn_evaluation_irn_2026_si_critiques_v1_1_20260622_1645.json');
+    expect(
+      fileName,
+      'openirn_evaluation_irn_2026_si_critiques_v1_1_20260622_1645.json',
+    );
   });
 }

@@ -82,10 +82,7 @@ void main() {
               },
             ],
             'assignments': <Map<String, dynamic>>[
-              <String, dynamic>{
-                'criterionId': 'RES-1.1',
-                'userId': 'user-1',
-              },
+              <String, dynamic>{'criterionId': 'RES-1.1', 'userId': 'user-1'},
             ],
             'activityLog': <String, dynamic>{
               'events': <Map<String, dynamic>>[],
@@ -99,10 +96,19 @@ void main() {
     expect(result.users.single.id, 'user-1');
     expect(result.campaigns.single.campaign.id, startsWith('remote-import-'));
     expect(result.campaigns.single.campaign.name, contains('Campagne source'));
-    expect(result.campaigns.single.criterionAnswers['RES-1.1']?.answer, IrnAnswer.resilient);
-    expect(result.campaigns.single.criterionAnswers['RES-1.1']?.justification, 'Justification distante');
+    expect(
+      result.campaigns.single.criterionAnswers['RES-1.1']?.answer,
+      IrnAnswer.resilient,
+    );
+    expect(
+      result.campaigns.single.criterionAnswers['RES-1.1']?.justification,
+      'Justification distante',
+    );
     expect(result.campaigns.single.assignments.single.userId, 'user-1');
-    expect(result.campaigns.single.activityEvents.first.title, 'Campagne importée depuis le serveur');
+    expect(
+      result.campaigns.single.activityEvents.first.title,
+      'Campagne importée depuis le serveur',
+    );
   });
 
   test('refuse un snapshot destiné à un autre référentiel', () {
@@ -114,9 +120,7 @@ void main() {
         payload: <String, dynamic>{
           'schemaVersion': 1,
           'type': 'openirn.syncPush',
-          'referential': <String, dynamic>{
-            'id': 'autre-referentiel',
-          },
+          'referential': <String, dynamic>{'id': 'autre-referentiel'},
           'users': <Map<String, dynamic>>[],
           'campaigns': <Map<String, dynamic>>[],
         },

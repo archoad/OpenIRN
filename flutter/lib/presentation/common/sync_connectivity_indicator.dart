@@ -5,11 +5,7 @@ import 'package:flutter/material.dart';
 import '../../data/api/openirn_api_client.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
 
-enum _ConnectivityState {
-  checking,
-  online,
-  localOnly,
-}
+enum _ConnectivityState { checking, online, localOnly }
 
 class SyncConnectivityIndicator extends StatefulWidget {
   final Duration refreshInterval;
@@ -20,7 +16,8 @@ class SyncConnectivityIndicator extends StatefulWidget {
   });
 
   @override
-  State<SyncConnectivityIndicator> createState() => _SyncConnectivityIndicatorState();
+  State<SyncConnectivityIndicator> createState() =>
+      _SyncConnectivityIndicatorState();
 }
 
 class _SyncConnectivityIndicatorState extends State<SyncConnectivityIndicator> {
@@ -53,7 +50,8 @@ class _SyncConnectivityIndicatorState extends State<SyncConnectivityIndicator> {
     if (!configuration.isConfigured) {
       setState(() {
         _state = _ConnectivityState.localOnly;
-        _tooltip = 'Mode hors ligne uniquement : synchronisation non configurée ou désactivée.';
+        _tooltip =
+            'Mode hors ligne uniquement : synchronisation non configurée ou désactivée.';
       });
       return;
     }
@@ -73,7 +71,9 @@ class _SyncConnectivityIndicatorState extends State<SyncConnectivityIndicator> {
     }
 
     setState(() {
-      _state = result.isAvailable ? _ConnectivityState.online : _ConnectivityState.localOnly;
+      _state = result.isAvailable
+          ? _ConnectivityState.online
+          : _ConnectivityState.localOnly;
       _tooltip = result.isAvailable
           ? 'Synchronisation OpenIRN active : ${result.snapshotCount} snapshot(s) serveur.'
           : 'Mode hors ligne uniquement : ${result.title}';

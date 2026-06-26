@@ -10,7 +10,8 @@ class AccessPolicyService {
 
   bool canManageCampaigns(AppUser user) {
     return user.active &&
-        (user.role == AppUserRole.administrator || user.role == AppUserRole.campaignManager);
+        (user.role == AppUserRole.administrator ||
+            user.role == AppUserRole.campaignManager);
   }
 
   bool canManageAssignments(AppUser user, LocalCampaign campaign) {
@@ -26,7 +27,8 @@ class AccessPolicyService {
     if (!user.active || campaign.isReadOnly) {
       return false;
     }
-    if (user.role == AppUserRole.administrator || user.role == AppUserRole.campaignManager) {
+    if (user.role == AppUserRole.administrator ||
+        user.role == AppUserRole.campaignManager) {
       return true;
     }
     if (user.role != AppUserRole.evaluator) {

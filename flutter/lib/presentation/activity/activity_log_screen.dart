@@ -65,7 +65,10 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return _ErrorState(error: snapshot.error.toString(), onRetry: _refresh);
+            return _ErrorState(
+              error: snapshot.error.toString(),
+              onRetry: _refresh,
+            );
           }
 
           final events = snapshot.data ?? <LocalActivityEvent>[];
@@ -84,7 +87,8 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
                   if (events.isEmpty)
                     const _EmptyState()
                   else
-                    for (final event in events) _ActivityEventCard(event: event),
+                    for (final event in events)
+                      _ActivityEventCard(event: event),
                 ],
               ),
             ),
@@ -124,7 +128,9 @@ class _HeaderCard extends StatelessWidget {
                 children: [
                   Text(campaign.name, style: theme.textTheme.titleLarge),
                   const SizedBox(height: 4),
-                  Text('Référentiel ${referential.version} · ${campaign.status.label}'),
+                  Text(
+                    'Référentiel ${referential.version} · ${campaign.status.label}',
+                  ),
                   const SizedBox(height: 8),
                   Text(
                     '$eventCount évènement(s) enregistré(s) localement pour cette campagne.',
@@ -179,9 +185,14 @@ class _ActivityEventCard extends StatelessWidget {
                     runSpacing: 8,
                     children: [
                       Chip(label: Text(_formatDate(event.createdAt))),
-                      if (event.criterionId != null) Chip(label: Text(event.criterionId!)),
+                      if (event.criterionId != null)
+                        Chip(label: Text(event.criterionId!)),
                       if (event.fromValue != null || event.toValue != null)
-                        Chip(label: Text('${event.fromValue ?? '—'} → ${event.toValue ?? '—'}')),
+                        Chip(
+                          label: Text(
+                            '${event.fromValue ?? '—'} → ${event.toValue ?? '—'}',
+                          ),
+                        ),
                     ],
                   ),
                 ],

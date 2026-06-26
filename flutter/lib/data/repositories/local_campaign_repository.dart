@@ -10,8 +10,9 @@ class LocalCampaignRepository {
   static const _schemaVersion = 3;
   static const _keyPrefix = 'openirn.localCampaigns';
 
-  Future<List<LocalCampaign>> loadCampaigns(
-      {required String referentialId}) async {
+  Future<List<LocalCampaign>> loadCampaigns({
+    required String referentialId,
+  }) async {
     final preferences = await SharedPreferences.getInstance();
     final rawPayload = preferences.getString(_storageKey(referentialId));
     if (rawPayload == null || rawPayload.trim().isEmpty) {
@@ -34,8 +35,9 @@ class LocalCampaignRepository {
         if (rawCampaign is! Map) {
           continue;
         }
-        final campaign =
-            LocalCampaign.fromJson(Map<String, dynamic>.from(rawCampaign));
+        final campaign = LocalCampaign.fromJson(
+          Map<String, dynamic>.from(rawCampaign),
+        );
         if (campaign.id.isEmpty || campaign.referentialId != referentialId) {
           continue;
         }
@@ -63,8 +65,9 @@ class LocalCampaignRepository {
       referentialVersion: referentialVersion,
     );
     await saveCampaigns(
-        referentialId: referentialId,
-        campaigns: <LocalCampaign>[defaultCampaign]);
+      referentialId: referentialId,
+      campaigns: <LocalCampaign>[defaultCampaign],
+    );
     return <LocalCampaign>[defaultCampaign];
   }
 
@@ -134,7 +137,9 @@ class LocalCampaignRepository {
     }
 
     await saveCampaigns(
-        referentialId: referentialId, campaigns: updatedCampaigns);
+      referentialId: referentialId,
+      campaigns: updatedCampaigns,
+    );
     return updatedCampaign;
   }
 
@@ -166,7 +171,9 @@ class LocalCampaignRepository {
     }
 
     await saveCampaigns(
-        referentialId: referentialId, campaigns: updatedCampaigns);
+      referentialId: referentialId,
+      campaigns: updatedCampaigns,
+    );
     return updatedCampaign;
   }
 
@@ -183,7 +190,9 @@ class LocalCampaignRepository {
             : campaign,
     ];
     await saveCampaigns(
-        referentialId: referentialId, campaigns: updatedCampaigns);
+      referentialId: referentialId,
+      campaigns: updatedCampaigns,
+    );
   }
 
   Future<void> saveCampaigns({
@@ -202,7 +211,9 @@ class LocalCampaignRepository {
     };
 
     await preferences.setString(
-        _storageKey(referentialId), jsonEncode(payload));
+      _storageKey(referentialId),
+      jsonEncode(payload),
+    );
   }
 
   String _storageKey(String referentialId) {

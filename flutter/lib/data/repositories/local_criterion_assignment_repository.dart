@@ -15,7 +15,9 @@ class LocalCriterionAssignmentRepository {
     required String campaignId,
   }) async {
     final preferences = await SharedPreferences.getInstance();
-    final rawPayload = preferences.getString(_storageKey(referentialId, campaignId));
+    final rawPayload = preferences.getString(
+      _storageKey(referentialId, campaignId),
+    );
     if (rawPayload == null || rawPayload.trim().isEmpty) {
       return <CriterionAssignment>[];
     }
@@ -38,10 +40,12 @@ class LocalCriterionAssignmentRepository {
         final assignment = CriterionAssignment.fromJson(
           rawAssignment.map((key, value) => MapEntry(key.toString(), value)),
         );
-        if (assignment.referentialId != referentialId || assignment.campaignId != campaignId) {
+        if (assignment.referentialId != referentialId ||
+            assignment.campaignId != campaignId) {
           continue;
         }
-        if (assignment.criterionId.trim().isEmpty || assignment.userId.trim().isEmpty) {
+        if (assignment.criterionId.trim().isEmpty ||
+            assignment.userId.trim().isEmpty) {
           continue;
         }
         assignments.add(assignment);
@@ -57,7 +61,10 @@ class LocalCriterionAssignmentRepository {
     required String referentialId,
     required String campaignId,
   }) async {
-    final assignments = await loadAssignments(referentialId: referentialId, campaignId: campaignId);
+    final assignments = await loadAssignments(
+      referentialId: referentialId,
+      campaignId: campaignId,
+    );
     return <String, CriterionAssignment>{
       for (final assignment in assignments) assignment.criterionId: assignment,
     };
@@ -70,9 +77,14 @@ class LocalCriterionAssignmentRepository {
     required String userId,
     String assignedByUserId = '',
   }) async {
-    final assignments = await loadAssignments(referentialId: referentialId, campaignId: campaignId);
+    final assignments = await loadAssignments(
+      referentialId: referentialId,
+      campaignId: campaignId,
+    );
     final now = DateTime.now().toUtc();
-    final existing = assignments.where((assignment) => assignment.criterionId == criterionId).toList(growable: false);
+    final existing = assignments
+        .where((assignment) => assignment.criterionId == criterionId)
+        .toList(growable: false);
     final next = <CriterionAssignment>[];
     CriterionAssignment savedAssignment;
 
@@ -94,7 +106,9 @@ class LocalCriterionAssignmentRepository {
         updatedAt: now,
       );
       for (final assignment in assignments) {
-        next.add(assignment.criterionId == criterionId ? savedAssignment : assignment);
+        next.add(
+          assignment.criterionId == criterionId ? savedAssignment : assignment,
+        );
       }
     }
 
@@ -111,11 +125,16 @@ class LocalCriterionAssignmentRepository {
     required String campaignId,
     required String criterionId,
   }) async {
-    final assignments = await loadAssignments(referentialId: referentialId, campaignId: campaignId);
+    final assignments = await loadAssignments(
+      referentialId: referentialId,
+      campaignId: campaignId,
+    );
     await saveAssignments(
       referentialId: referentialId,
       campaignId: campaignId,
-      assignments: assignments.where((assignment) => assignment.criterionId != criterionId).toList(growable: false),
+      assignments: assignments
+          .where((assignment) => assignment.criterionId != criterionId)
+          .toList(growable: false),
     );
   }
 
@@ -132,11 +151,15 @@ class LocalCriterionAssignmentRepository {
       'updatedAt': DateTime.now().toUtc().toIso8601String(),
       'assignments': <Map<String, dynamic>>[
         for (final assignment in assignments)
-          if (assignment.referentialId == referentialId && assignment.campaignId == campaignId)
+          if (assignment.referentialId == referentialId &&
+              assignment.campaignId == campaignId)
             assignment.toJson(),
       ],
     };
-    await preferences.setString(_storageKey(referentialId, campaignId), jsonEncode(payload));
+    await preferences.setString(
+      _storageKey(referentialId, campaignId),
+      jsonEncode(payload),
+    );
   }
 
   String _storageKey(String referentialId, String campaignId) {

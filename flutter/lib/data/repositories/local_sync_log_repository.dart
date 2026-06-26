@@ -49,12 +49,16 @@ class LocalSyncLogRepository {
 
   Future<void> saveEvents(List<SyncLogEvent> events) async {
     final preferences = await SharedPreferences.getInstance();
-    final sortedEvents = [...events]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final sortedEvents = [...events]
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     final payload = <String, dynamic>{
       'schemaVersion': _schemaVersion,
       'updatedAt': DateTime.now().toUtc().toIso8601String(),
       'retentionPolicy': 'local_last_${_maxEvents}_sync_events',
-      'events': sortedEvents.take(_maxEvents).map((event) => event.toJson()).toList(growable: false),
+      'events': sortedEvents
+          .take(_maxEvents)
+          .map((event) => event.toJson())
+          .toList(growable: false),
     };
     await preferences.setString(_storageKey, jsonEncode(payload));
   }

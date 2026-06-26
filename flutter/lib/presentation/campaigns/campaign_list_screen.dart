@@ -18,10 +18,7 @@ import '../common/openirn_app_bar.dart';
 class CampaignListScreen extends StatefulWidget {
   final IrnReferential referential;
 
-  const CampaignListScreen({
-    required this.referential,
-    super.key,
-  });
+  const CampaignListScreen({required this.referential, super.key});
 
   @override
   State<CampaignListScreen> createState() => _CampaignListScreenState();
@@ -45,7 +42,6 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
     _campaignsFuture = _loadCampaigns();
   }
 
-
   Future<_CampaignListState> _loadCampaigns() async {
     final campaigns = await _campaignRepository.ensureDefaultCampaign(
       referentialId: widget.referential.id,
@@ -59,21 +55,27 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
         campaignId: campaign.id,
       );
       final answers = <String, IrnAnswer>{
-        for (final entry in criterionAnswers.entries) entry.key: entry.value.answer,
+        for (final entry in criterionAnswers.entries)
+          entry.key: entry.value.answer,
       };
-      final summary = _scoringService.computeSummary(widget.referential, answers);
+      final summary = _scoringService.computeSummary(
+        widget.referential,
+        answers,
+      );
       final qualityReport = _qualityService.buildReport(
         referential: widget.referential,
         criterionAnswers: criterionAnswers,
         campaign: campaign,
       );
-      enriched.add(_CampaignWithSummary(
-        campaign: campaign,
-        criterionAnswers: criterionAnswers,
-        answers: answers,
-        summary: summary,
-        qualityReport: qualityReport,
-      ));
+      enriched.add(
+        _CampaignWithSummary(
+          campaign: campaign,
+          criterionAnswers: criterionAnswers,
+          answers: answers,
+          summary: summary,
+          qualityReport: qualityReport,
+        ),
+      );
     }
     return _CampaignListState(campaigns: enriched);
   }
@@ -91,7 +93,9 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _openCampaign(LocalCampaign campaign) async {
@@ -118,9 +122,13 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
       return null;
     }
 
-    final selectableUsers = authenticationData.users.where((user) => user.active).toList(growable: false);
+    final selectableUsers = authenticationData.users
+        .where((user) => user.active)
+        .toList(growable: false);
     if (selectableUsers.isEmpty) {
-      _showForbidden('Aucun utilisateur actif n’est disponible pour ouvrir cette campagne.');
+      _showForbidden(
+        'Aucun utilisateur actif n’est disponible pour ouvrir cette campagne.',
+      );
       return null;
     }
 
@@ -190,7 +198,9 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
     if (result.mustChangePin) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Code initial accepté. Pense à définir un code personnel côté administration API.'),
+          content: Text(
+            'Code initial accepté. Pense à définir un code personnel côté administration API.',
+          ),
         ),
       );
     }
@@ -200,7 +210,8 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
 
   Future<_CampaignAuthenticationData> _loadAuthenticatableUsers() async {
     final localUsers = await _userRepository.ensureDefaultUsers();
-    final configuration = await _syncConfigurationRepository.loadConfiguration();
+    final configuration =
+        await _syncConfigurationRepository.loadConfiguration();
 
     if (configuration.isConfigured) {
       final centralUsers = await _apiClient.loadUsers(
@@ -213,7 +224,8 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
         await _userRepository.saveUsers(centralUsers.users);
         return _CampaignAuthenticationData(
           source: _CampaignAuthenticationSource.server,
-          message: '${centralUsers.message} Sélectionne ton identité puis saisis ton code personnel.',
+          message:
+              '${centralUsers.message} Sélectionne ton identité puis saisis ton code personnel.',
           users: centralUsers.users,
           apiBaseUrl: configuration.apiBaseUrl,
           tenantId: configuration.tenantId,
@@ -223,14 +235,16 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
 
       return _CampaignAuthenticationData(
         source: _CampaignAuthenticationSource.localFallback,
-        message: '${centralUsers.title} — bascule temporaire sur la base utilisateurs de secours.',
+        message:
+            '${centralUsers.title} — bascule temporaire sur la base utilisateurs de secours.',
         users: localUsers,
       );
     }
 
     return const _CampaignAuthenticationData(
       source: _CampaignAuthenticationSource.localOnly,
-      message: 'Synchronisation non configurée : sélection dans la base utilisateurs de secours.',
+      message:
+          'Synchronisation non configurée : sélection dans la base utilisateurs de secours.',
       users: <AppUser>[],
     ).copyWith(users: localUsers);
   }
@@ -238,9 +252,7 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const OpenIrnAppBar(
-        title: 'Campagnes',
-      ),
+      appBar: const OpenIrnAppBar(title: 'Campagnes'),
       body: FutureBuilder<_CampaignListState>(
         future: _campaignsFuture,
         builder: (context, snapshot) {
@@ -248,7 +260,10 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return _ErrorState(error: snapshot.error.toString(), onRetry: _refresh);
+            return _ErrorState(
+              error: snapshot.error.toString(),
+              onRetry: _refresh,
+            );
           }
 
           final state = snapshot.data;
@@ -259,9 +274,7 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  _HeaderCard(
-                    referential: widget.referential,
-                  ),
+                  _HeaderCard(referential: widget.referential),
                   const SizedBox(height: 12),
                   for (final campaign in campaigns)
                     _CampaignCard(
@@ -278,11 +291,7 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
   }
 }
 
-enum _CampaignAuthenticationSource {
-  server,
-  localFallback,
-  localOnly,
-}
+enum _CampaignAuthenticationSource { server, localFallback, localOnly }
 
 class _CampaignAuthenticationData {
   final _CampaignAuthenticationSource source;
@@ -358,7 +367,11 @@ class _CampaignAuthenticationDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final sourceData = _CampaignAuthenticationData(source: source, message: message, users: users);
+    final sourceData = _CampaignAuthenticationData(
+      source: source,
+      message: message,
+      users: users,
+    );
     final dialogMaxHeight = MediaQuery.sizeOf(context).height * 0.62;
 
     return AlertDialog(
@@ -377,23 +390,20 @@ class _CampaignAuthenticationDialog extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                Chip(
-                  avatar: Icon(sourceData.sourceIcon, size: 18),
-                  label: Text(sourceData.sourceLabel),
-                ),
-                Chip(label: Text('${users.length} utilisateur(s) actif(s)')),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              message,
-              style: theme.textTheme.bodySmall,
-            ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  Chip(
+                    avatar: Icon(sourceData.sourceIcon, size: 18),
+                    label: Text(sourceData.sourceLabel),
+                  ),
+                  Chip(label: Text('${users.length} utilisateur(s) actif(s)')),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(message, style: theme.textTheme.bodySmall),
               const SizedBox(height: 14),
               Flexible(
                 fit: FlexFit.loose,
@@ -406,9 +416,7 @@ class _CampaignAuthenticationDialog extends StatelessWidget {
                     final user = users[index];
                     return Card.outlined(
                       child: ListTile(
-                        leading: CircleAvatar(
-                          child: Text(_initials(user)),
-                        ),
+                        leading: CircleAvatar(child: Text(_initials(user))),
                         title: Text(
                           user.fullName.isNotEmpty ? user.fullName : user.email,
                           maxLines: 1,
@@ -453,18 +461,20 @@ class _CampaignAuthenticationDialog extends StatelessWidget {
   }
 
   String _initials(AppUser user) {
-    final parts = <String>[user.firstName.trim(), user.lastName.trim()]
-        .where((part) => part.isNotEmpty)
-        .toList(growable: false);
+    final parts = <String>[
+      user.firstName.trim(),
+      user.lastName.trim(),
+    ].where((part) => part.isNotEmpty).toList(growable: false);
     if (parts.isEmpty) {
-      final fallback = user.email.trim().isNotEmpty ? user.email.trim() : user.id.trim();
+      final fallback =
+          user.email.trim().isNotEmpty ? user.email.trim() : user.id.trim();
       return fallback.isEmpty ? '?' : fallback.substring(0, 1).toUpperCase();
     }
-    final initials = parts.take(2).map((part) => part.substring(0, 1).toUpperCase()).join();
+    final initials =
+        parts.take(2).map((part) => part.substring(0, 1).toUpperCase()).join();
     return initials.isEmpty ? '?' : initials;
   }
 }
-
 
 class _PinAuthenticationDialog extends StatefulWidget {
   final AppUser user;
@@ -472,7 +482,8 @@ class _PinAuthenticationDialog extends StatefulWidget {
   const _PinAuthenticationDialog({required this.user});
 
   @override
-  State<_PinAuthenticationDialog> createState() => _PinAuthenticationDialogState();
+  State<_PinAuthenticationDialog> createState() =>
+      _PinAuthenticationDialogState();
 }
 
 class _PinAuthenticationDialogState extends State<_PinAuthenticationDialog> {
@@ -498,7 +509,9 @@ class _PinAuthenticationDialogState extends State<_PinAuthenticationDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final displayName = widget.user.fullName.isNotEmpty ? widget.user.fullName : widget.user.email;
+    final displayName = widget.user.fullName.isNotEmpty
+        ? widget.user.fullName
+        : widget.user.email;
     return AlertDialog(
       title: const Text('Authentification utilisateur'),
       content: SizedBox(
@@ -524,7 +537,8 @@ class _PinAuthenticationDialogState extends State<_PinAuthenticationDialog> {
               textInputAction: TextInputAction.done,
               decoration: InputDecoration(
                 labelText: 'Code personnel',
-                helperText: 'Code initial serveur : 0000 si aucun code n’a encore été défini.',
+                helperText:
+                    'Code initial serveur : 0000 si aucun code n’a encore été défini.',
                 errorText: _errorText,
                 prefixIcon: const Icon(Icons.lock_outline),
               ),
@@ -573,9 +587,7 @@ class _CampaignWithSummary {
 class _HeaderCard extends StatelessWidget {
   final IrnReferential referential;
 
-  const _HeaderCard({
-    required this.referential,
-  });
+  const _HeaderCard({required this.referential});
 
   @override
   Widget build(BuildContext context) {
@@ -591,9 +603,14 @@ class _HeaderCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Campagnes OpenIRN', style: Theme.of(context).textTheme.titleLarge),
+                  Text(
+                    'Campagnes OpenIRN',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
                   const SizedBox(height: 4),
-                  Text('Référentiel : ${referential.id} · ${referential.version}'),
+                  Text(
+                    'Référentiel : ${referential.id} · ${referential.version}',
+                  ),
                   const SizedBox(height: 8),
                   const Text(
                     'Une campagne regroupe une saisie R / NR, sa synthèse et son contrôle qualité',
@@ -612,10 +629,7 @@ class _CampaignCard extends StatelessWidget {
   final _CampaignWithSummary entry;
   final VoidCallback onOpen;
 
-  const _CampaignCard({
-    required this.entry,
-    required this.onOpen,
-  });
+  const _CampaignCard({required this.entry, required this.onOpen});
 
   @override
   Widget build(BuildContext context) {
@@ -637,20 +651,28 @@ class _CampaignCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(campaign.name, style: Theme.of(context).textTheme.titleMedium),
+                      Text(
+                        campaign.name,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
                       if (campaign.description.isNotEmpty) ...[
                         const SizedBox(height: 2),
                         Text(campaign.description),
                       ],
-                      if (campaign.information.systemName.trim().isNotEmpty) ...[
+                      if (campaign.information.systemName
+                          .trim()
+                          .isNotEmpty) ...[
                         const SizedBox(height: 6),
                         Text(
                           'SI : ${campaign.information.systemName}',
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
                       ],
-                      if (campaign.information.projectDirectorFullName.isNotEmpty ||
-                          campaign.information.projectDirectorEmail.trim().isNotEmpty) ...[
+                      if (campaign
+                              .information.projectDirectorFullName.isNotEmpty ||
+                          campaign.information.projectDirectorEmail
+                              .trim()
+                              .isNotEmpty) ...[
                         const SizedBox(height: 2),
                         Text(
                           'Directeur projet : ${_projectDirectorLabel(campaign.information)}',
@@ -660,12 +682,17 @@ class _CampaignCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                Text(summary.formattedOfficialScore, style: Theme.of(context).textTheme.titleLarge),
+                Text(
+                  summary.formattedOfficialScore,
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
               ],
             ),
             const SizedBox(height: 14),
             LinearProgressIndicator(
-              value: summary.officialScore == null ? 0 : summary.officialScore! / 100,
+              value: summary.officialScore == null
+                  ? 0
+                  : summary.officialScore! / 100,
             ),
             const SizedBox(height: 14),
             Wrap(
@@ -676,14 +703,24 @@ class _CampaignCard extends StatelessWidget {
                   avatar: const Icon(Icons.flag_outlined, size: 18),
                   label: Text(campaign.status.label),
                 ),
-                Chip(label: Text('Cotés : ${summary.answeredCriteria}/${summary.totalCriteria}')),
+                Chip(
+                  label: Text(
+                    'Cotés : ${summary.answeredCriteria}/${summary.totalCriteria}',
+                  ),
+                ),
                 Chip(label: Text('R : ${summary.resilientCriteria}')),
                 Chip(label: Text('NR : ${summary.nonResilientCriteria}')),
-                Chip(label: Text('Complétude : ${(summary.completionRate * 100).toStringAsFixed(0)} %')),
+                Chip(
+                  label: Text(
+                    'Complétude : ${(summary.completionRate * 100).toStringAsFixed(0)} %',
+                  ),
+                ),
                 Chip(label: Text('Maj : ${_formatDate(campaign.updatedAt)}')),
                 Chip(
                   avatar: Icon(
-                    qualityReport.isCampaignInformationComplete ? Icons.check_circle_outline : Icons.info_outline,
+                    qualityReport.isCampaignInformationComplete
+                        ? Icons.check_circle_outline
+                        : Icons.info_outline,
                     size: 18,
                   ),
                   label: Text(
@@ -700,7 +737,10 @@ class _CampaignCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
-            Text(campaign.status.helperText, style: Theme.of(context).textTheme.bodySmall),
+            Text(
+              campaign.status.helperText,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
             const SizedBox(height: 14),
             Align(
               alignment: Alignment.centerRight,
@@ -741,8 +781,6 @@ class _CampaignCard extends StatelessWidget {
     return '$day/$month/$year $hour:$minute';
   }
 }
-
-
 
 class _ErrorState extends StatelessWidget {
   final String error;

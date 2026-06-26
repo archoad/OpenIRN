@@ -24,7 +24,8 @@ class CriterionAssignmentScreen extends StatefulWidget {
   });
 
   @override
-  State<CriterionAssignmentScreen> createState() => _CriterionAssignmentScreenState();
+  State<CriterionAssignmentScreen> createState() =>
+      _CriterionAssignmentScreenState();
 }
 
 class _CriterionAssignmentScreenState extends State<CriterionAssignmentScreen> {
@@ -68,18 +69,22 @@ class _CriterionAssignmentScreenState extends State<CriterionAssignmentScreen> {
     super.dispose();
   }
 
-
   Future<void> _assignCriterion({
     required IrnCriterion criterion,
     required String? userId,
     required _AssignmentState state,
   }) async {
-    if (!_accessPolicy.canManageAssignments(state.activeUser, widget.campaign)) {
+    if (!_accessPolicy.canManageAssignments(
+      state.activeUser,
+      widget.campaign,
+    )) {
       return;
     }
 
     final previousAssignment = state.assignmentsByCriterionId[criterion.id];
-    final previousUser = previousAssignment == null ? null : state.userById(previousAssignment.userId);
+    final previousUser = previousAssignment == null
+        ? null
+        : state.userById(previousAssignment.userId);
 
     if (userId == null || userId.trim().isEmpty) {
       await _assignmentRepository.clearAssignment(
@@ -124,7 +129,9 @@ class _CriterionAssignmentScreenState extends State<CriterionAssignmentScreen> {
         referentialId: widget.referential.id,
         campaignId: widget.campaign.id,
         type: LocalActivityType.assignmentChanged,
-        title: previousAssignment == null ? 'Critère affecté' : 'Affectation modifiée',
+        title: previousAssignment == null
+            ? 'Critère affecté'
+            : 'Affectation modifiée',
         description: '${criterion.code} — ${criterion.label}',
         criterionId: criterion.id,
         fromValue: previousUser?.displayName ?? 'Non affecté',
@@ -143,7 +150,9 @@ class _CriterionAssignmentScreenState extends State<CriterionAssignmentScreen> {
     required String criterionId,
     required CriterionAssignment? assignment,
   }) {
-    final nextAssignments = Map<String, CriterionAssignment>.of(state.assignmentsByCriterionId);
+    final nextAssignments = Map<String, CriterionAssignment>.of(
+      state.assignmentsByCriterionId,
+    );
     if (assignment == null) {
       nextAssignments.remove(criterionId);
     } else {
@@ -165,19 +174,31 @@ class _CriterionAssignmentScreenState extends State<CriterionAssignmentScreen> {
         future: _stateFuture,
         builder: (context, snapshot) {
           final state = snapshot.data;
-          if (state == null && snapshot.connectionState != ConnectionState.done) {
+          if (state == null &&
+              snapshot.connectionState != ConnectionState.done) {
             return const Center(child: CircularProgressIndicator());
           }
           if (state == null && snapshot.hasError) {
-            return Center(child: Text('Chargement impossible : ${snapshot.error}'));
+            return Center(
+              child: Text('Chargement impossible : ${snapshot.error}'),
+            );
           }
           if (state == null) {
-            return const Center(child: Text('Aucune donnée d’affectation disponible.'));
+            return const Center(
+              child: Text('Aucune donnée d’affectation disponible.'),
+            );
           }
-          final criteriaByPillar = _catalogService.criteriaByPillar(widget.referential);
-          final activeCriteriaCount = widget.referential.criteria.where((criterion) => criterion.active).length;
+          final criteriaByPillar = _catalogService.criteriaByPillar(
+            widget.referential,
+          );
+          final activeCriteriaCount = widget.referential.criteria
+              .where((criterion) => criterion.active)
+              .length;
           final evaluatorIds = state.users.map((user) => user.id).toSet();
-          final canManageAssignments = _accessPolicy.canManageAssignments(state.activeUser, widget.campaign);
+          final canManageAssignments = _accessPolicy.canManageAssignments(
+            state.activeUser,
+            widget.campaign,
+          );
           final assignedCount = state.assignmentsByCriterionId.values
               .where((assignment) => evaluatorIds.contains(assignment.userId))
               .length;
@@ -201,8 +222,12 @@ class _CriterionAssignmentScreenState extends State<CriterionAssignmentScreen> {
                   for (final entry in criteriaByPillar.entries)
                     Card(
                       child: ExpansionTile(
-                        key: PageStorageKey<String>('assignment-pillar-${entry.key.id}'),
-                        initiallyExpanded: _expandedPillarIds.contains(entry.key.id),
+                        key: PageStorageKey<String>(
+                          'assignment-pillar-${entry.key.id}',
+                        ),
+                        initiallyExpanded: _expandedPillarIds.contains(
+                          entry.key.id,
+                        ),
                         onExpansionChanged: (expanded) {
                           setState(() {
                             if (expanded) {
@@ -219,7 +244,8 @@ class _CriterionAssignmentScreenState extends State<CriterionAssignmentScreen> {
                             _CriterionAssignmentTile(
                               criterion: criterion,
                               users: state.users,
-                              assignment: state.assignmentsByCriterionId[criterion.id],
+                              assignment:
+                                  state.assignmentsByCriterionId[criterion.id],
                               readOnly: !canManageAssignments,
                               onChanged: (userId) => _assignCriterion(
                                 criterion: criterion,
@@ -258,7 +284,8 @@ class _AssignmentState {
     return _AssignmentState(
       activeUser: activeUser,
       users: users ?? this.users,
-      assignmentsByCriterionId: assignmentsByCriterionId ?? this.assignmentsByCriterionId,
+      assignmentsByCriterionId:
+          assignmentsByCriterionId ?? this.assignmentsByCriterionId,
     );
   }
 
@@ -297,16 +324,25 @@ class _AssignmentHeaderCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Affectations — ${campaign.name}', style: Theme.of(context).textTheme.titleLarge),
+            Text(
+              'Affectations — ${campaign.name}',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
             const SizedBox(height: 6),
-            const Text('Affecte chaque critère à un utilisateur de secours disposant du profil Évaluateur. Les droits serveur et la connexion réelle seront ajoutés dans l’étape API.'),
+            const Text(
+              'Affecte chaque critère à un utilisateur de secours disposant du profil Évaluateur. Les droits serveur et la connexion réelle seront ajoutés dans l’étape API.',
+            ),
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
                 Chip(label: Text('Évaluateurs actifs : $userCount')),
-                Chip(label: Text('Critères affectés : $assignedCount/$totalCriteria')),
+                Chip(
+                  label: Text(
+                    'Critères affectés : $assignedCount/$totalCriteria',
+                  ),
+                ),
                 Chip(
                   avatar: const Icon(Icons.verified_user_outlined, size: 18),
                   label: Text('Session : ${activeUser.displayName}'),
@@ -368,11 +404,7 @@ class _CriterionAssignmentTile extends StatelessWidget {
           if (constraints.maxWidth < 760) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                criterionInfo,
-                const SizedBox(height: 8),
-                dropdown,
-              ],
+              children: [criterionInfo, const SizedBox(height: 8), dropdown],
             );
           }
 
@@ -390,7 +422,9 @@ class _CriterionAssignmentTile extends StatelessWidget {
   }
 
   Widget _buildAssigneeDropdown() {
-    final selectedUserId = users.any((user) => user.id == assignment?.userId) ? assignment!.userId : '';
+    final selectedUserId = users.any((user) => user.id == assignment?.userId)
+        ? assignment!.userId
+        : '';
 
     return DropdownButtonFormField<String>(
       initialValue: selectedUserId,
@@ -423,7 +457,9 @@ class _CriterionAssignmentTile extends StatelessWidget {
             ),
           ),
       ],
-      onChanged: readOnly ? null : (value) => onChanged(value == null || value.isEmpty ? null : value),
+      onChanged: readOnly
+          ? null
+          : (value) => onChanged(value == null || value.isEmpty ? null : value),
     );
   }
 

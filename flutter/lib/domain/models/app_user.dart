@@ -103,9 +103,10 @@ class AppUser {
   });
 
   String get fullName {
-    return <String>[firstName.trim(), lastName.trim()]
-        .where((part) => part.isNotEmpty)
-        .join(' ');
+    return <String>[
+      firstName.trim(),
+      lastName.trim(),
+    ].where((part) => part.isNotEmpty).join(' ');
   }
 
   String get displayName {
@@ -147,7 +148,10 @@ class AppUser {
   }) {
     final timestamp = (now ?? DateTime.now()).toUtc();
     final safeEmail = _safeIdPart(email.trim().toLowerCase());
-    final safeTimestamp = timestamp.toIso8601String().replaceAll(RegExp(r'[^0-9]'), '');
+    final safeTimestamp = timestamp.toIso8601String().replaceAll(
+          RegExp(r'[^0-9]'),
+          '',
+        );
     return AppUser(
       id: 'user-$safeTimestamp-$safeEmail',
       firstName: firstName.trim(),
@@ -161,7 +165,8 @@ class AppUser {
   }
 
   factory AppUser.fromJson(Map<String, dynamic> json) {
-    final createdAt = _parseDate(json['createdAt']) ?? DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+    final createdAt = _parseDate(json['createdAt']) ??
+        DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
     final updatedAt = _parseDate(json['updatedAt']) ?? createdAt;
     return AppUser(
       id: json['id']?.toString() ?? '',
@@ -218,7 +223,10 @@ class AppUser {
   }
 
   static String _safeIdPart(String value) {
-    final normalized = value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-');
+    final normalized = value.toLowerCase().replaceAll(
+          RegExp(r'[^a-z0-9]+'),
+          '-',
+        );
     return normalized.replaceAll(RegExp(r'^-+|-+$'), '');
   }
 }

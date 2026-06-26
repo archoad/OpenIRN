@@ -29,7 +29,11 @@ class CriterionAssignment {
   }) {
     final timestamp = (now ?? DateTime.now()).toUtc();
     return CriterionAssignment(
-      id: _buildId(referentialId: referentialId, campaignId: campaignId, criterionId: criterionId),
+      id: _buildId(
+        referentialId: referentialId,
+        campaignId: campaignId,
+        criterionId: criterionId,
+      ),
       referentialId: referentialId,
       campaignId: campaignId,
       criterionId: criterionId,
@@ -41,7 +45,8 @@ class CriterionAssignment {
   }
 
   factory CriterionAssignment.fromJson(Map<String, dynamic> json) {
-    final createdAt = _parseDate(json['createdAt']) ?? DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+    final createdAt = _parseDate(json['createdAt']) ??
+        DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
     final updatedAt = _parseDate(json['updatedAt']) ?? createdAt;
     return CriterionAssignment(
       id: json['id']?.toString() ?? '',
@@ -79,7 +84,8 @@ class CriterionAssignment {
       'campaignId': campaignId,
       'criterionId': criterionId,
       'userId': userId,
-      if (assignedByUserId.trim().isNotEmpty) 'assignedByUserId': assignedByUserId,
+      if (assignedByUserId.trim().isNotEmpty)
+        'assignedByUserId': assignedByUserId,
       'createdAt': createdAt.toUtc().toIso8601String(),
       'updatedAt': updatedAt.toUtc().toIso8601String(),
     };
@@ -102,7 +108,10 @@ class CriterionAssignment {
   }
 
   static String _safeIdPart(String value) {
-    final normalized = value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-');
+    final normalized = value.toLowerCase().replaceAll(
+          RegExp(r'[^a-z0-9]+'),
+          '-',
+        );
     return normalized.replaceAll(RegExp(r'^-+|-+$'), '');
   }
 }

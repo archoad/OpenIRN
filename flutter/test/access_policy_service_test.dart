@@ -40,7 +40,8 @@ void main() {
         updatedAt: DateTime.utc(2026, 6, 24),
       );
 
-  CriterionAssignment assignmentFor(String userId) => CriterionAssignment.create(
+  CriterionAssignment assignmentFor(String userId) =>
+      CriterionAssignment.create(
         referentialId: 'adri-irn-v1.1',
         campaignId: campaign.id,
         criterionId: criterion.id,
@@ -49,18 +50,24 @@ void main() {
         now: DateTime.utc(2026, 6, 24),
       );
 
-  test('administrators and campaign managers can evaluate any editable campaign', () {
-    for (final role in [AppUserRole.administrator, AppUserRole.campaignManager]) {
-      expect(
-        service.canEvaluateCriterion(
-          user: user(role.jsonValue, role),
-          campaign: campaign,
-          criterion: criterion,
-        ),
-        isTrue,
-      );
-    }
-  });
+  test(
+    'administrators and campaign managers can evaluate any editable campaign',
+    () {
+      for (final role in [
+        AppUserRole.administrator,
+        AppUserRole.campaignManager,
+      ]) {
+        expect(
+          service.canEvaluateCriterion(
+            user: user(role.jsonValue, role),
+            campaign: campaign,
+            criterion: criterion,
+          ),
+          isTrue,
+        );
+      }
+    },
+  );
 
   test('evaluators can evaluate only criteria explicitly assigned to them', () {
     final evaluator = user('evaluator-1', AppUserRole.evaluator);

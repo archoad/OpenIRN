@@ -16,8 +16,9 @@ class LocalActivityRepository {
     required String campaignId,
   }) async {
     final preferences = await SharedPreferences.getInstance();
-    final rawPayload =
-        preferences.getString(_storageKey(referentialId, campaignId));
+    final rawPayload = preferences.getString(
+      _storageKey(referentialId, campaignId),
+    );
     if (rawPayload == null || rawPayload.trim().isEmpty) {
       return <LocalActivityEvent>[];
     }
@@ -38,8 +39,9 @@ class LocalActivityRepository {
         if (rawEvent is! Map) {
           continue;
         }
-        final event =
-            LocalActivityEvent.fromJson(Map<String, dynamic>.from(rawEvent));
+        final event = LocalActivityEvent.fromJson(
+          Map<String, dynamic>.from(rawEvent),
+        );
         if (event.id.isEmpty ||
             event.referentialId != referentialId ||
             event.campaignId != campaignId) {
@@ -96,7 +98,9 @@ class LocalActivityRepository {
     };
 
     await preferences.setString(
-        _storageKey(referentialId, campaignId), jsonEncode(payload));
+      _storageKey(referentialId, campaignId),
+      jsonEncode(payload),
+    );
   }
 
   Future<void> clearEvents({
