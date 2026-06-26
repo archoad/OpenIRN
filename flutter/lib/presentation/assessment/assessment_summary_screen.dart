@@ -24,10 +24,22 @@ class AssessmentSummaryScreen extends StatelessWidget {
     const scoringService = OfficialRnrScoringService();
     final answers = _answersFromCriterionAnswers(criterionAnswers);
     final globalSummary = scoringService.computeSummary(referential, answers);
-    final pillarSummaries = scoringService.computeSummariesByPillar(referential, answers);
-    final scopeSummaries = scoringService.computeSummariesByScope(referential, answers);
-    final weakestPillars = _rankedPillars(pillarSummaries, ascending: true).take(3).toList();
-    final strongestPillars = _rankedPillars(pillarSummaries, ascending: false).take(3).toList();
+    final pillarSummaries = scoringService.computeSummariesByPillar(
+      referential,
+      answers,
+    );
+    final scopeSummaries = scoringService.computeSummariesByScope(
+      referential,
+      answers,
+    );
+    final weakestPillars = _rankedPillars(
+      pillarSummaries,
+      ascending: true,
+    ).take(3).toList();
+    final strongestPillars = _rankedPillars(
+      pillarSummaries,
+      ascending: false,
+    ).take(3).toList();
     final radarData = _radarData(pillarSummaries);
 
     return Scaffold(
@@ -51,7 +63,8 @@ class AssessmentSummaryScreen extends StatelessWidget {
               const SizedBox(height: 12),
               const _SectionTitle(
                 title: 'Score par pilier',
-                subtitle: 'Lecture officielle simple : R / (R + NR), hors critères N.C.',
+                subtitle:
+                    'Lecture officielle simple : R / (R + NR), hors critères N.C.',
               ),
               const SizedBox(height: 8),
               for (final entry in pillarSummaries.entries)
@@ -59,7 +72,8 @@ class AssessmentSummaryScreen extends StatelessWidget {
               const SizedBox(height: 12),
               const _SectionTitle(
                 title: 'Répartition par portée',
-                subtitle: 'Utile pour distinguer les critères organisationnels et les critères d’actif numérique.',
+                subtitle:
+                    'Utile pour distinguer les critères organisationnels et les critères d’actif numérique.',
               ),
               const SizedBox(height: 8),
               for (final entry in scopeSummaries.entries)
@@ -69,14 +83,16 @@ class AssessmentSummaryScreen extends StatelessWidget {
                 title: 'Points forts provisoires',
                 icon: Icons.trending_up,
                 entries: strongestPillars,
-                emptyMessage: 'Pas encore assez de critères cotés pour identifier les points forts.',
+                emptyMessage:
+                    'Pas encore assez de critères cotés pour identifier les points forts.',
               ),
               const SizedBox(height: 12),
               _RankedPillarsCard(
                 title: 'Points d’attention provisoires',
                 icon: Icons.priority_high,
                 entries: weakestPillars,
-                emptyMessage: 'Pas encore assez de critères cotés pour identifier les points d’attention.',
+                emptyMessage:
+                    'Pas encore assez de critères cotés pour identifier les points d’attention.',
               ),
             ],
           ),
@@ -85,10 +101,12 @@ class AssessmentSummaryScreen extends StatelessWidget {
     );
   }
 
-
-  Map<String, IrnAnswer> _answersFromCriterionAnswers(Map<String, CriterionAnswer> criterionAnswers) {
+  Map<String, IrnAnswer> _answersFromCriterionAnswers(
+    Map<String, CriterionAnswer> criterionAnswers,
+  ) {
     return <String, IrnAnswer>{
-      for (final entry in criterionAnswers.entries) entry.key: entry.value.answer,
+      for (final entry in criterionAnswers.entries)
+        entry.key: entry.value.answer,
     };
   }
 
@@ -123,7 +141,6 @@ class AssessmentSummaryScreen extends StatelessWidget {
   }
 }
 
-
 class _CampaignSummaryHeader extends StatelessWidget {
   final LocalCampaign campaign;
   final IrnReferential referential;
@@ -147,7 +164,10 @@ class _CampaignSummaryHeader extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(campaign.name, style: Theme.of(context).textTheme.titleLarge),
+                  Text(
+                    campaign.name,
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
                   const SizedBox(height: 4),
                   Text('Campagne · ${referential.id} · ${referential.version}'),
                   if (campaign.description.isNotEmpty) ...[
@@ -186,13 +206,21 @@ class _GlobalSummaryCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Score global officiel', style: theme.textTheme.headlineSmall),
+                      Text(
+                        'Score global officiel',
+                        style: theme.textTheme.headlineSmall,
+                      ),
                       const SizedBox(height: 4),
-                      const Text('Moteur R / NR local, basé uniquement sur le référentiel officiel.'),
+                      const Text(
+                        'Moteur R / NR local, basé uniquement sur le référentiel officiel.',
+                      ),
                     ],
                   ),
                 ),
-                Text(summary.formattedOfficialScore, style: theme.textTheme.headlineMedium),
+                Text(
+                  summary.formattedOfficialScore,
+                  style: theme.textTheme.headlineMedium,
+                ),
               ],
             ),
             const SizedBox(height: 16),
@@ -207,7 +235,11 @@ class _GlobalSummaryCard extends StatelessWidget {
                 Chip(label: Text('R : ${summary.resilientCriteria}')),
                 Chip(label: Text('NR : ${summary.nonResilientCriteria}')),
                 Chip(label: Text('N.C. : ${summary.notAnsweredCriteria}')),
-                Chip(label: Text('Complétude : ${(summary.completionRate * 100).toStringAsFixed(0)} %')),
+                Chip(
+                  label: Text(
+                    'Complétude : ${(summary.completionRate * 100).toStringAsFixed(0)} %',
+                  ),
+                ),
               ],
             ),
           ],
@@ -273,7 +305,6 @@ class _InterpretationCard extends StatelessWidget {
     return 'Le niveau de résilience déclaré est faible sur les critères cotés : les critères NR doivent être analysés en priorité.';
   }
 }
-
 
 class _PillarRadarCard extends StatelessWidget {
   final List<PillarRadarDatum> data;
@@ -420,7 +451,8 @@ class _PillarScoreCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return _ScoreLineCard(
       title: '${pillar.code} — ${pillar.label}',
-      subtitle: '${summary.answeredCriteria}/${summary.totalCriteria} coté(s) · R ${summary.resilientCriteria} · NR ${summary.nonResilientCriteria}',
+      subtitle:
+          '${summary.answeredCriteria}/${summary.totalCriteria} coté(s) · R ${summary.resilientCriteria} · NR ${summary.nonResilientCriteria}',
       summary: summary,
     );
   }
@@ -436,7 +468,8 @@ class _ScopeScoreCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return _ScoreLineCard(
       title: scope.label,
-      subtitle: '${summary.answeredCriteria}/${summary.totalCriteria} coté(s) · R ${summary.resilientCriteria} · NR ${summary.nonResilientCriteria}',
+      subtitle:
+          '${summary.answeredCriteria}/${summary.totalCriteria} coté(s) · R ${summary.resilientCriteria} · NR ${summary.nonResilientCriteria}',
       summary: summary,
     );
   }
@@ -469,13 +502,19 @@ class _ScoreLineCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(title, style: Theme.of(context).textTheme.titleMedium),
+                      Text(
+                        title,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
                       const SizedBox(height: 2),
                       Text(subtitle),
                     ],
                   ),
                 ),
-                Text(summary.formattedOfficialScore, style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  summary.formattedOfficialScore,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
               ],
             ),
             const SizedBox(height: 10),

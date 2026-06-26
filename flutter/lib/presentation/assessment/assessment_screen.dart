@@ -52,9 +52,11 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   final _userRepository = const LocalUserRepository();
   final _assignmentRepository = const LocalCriterionAssignmentRepository();
   final _syncAutomationService = const SyncAutomationService();
-  final Map<String, CriterionAnswer> _criterionAnswers = <String, CriterionAnswer>{};
+  final Map<String, CriterionAnswer> _criterionAnswers =
+      <String, CriterionAnswer>{};
   final Map<String, AppUser> _usersById = <String, AppUser>{};
-  final Map<String, CriterionAssignment> _assignmentsByCriterionId = <String, CriterionAssignment>{};
+  final Map<String, CriterionAssignment> _assignmentsByCriterionId =
+      <String, CriterionAssignment>{};
 
   late LocalCampaign _campaign;
 
@@ -70,7 +72,8 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   bool _autoSyncRunning = false;
 
   Map<String, IrnAnswer> get _answers => <String, IrnAnswer>{
-        for (final entry in _criterionAnswers.entries) entry.key: entry.value.answer,
+        for (final entry in _criterionAnswers.entries)
+          entry.key: entry.value.answer,
       };
 
   int get _justificationCount {
@@ -121,16 +124,17 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       }
       setState(() {
         _isLoadingAnswers = false;
-        _localStatusMessage = 'Impossible de restaurer l’évaluation depuis ce terminal : $error';
+        _localStatusMessage =
+            'Impossible de restaurer l’évaluation depuis ce terminal : $error';
       });
     }
   }
 
-
   Future<void> _loadAssignments() async {
     try {
       final users = await _userRepository.ensureDefaultUsers();
-      final assignments = await _assignmentRepository.loadAssignmentsByCriterion(
+      final assignments =
+          await _assignmentRepository.loadAssignmentsByCriterion(
         referentialId: widget.referential.id,
         campaignId: _campaign.id,
       );
@@ -165,16 +169,20 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       const Duration(seconds: 60),
       (_) => _pullLatestRemoteVersion(),
     );
-    WidgetsBinding.instance.addPostFrameCallback((_) => _pullLatestRemoteVersion());
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _pullLatestRemoteVersion(),
+    );
   }
 
   void _startRealtimeSynchronization() {
     _remoteEventReconnectTimer?.cancel();
     _remoteEventSubscription?.cancel();
-    _remoteEventSubscription = _syncAutomationService.watchRemoteEvents().listen(
+    _remoteEventSubscription =
+        _syncAutomationService.watchRemoteEvents().listen(
       (event) {
         final serverSyncId = event.serverSyncId.trim();
-        if (serverSyncId.isEmpty || serverSyncId == _lastRemoteEventServerSyncId) {
+        if (serverSyncId.isEmpty ||
+            serverSyncId == _lastRemoteEventServerSyncId) {
           return;
         }
         _lastRemoteEventServerSyncId = serverSyncId;
@@ -226,11 +234,14 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       }
       if (result.pushedLocalSnapshot) {
         setState(() {
-          _localStatusMessage = 'Synchronisation automatique publiée sur le serveur.';
+          _localStatusMessage =
+              'Synchronisation automatique publiée sur le serveur.';
         });
-      } else if (result.outcome == SyncAutomationOutcome.offline || result.outcome == SyncAutomationOutcome.failed) {
+      } else if (result.outcome == SyncAutomationOutcome.offline ||
+          result.outcome == SyncAutomationOutcome.failed) {
         setState(() {
-          _localStatusMessage = 'Synchronisation automatique différée : ${result.title}';
+          _localStatusMessage =
+              'Synchronisation automatique différée : ${result.title}';
         });
       }
     } finally {
@@ -252,7 +263,8 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       }
       if (result.importedRemoteSnapshot) {
         await _reloadCurrentCampaignAfterAutomaticImport(result);
-      } else if (result.outcome == SyncAutomationOutcome.offline || result.outcome == SyncAutomationOutcome.failed) {
+      } else if (result.outcome == SyncAutomationOutcome.offline ||
+          result.outcome == SyncAutomationOutcome.failed) {
         setState(() {
           _localStatusMessage = 'Mode hors ligne temporaire : ${result.title}';
         });
@@ -262,8 +274,12 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     }
   }
 
-  Future<void> _reloadCurrentCampaignAfterAutomaticImport(SyncAutomationResult result) async {
-    final campaigns = await _campaignRepository.loadCampaigns(referentialId: widget.referential.id);
+  Future<void> _reloadCurrentCampaignAfterAutomaticImport(
+    SyncAutomationResult result,
+  ) async {
+    final campaigns = await _campaignRepository.loadCampaigns(
+      referentialId: widget.referential.id,
+    );
     LocalCampaign? currentCampaign;
     for (final campaign in campaigns) {
       if (campaign.id == _campaign.id) {
@@ -319,7 +335,8 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     final previousAnswer = current.answer;
     final updated = current.copyWith(
       answer: answer,
-      justification: answer == IrnAnswer.notAnswered ? '' : current.justification,
+      justification:
+          answer == IrnAnswer.notAnswered ? '' : current.justification,
     );
 
     setState(() {
@@ -341,7 +358,10 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     }
   }
 
-  Future<void> _setJustification(IrnCriterion criterion, String justification) async {
+  Future<void> _setJustification(
+    IrnCriterion criterion,
+    String justification,
+  ) async {
     if (!_canEvaluateCriterion(criterion)) {
       _showForbidden(_disabledReasonForCriterion(criterion));
       return;
@@ -366,7 +386,9 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     if (saved && previousJustification != updatedJustification) {
       await _recordActivity(
         type: LocalActivityType.justificationChanged,
-        title: updatedJustification.isEmpty ? 'Justification supprimée' : 'Justification modifiée',
+        title: updatedJustification.isEmpty
+            ? 'Justification supprimée'
+            : 'Justification modifiée',
         description: '${criterion.code} — ${criterion.label}',
         criterionId: criterion.id,
         fromValue: previousJustification.isEmpty ? 'vide' : 'renseignée',
@@ -376,7 +398,8 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   }
 
   void _upsertCriterionAnswer(CriterionAnswer answer) {
-    final hasUsefulContent = answer.answer != IrnAnswer.notAnswered || answer.justification.trim().isNotEmpty;
+    final hasUsefulContent = answer.answer != IrnAnswer.notAnswered ||
+        answer.justification.trim().isNotEmpty;
     if (!hasUsefulContent) {
       _criterionAnswers.remove(answer.criterionId);
       return;
@@ -384,7 +407,9 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     _criterionAnswers[answer.criterionId] = answer;
   }
 
-  Future<bool> _saveOrRollback(Map<String, CriterionAnswer> previousAnswers) async {
+  Future<bool> _saveOrRollback(
+    Map<String, CriterionAnswer> previousAnswers,
+  ) async {
     try {
       await _assessmentRepository.saveCriterionAnswers(
         referentialId: widget.referential.id,
@@ -396,7 +421,8 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       }
       setState(() {
         _isSavingAnswers = false;
-        _localStatusMessage = 'Évaluation sauvegardée localement ($_justificationCount justification(s)).';
+        _localStatusMessage =
+            'Évaluation sauvegardée localement ($_justificationCount justification(s)).';
       });
       return true;
     } catch (error) {
@@ -440,7 +466,9 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   }
 
   Future<void> _resetAnswers() async {
-    if (!_accessPolicy.canManageCampaigns(widget.activeUser) || _campaign.isReadOnly || _criterionAnswers.isEmpty) {
+    if (!_accessPolicy.canManageCampaigns(widget.activeUser) ||
+        _campaign.isReadOnly ||
+        _criterionAnswers.isEmpty) {
       return;
     }
 
@@ -472,7 +500,8 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       await _recordActivity(
         type: LocalActivityType.answersReset,
         title: 'Réponses réinitialisées',
-        description: 'Toutes les réponses et justifications locales de la campagne ont été supprimées.',
+        description:
+            'Toutes les réponses et justifications locales de la campagne ont été supprimées.',
       );
     } catch (error) {
       if (!mounted) {
@@ -521,7 +550,9 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     final result = <IrnPillar, List<IrnCriterion>>{};
     for (final entry in criteriaByPillar.entries) {
       final visibleCriteria = entry.value
-          .where((criterion) => _isCriterionAssignedToActiveEvaluator(criterion))
+          .where(
+            (criterion) => _isCriterionAssignedToActiveEvaluator(criterion),
+          )
           .toList(growable: false);
       if (visibleCriteria.isNotEmpty) {
         result[entry.key] = visibleCriteria;
@@ -573,14 +604,19 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _editCampaignInformation() async {
-    if (!_accessPolicy.canManageCampaigns(widget.activeUser) || _campaign.isReadOnly) {
-      _showForbidden(_campaign.isReadOnly
-          ? 'La campagne est en lecture seule.'
-          : 'Seuls les administrateurs et pilotes IRN peuvent modifier les informations de campagne.');
+    if (!_accessPolicy.canManageCampaigns(widget.activeUser) ||
+        _campaign.isReadOnly) {
+      _showForbidden(
+        _campaign.isReadOnly
+            ? 'La campagne est en lecture seule.'
+            : 'Seuls les administrateurs et pilotes IRN peuvent modifier les informations de campagne.',
+      );
       return;
     }
 
@@ -621,7 +657,9 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
         builder: (_) => AssessmentSummaryScreen(
           referential: widget.referential,
           campaign: _campaign,
-          criterionAnswers: Map<String, CriterionAnswer>.unmodifiable(_criterionAnswers),
+          criterionAnswers: Map<String, CriterionAnswer>.unmodifiable(
+            _criterionAnswers,
+          ),
         ),
       ),
     );
@@ -633,7 +671,9 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
         builder: (_) => AssessmentExportScreen(
           referential: widget.referential,
           campaign: _campaign,
-          criterionAnswers: Map<String, CriterionAnswer>.unmodifiable(_criterionAnswers),
+          criterionAnswers: Map<String, CriterionAnswer>.unmodifiable(
+            _criterionAnswers,
+          ),
         ),
       ),
     );
@@ -645,7 +685,9 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
         builder: (_) => AssessmentQualityScreen(
           referential: widget.referential,
           campaign: _campaign,
-          criterionAnswers: Map<String, CriterionAnswer>.unmodifiable(_criterionAnswers),
+          criterionAnswers: Map<String, CriterionAnswer>.unmodifiable(
+            _criterionAnswers,
+          ),
         ),
       ),
     );
@@ -672,28 +714,38 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
 
   Future<void> _openUsers() async {
     if (!_accessPolicy.canManageCampaigns(widget.activeUser)) {
-      _showForbidden('Seuls les administrateurs et pilotes IRN peuvent accéder aux utilisateurs.');
+      _showForbidden(
+        'Seuls les administrateurs et pilotes IRN peuvent accéder aux utilisateurs.',
+      );
       return;
     }
 
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => const UserListScreen(),
-      ),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const UserListScreen()));
     await _loadAssignments();
   }
 
   @override
   Widget build(BuildContext context) {
     final answers = _answers;
-    final canManageCampaign = _accessPolicy.canManageCampaigns(widget.activeUser);
+    final canManageCampaign = _accessPolicy.canManageCampaigns(
+      widget.activeUser,
+    );
     final canEditCampaign = canManageCampaign && !_campaign.isReadOnly;
-    final canManageAssignments = _accessPolicy.canManageAssignments(widget.activeUser, _campaign);
+    final canManageAssignments = _accessPolicy.canManageAssignments(
+      widget.activeUser,
+      _campaign,
+    );
     final summary = _scoringService.computeSummary(widget.referential, answers);
-    final criteriaByPillar = _catalogService.criteriaByPillar(widget.referential);
+    final criteriaByPillar = _catalogService.criteriaByPillar(
+      widget.referential,
+    );
     final visibleCriteriaByPillar = _visibleCriteriaByPillar(criteriaByPillar);
-    final visibleCriteriaCount = visibleCriteriaByPillar.values.fold<int>(0, (total, criteria) => total + criteria.length);
+    final visibleCriteriaCount = visibleCriteriaByPillar.values.fold<int>(
+      0,
+      (total, criteria) => total + criteria.length,
+    );
 
     return Scaffold(
       appBar: OpenIrnAppBar(
@@ -766,7 +818,10 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
               id: 'reset',
               label: 'Réinitialiser',
               icon: Icons.refresh,
-              enabled: canEditCampaign && _criterionAnswers.isNotEmpty && !_isLoadingAnswers && !_isSavingAnswers,
+              enabled: canEditCampaign &&
+                  _criterionAnswers.isNotEmpty &&
+                  !_isLoadingAnswers &&
+                  !_isSavingAnswers,
               destructive: true,
               onSelected: _resetAnswers,
             ),
@@ -791,11 +846,17 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
                 assignmentCount: _assignmentsByCriterionId.length,
                 totalCriteria: widget.activeUser.role == AppUserRole.evaluator
                     ? visibleCriteriaCount
-                    : widget.referential.criteria.where((criterion) => criterion.active).length,
-                onOpenAssignments: canManageAssignments ? _openAssignments : null,
+                    : widget.referential.criteria
+                        .where((criterion) => criterion.active)
+                        .length,
+                onOpenAssignments:
+                    canManageAssignments ? _openAssignments : null,
               ),
               const SizedBox(height: 12),
-              _ScoreCard(summary: summary, justificationCount: _justificationCount),
+              _ScoreCard(
+                summary: summary,
+                justificationCount: _justificationCount,
+              ),
               const SizedBox(height: 12),
               _LocalPersistenceCard(
                 isLoading: _isLoadingAnswers,
@@ -839,7 +900,6 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   }
 }
 
-
 class _NoAssignedCriteriaCard extends StatelessWidget {
   const _NoAssignedCriteriaCard();
 
@@ -858,7 +918,10 @@ class _NoAssignedCriteriaCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Aucun critère affecté', style: theme.textTheme.titleMedium),
+                  Text(
+                    'Aucun critère affecté',
+                    style: theme.textTheme.titleMedium,
+                  ),
                   const SizedBox(height: 4),
                   const Text(
                     'Ton profil Évaluateur ne possède actuellement aucune affectation sur cette campagne.',
@@ -914,7 +977,10 @@ class _CampaignContextCard extends StatelessWidget {
                     children: [
                       Chip(label: Text(campaign.status.label)),
                       Chip(
-                        avatar: const Icon(Icons.verified_user_outlined, size: 18),
+                        avatar: const Icon(
+                          Icons.verified_user_outlined,
+                          size: 18,
+                        ),
                         label: Text('Session : ${activeUser.displayName}'),
                       ),
                       Chip(label: Text(activeUser.role.label)),
@@ -926,7 +992,10 @@ class _CampaignContextCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 4),
-                  Text(campaign.status.helperText, style: theme.textTheme.bodySmall),
+                  Text(
+                    campaign.status.helperText,
+                    style: theme.textTheme.bodySmall,
+                  ),
                   if (campaign.description.isNotEmpty) ...[
                     const SizedBox(height: 4),
                     Text(campaign.description),
@@ -939,7 +1008,9 @@ class _CampaignContextCard extends StatelessWidget {
                     child: FilledButton.tonalIcon(
                       onPressed: canEdit ? onEditInformation : null,
                       icon: const Icon(Icons.edit_note_outlined),
-                      label: const Text('Modifier les informations de campagne'),
+                      label: const Text(
+                        'Modifier les informations de campagne',
+                      ),
                     ),
                   ),
                 ],
@@ -951,7 +1022,6 @@ class _CampaignContextCard extends StatelessWidget {
     );
   }
 }
-
 
 class _CampaignInfoRows extends StatelessWidget {
   final LocalCampaign campaign;
@@ -967,7 +1037,11 @@ class _CampaignInfoRows extends StatelessWidget {
       children: [
         Chip(
           avatar: const Icon(Icons.dns_outlined, size: 18),
-          label: Text(info.systemName.trim().isEmpty ? 'SI non renseigné' : 'SI : ${info.systemName}'),
+          label: Text(
+            info.systemName.trim().isEmpty
+                ? 'SI non renseigné'
+                : 'SI : ${info.systemName}',
+          ),
         ),
         Chip(
           avatar: const Icon(Icons.person_outline, size: 18),
@@ -1011,10 +1085,12 @@ class _CampaignInformationDialog extends StatefulWidget {
   const _CampaignInformationDialog({required this.campaign});
 
   @override
-  State<_CampaignInformationDialog> createState() => _CampaignInformationDialogState();
+  State<_CampaignInformationDialog> createState() =>
+      _CampaignInformationDialogState();
 }
 
-class _CampaignInformationDialogState extends State<_CampaignInformationDialog> {
+class _CampaignInformationDialogState
+    extends State<_CampaignInformationDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
   late final TextEditingController _descriptionController;
@@ -1032,10 +1108,18 @@ class _CampaignInformationDialogState extends State<_CampaignInformationDialog> 
     _nameController = TextEditingController(text: campaign.name);
     _descriptionController = TextEditingController(text: campaign.description);
     _systemNameController = TextEditingController(text: info.systemName);
-    _systemDescriptionController = TextEditingController(text: info.systemDescription);
-    _projectDirectorFirstNameController = TextEditingController(text: info.projectDirectorFirstName);
-    _projectDirectorLastNameController = TextEditingController(text: info.projectDirectorLastName);
-    _projectDirectorEmailController = TextEditingController(text: info.projectDirectorEmail);
+    _systemDescriptionController = TextEditingController(
+      text: info.systemDescription,
+    );
+    _projectDirectorFirstNameController = TextEditingController(
+      text: info.projectDirectorFirstName,
+    );
+    _projectDirectorLastNameController = TextEditingController(
+      text: info.projectDirectorLastName,
+    );
+    _projectDirectorEmailController = TextEditingController(
+      text: info.projectDirectorEmail,
+    );
   }
 
   @override
@@ -1061,8 +1145,10 @@ class _CampaignInformationDialogState extends State<_CampaignInformationDialog> 
         information: CampaignInformation(
           systemName: _systemNameController.text.trim(),
           systemDescription: _systemDescriptionController.text.trim(),
-          projectDirectorFirstName: _projectDirectorFirstNameController.text.trim(),
-          projectDirectorLastName: _projectDirectorLastNameController.text.trim(),
+          projectDirectorFirstName:
+              _projectDirectorFirstNameController.text.trim(),
+          projectDirectorLastName:
+              _projectDirectorLastNameController.text.trim(),
           projectDirectorEmail: _projectDirectorEmailController.text.trim(),
         ),
       ),
@@ -1082,7 +1168,10 @@ class _CampaignInformationDialogState extends State<_CampaignInformationDialog> 
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Campagne', style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  'Campagne',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
                 const SizedBox(height: 10),
                 TextFormField(
                   controller: _nameController,
@@ -1092,7 +1181,9 @@ class _CampaignInformationDialogState extends State<_CampaignInformationDialog> 
                     hintText: 'Ex. Évaluation IRN 2026 — SI Facturation',
                     border: OutlineInputBorder(),
                   ),
-                  validator: (value) => value == null || value.trim().isEmpty ? 'Le nom de campagne est obligatoire.' : null,
+                  validator: (value) => value == null || value.trim().isEmpty
+                      ? 'Le nom de campagne est obligatoire.'
+                      : null,
                 ),
                 const SizedBox(height: 10),
                 TextFormField(
@@ -1101,12 +1192,16 @@ class _CampaignInformationDialogState extends State<_CampaignInformationDialog> 
                   maxLines: 4,
                   decoration: const InputDecoration(
                     labelText: 'Description de la campagne',
-                    hintText: 'Périmètre, contexte ou objectif de l’évaluation.',
+                    hintText:
+                        'Périmètre, contexte ou objectif de l’évaluation.',
                     border: OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 18),
-                Text('Système d’information concerné', style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  'Système d’information concerné',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
                 const SizedBox(height: 10),
                 TextFormField(
                   controller: _systemNameController,
@@ -1115,7 +1210,9 @@ class _CampaignInformationDialogState extends State<_CampaignInformationDialog> 
                     hintText: 'Ex. SI Facturation',
                     border: OutlineInputBorder(),
                   ),
-                  validator: (value) => value == null || value.trim().isEmpty ? 'Le nom du SI est obligatoire.' : null,
+                  validator: (value) => value == null || value.trim().isEmpty
+                      ? 'Le nom du SI est obligatoire.'
+                      : null,
                 ),
                 const SizedBox(height: 10),
                 TextFormField(
@@ -1124,13 +1221,19 @@ class _CampaignInformationDialogState extends State<_CampaignInformationDialog> 
                   maxLines: 6,
                   decoration: const InputDecoration(
                     labelText: 'Description du système d’information',
-                    hintText: 'Fonction métier supportée, criticité, principaux composants ou dépendances.',
+                    hintText:
+                        'Fonction métier supportée, criticité, principaux composants ou dépendances.',
                     border: OutlineInputBorder(),
                   ),
-                  validator: (value) => value == null || value.trim().isEmpty ? 'La description du SI est obligatoire.' : null,
+                  validator: (value) => value == null || value.trim().isEmpty
+                      ? 'La description du SI est obligatoire.'
+                      : null,
                 ),
                 const SizedBox(height: 18),
-                Text('Directeur de projet', style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  'Directeur de projet',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
                 const SizedBox(height: 10),
                 Row(
                   children: [
@@ -1141,7 +1244,10 @@ class _CampaignInformationDialogState extends State<_CampaignInformationDialog> 
                           labelText: 'Prénom',
                           border: OutlineInputBorder(),
                         ),
-                        validator: (value) => value == null || value.trim().isEmpty ? 'Prénom obligatoire.' : null,
+                        validator: (value) =>
+                            value == null || value.trim().isEmpty
+                                ? 'Prénom obligatoire.'
+                                : null,
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -1152,7 +1258,10 @@ class _CampaignInformationDialogState extends State<_CampaignInformationDialog> 
                           labelText: 'Nom',
                           border: OutlineInputBorder(),
                         ),
-                        validator: (value) => value == null || value.trim().isEmpty ? 'Nom obligatoire.' : null,
+                        validator: (value) =>
+                            value == null || value.trim().isEmpty
+                                ? 'Nom obligatoire.'
+                                : null,
                       ),
                     ),
                   ],
@@ -1187,15 +1296,11 @@ class _CampaignInformationDialogState extends State<_CampaignInformationDialog> 
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Annuler'),
         ),
-        FilledButton(
-          onPressed: _submit,
-          child: const Text('Enregistrer'),
-        ),
+        FilledButton(onPressed: _submit, child: const Text('Enregistrer')),
       ],
     );
   }
 }
-
 
 class _AssignmentStatusCard extends StatelessWidget {
   final bool isLoading;
@@ -1239,10 +1344,7 @@ class _AssignmentChip extends StatelessWidget {
   final CriterionAssignment? assignment;
   final AppUser? assignedUser;
 
-  const _AssignmentChip({
-    required this.assignment,
-    required this.assignedUser,
-  });
+  const _AssignmentChip({required this.assignment, required this.assignedUser});
 
   String get _assignedUserLabel {
     final user = assignedUser;
@@ -1267,7 +1369,8 @@ class _AssignmentChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isAssigned = assignment != null;
-    final label = isAssigned ? 'Évaluateur : $_assignedUserLabel' : 'Non affecté';
+    final label =
+        isAssigned ? 'Évaluateur : $_assignedUserLabel' : 'Non affecté';
     final icon = isAssigned ? Icons.person_outline : Icons.person_off_outlined;
     final backgroundColor = isAssigned
         ? theme.colorScheme.secondaryContainer
@@ -1327,7 +1430,10 @@ class _ScoreCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Score officiel R / NR', style: theme.textTheme.titleLarge),
+                      Text(
+                        'Score officiel R / NR',
+                        style: theme.textTheme.titleLarge,
+                      ),
                       const SizedBox(height: 4),
                       const Text(
                         'Calcul : R / (R + NR). Les critères non cotés sont exclus du score.',
@@ -1354,7 +1460,11 @@ class _ScoreCard extends StatelessWidget {
                 Chip(label: Text('NR : ${summary.nonResilientCriteria}')),
                 Chip(label: Text('N.C. : ${summary.notAnsweredCriteria}')),
                 Chip(label: Text('Justifications : $justificationCount')),
-                Chip(label: Text('Complétude : ${(summary.completionRate * 100).toStringAsFixed(0)} %')),
+                Chip(
+                  label: Text(
+                    'Complétude : ${(summary.completionRate * 100).toStringAsFixed(0)} %',
+                  ),
+                ),
               ],
             ),
           ],
@@ -1388,12 +1498,7 @@ class _LocalPersistenceCard extends StatelessWidget {
           children: [
             Icon(icon),
             const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                label,
-                style: theme.textTheme.bodyMedium,
-              ),
-            ),
+            Expanded(child: Text(label, style: theme.textTheme.bodyMedium)),
             if (isLoading || isSaving)
               const SizedBox(
                 width: 18,
@@ -1418,7 +1523,8 @@ class _PillarAssessmentCard extends StatelessWidget {
   final bool Function(IrnCriterion criterion) canEditCriterion;
   final String Function(IrnCriterion criterion) disabledReasonForCriterion;
   final void Function(IrnCriterion criterion, IrnAnswer answer) onAnswerChanged;
-  final void Function(IrnCriterion criterion, String justification) onJustificationChanged;
+  final void Function(IrnCriterion criterion, String justification)
+      onJustificationChanged;
 
   const _PillarAssessmentCard({
     required this.pillar,
@@ -1437,7 +1543,11 @@ class _PillarAssessmentCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final justificationCount = criteria
-        .where((criterion) => criterionAnswers[criterion.id]?.justification.trim().isNotEmpty ?? false)
+        .where(
+          (criterion) =>
+              criterionAnswers[criterion.id]?.justification.trim().isNotEmpty ??
+              false,
+        )
         .length;
 
     return Card(
@@ -1455,13 +1565,16 @@ class _PillarAssessmentCard extends StatelessWidget {
               child: _CriterionAnswerTile(
                 criterion: criterion,
                 answer: answers[criterion.id] ?? IrnAnswer.notAnswered,
-                justification: criterionAnswers[criterion.id]?.justification ?? '',
+                justification:
+                    criterionAnswers[criterion.id]?.justification ?? '',
                 assignment: assignmentsByCriterionId[criterion.id],
-                assignedUser: usersById[assignmentsByCriterionId[criterion.id]?.userId],
+                assignedUser:
+                    usersById[assignmentsByCriterionId[criterion.id]?.userId],
                 canEdit: canEditCriterion(criterion),
                 disabledReason: disabledReasonForCriterion(criterion),
                 onAnswerChanged: (answer) => onAnswerChanged(criterion, answer),
-                onJustificationChanged: (justification) => onJustificationChanged(criterion, justification),
+                onJustificationChanged: (justification) =>
+                    onJustificationChanged(criterion, justification),
               ),
             ),
         ],
@@ -1497,7 +1610,8 @@ class _CriterionAnswerTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final hasJustification = justification.trim().isNotEmpty;
-    final canJustify = answer == IrnAnswer.resilient || answer == IrnAnswer.nonResilient;
+    final canJustify =
+        answer == IrnAnswer.resilient || answer == IrnAnswer.nonResilient;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -1505,101 +1619,120 @@ class _CriterionAnswerTile extends StatelessWidget {
         width: double.infinity,
         child: DecoratedBox(
           decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: theme.dividerColor),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final details = Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('${criterion.code} — ${criterion.label}', style: theme.textTheme.titleSmall),
-                      const SizedBox(height: 4),
-                      Text('Portée : ${criterion.scope.label}'),
-                      const SizedBox(height: 6),
-                      _AssignmentChip(assignment: assignment, assignedUser: assignedUser),
-                      if (!canEdit) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          disabledReason,
-                          style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
-                        ),
-                      ],
-                    ],
-                  );
-                  final choices = Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: [
-                      for (final option in IrnAnswer.values)
-                        ChoiceChip(
-                          label: Text(option.label),
-                          tooltip: option.longLabel,
-                          selected: answer == option,
-                          onSelected: canEdit ? (_) => onAnswerChanged(option) : null,
-                        ),
-                    ],
-                  );
-                  final isNarrow = constraints.maxWidth < 520;
-                  if (isNarrow) {
-                    return Column(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: theme.dividerColor),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final details = Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        details,
-                        const SizedBox(height: 10),
-                        choices,
+                        Text(
+                          '${criterion.code} — ${criterion.label}',
+                          style: theme.textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 4),
+                        Text('Portée : ${criterion.scope.label}'),
+                        const SizedBox(height: 6),
+                        _AssignmentChip(
+                          assignment: assignment,
+                          assignedUser: assignedUser,
+                        ),
+                        if (!canEdit) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            disabledReason,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.error,
+                            ),
+                          ),
+                        ],
                       ],
                     );
-                  }
-                  return Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(child: details),
-                      const SizedBox(width: 12),
-                      Flexible(child: choices),
-                    ],
-                  );
-                },
-              ),
-              if (canJustify) ...[
-                const SizedBox(height: 8),
-                if (hasJustification)
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(10),
-                      color: theme.colorScheme.surfaceContainerHighest,
-                    ),
-                    child: Text(
-                      justification.trim(),
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  )
-                else
-                  Text(
-                    'Aucune justification renseignée.',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                const SizedBox(height: 6),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: canEdit ? () => _openJustificationDialog(context) : null,
-                    icon: Icon(hasJustification ? Icons.edit_note : Icons.note_add_outlined),
-                    label: Text(hasJustification ? 'Modifier la justification' : 'Ajouter une justification'),
-                  ),
+                    final choices = Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final option in IrnAnswer.values)
+                          ChoiceChip(
+                            label: Text(option.label),
+                            tooltip: option.longLabel,
+                            selected: answer == option,
+                            onSelected:
+                                canEdit ? (_) => onAnswerChanged(option) : null,
+                          ),
+                      ],
+                    );
+                    final isNarrow = constraints.maxWidth < 520;
+                    if (isNarrow) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          details,
+                          const SizedBox(height: 10),
+                          choices,
+                        ],
+                      );
+                    }
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: details),
+                        const SizedBox(width: 12),
+                        Flexible(child: choices),
+                      ],
+                    );
+                  },
                 ),
+                if (canJustify) ...[
+                  const SizedBox(height: 8),
+                  if (hasJustification)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(10),
+                        color: theme.colorScheme.surfaceContainerHighest,
+                      ),
+                      child: Text(
+                        justification.trim(),
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    )
+                  else
+                    Text(
+                      'Aucune justification renseignée.',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  const SizedBox(height: 6),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: canEdit
+                          ? () => _openJustificationDialog(context)
+                          : null,
+                      icon: Icon(
+                        hasJustification
+                            ? Icons.edit_note
+                            : Icons.note_add_outlined,
+                      ),
+                      label: Text(
+                        hasJustification
+                            ? 'Modifier la justification'
+                            : 'Ajouter une justification',
+                      ),
+                    ),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
-        ),
         ),
       ),
     );
@@ -1664,7 +1797,8 @@ class _JustificationDialogState extends State<_JustificationDialog> {
             labelText: 'Justification / commentaire',
             alignLabelWithHint: true,
             border: OutlineInputBorder(),
-            hintText: 'Explique la réponse, cite une preuve, une hypothèse ou un point à vérifier.',
+            hintText:
+                'Explique la réponse, cite une preuve, une hypothèse ou un point à vérifier.',
           ),
         ),
       ),

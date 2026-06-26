@@ -50,8 +50,14 @@ class AssessmentExportService {
     final exportedAtUtc = (exportedAt ?? DateTime.now()).toUtc();
     final answers = _answersFromCriterionAnswers(criterionAnswers);
     final globalSummary = scoringService.computeSummary(referential, answers);
-    final pillarSummaries = scoringService.computeSummariesByPillar(referential, answers);
-    final scopeSummaries = scoringService.computeSummariesByScope(referential, answers);
+    final pillarSummaries = scoringService.computeSummariesByPillar(
+      referential,
+      answers,
+    );
+    final scopeSummaries = scoringService.computeSummariesByScope(
+      referential,
+      answers,
+    );
 
     return <String, dynamic>{
       'schemaVersion': 6,
@@ -140,9 +146,12 @@ class AssessmentExportService {
     };
   }
 
-  Map<String, IrnAnswer> _answersFromCriterionAnswers(Map<String, CriterionAnswer> criterionAnswers) {
+  Map<String, IrnAnswer> _answersFromCriterionAnswers(
+    Map<String, CriterionAnswer> criterionAnswers,
+  ) {
     return <String, IrnAnswer>{
-      for (final entry in criterionAnswers.entries) entry.key: entry.value.answer,
+      for (final entry in criterionAnswers.entries)
+        entry.key: entry.value.answer,
     };
   }
 
@@ -154,10 +163,10 @@ class AssessmentExportService {
       'nonResilientCriteria': summary.nonResilientCriteria,
       'notAnsweredCriteria': summary.notAnsweredCriteria,
       'completionRate': _round(summary.completionRate),
-      'officialScore': summary.officialScore == null ? null : _round(summary.officialScore!),
+      'officialScore':
+          summary.officialScore == null ? null : _round(summary.officialScore!),
     };
   }
-
 
   Map<String, dynamic> _userToJson(AppUser user) {
     return <String, dynamic>{
@@ -176,7 +185,8 @@ class AssessmentExportService {
       'id': assignment.id,
       'criterionId': assignment.criterionId,
       'userId': assignment.userId,
-      if (assignment.assignedByUserId.trim().isNotEmpty) 'assignedByUserId': assignment.assignedByUserId,
+      if (assignment.assignedByUserId.trim().isNotEmpty)
+        'assignedByUserId': assignment.assignedByUserId,
       'createdAt': assignment.createdAt.toUtc().toIso8601String(),
       'updatedAt': assignment.updatedAt.toUtc().toIso8601String(),
     };

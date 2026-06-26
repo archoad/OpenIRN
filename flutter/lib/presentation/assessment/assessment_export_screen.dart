@@ -43,9 +43,11 @@ class AssessmentExportScreen extends StatefulWidget {
 }
 
 class _AssessmentExportScreenState extends State<AssessmentExportScreen> {
-  final LocalActivityRepository _activityRepository = const LocalActivityRepository();
+  final LocalActivityRepository _activityRepository =
+      const LocalActivityRepository();
   final LocalUserRepository _userRepository = const LocalUserRepository();
-  final LocalCriterionAssignmentRepository _assignmentRepository = const LocalCriterionAssignmentRepository();
+  final LocalCriterionAssignmentRepository _assignmentRepository =
+      const LocalCriterionAssignmentRepository();
   final LocalJsonFileService _fileService = const LocalJsonFileService();
   late final Future<_ExportContext> _exportContextFuture;
 
@@ -98,7 +100,9 @@ class _AssessmentExportScreenState extends State<AssessmentExportScreen> {
           users: exportContext.users,
           assignments: exportContext.assignments,
         );
-        final answeredCount = widget.criterionAnswers.values.where((answer) => answer.answer.isCounted).length;
+        final answeredCount = widget.criterionAnswers.values
+            .where((answer) => answer.answer.isCounted)
+            .length;
         final justificationCount = widget.criterionAnswers.values
             .where((answer) => answer.justification.trim().isNotEmpty)
             .length;
@@ -136,13 +140,16 @@ class _AssessmentExportScreenState extends State<AssessmentExportScreen> {
                     activityEventCount: activityEvents.length,
                     assignmentCount: exportContext.assignments.length,
                     onCopy: () => _copyToClipboard(context, jsonPayload),
-                    onSave: _isSaving ? null : () => _saveToFile(context, jsonPayload),
+                    onSave: _isSaving
+                        ? null
+                        : () => _saveToFile(context, jsonPayload),
                     isSaving: _isSaving,
                   ),
                   if (snapshot.hasError) ...[
                     const SizedBox(height: 12),
                     const _ExportWarningCard(
-                      message: 'Le journal d’activité n’a pas pu être chargé. L’export reste utilisable, mais il ne contient pas la trace locale.',
+                      message:
+                          'Le journal d’activité n’a pas pu être chargé. L’export reste utilisable, mais il ne contient pas la trace locale.',
                     ),
                   ],
                   if (_fileErrorMessage != null) ...[
@@ -185,14 +192,14 @@ class _AssessmentExportScreenState extends State<AssessmentExportScreen> {
         return;
       }
       if (path == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Export fichier annulé.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Export fichier annulé.')));
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Export JSON enregistré : $path')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Export JSON enregistré : $path')));
     } catch (error) {
       if (!context.mounted) {
         return;
@@ -212,13 +219,18 @@ class _AssessmentExportScreenState extends State<AssessmentExportScreen> {
     }
   }
 
-  Future<void> _copyToClipboard(BuildContext context, String jsonPayload) async {
+  Future<void> _copyToClipboard(
+    BuildContext context,
+    String jsonPayload,
+  ) async {
     await Clipboard.setData(ClipboardData(text: jsonPayload));
     if (!context.mounted) {
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Export JSON copié dans le presse-papiers.')),
+      const SnackBar(
+        content: Text('Export JSON copié dans le presse-papiers.'),
+      ),
     );
   }
 }
@@ -246,7 +258,6 @@ class _ExportIntroCard extends StatelessWidget {
     required this.isSaving,
   });
 
-
   String _projectDirectorLabel(CampaignInformation info) {
     if (info.projectDirectorFullName.isNotEmpty) {
       return info.projectDirectorFullName;
@@ -272,7 +283,10 @@ class _ExportIntroCard extends StatelessWidget {
                 const Icon(Icons.data_object_outlined),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text('Export local de l’évaluation', style: theme.textTheme.titleLarge),
+                  child: Text(
+                    'Export local de l’évaluation',
+                    style: theme.textTheme.titleLarge,
+                  ),
                 ),
                 Wrap(
                   spacing: 8,
@@ -287,7 +301,9 @@ class _ExportIntroCard extends StatelessWidget {
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Icon(Icons.save_alt_outlined),
-                      label: Text(isSaving ? 'Enregistrement…' : 'Enregistrer .json'),
+                      label: Text(
+                        isSaving ? 'Enregistrement…' : 'Enregistrer .json',
+                      ),
                     ),
                     OutlinedButton.icon(
                       onPressed: onCopy,
@@ -311,15 +327,27 @@ class _ExportIntroCard extends StatelessWidget {
               children: [
                 Chip(label: Text('Campagne : ${campaign.name}')),
                 Chip(label: Text('Statut : ${campaign.status.label}')),
-                Chip(label: Text('SI : ${campaign.information.systemName.trim().isEmpty ? 'non renseigné' : campaign.information.systemName}')),
-                Chip(label: Text('Directeur : ${_projectDirectorLabel(campaign.information)}')),
+                Chip(
+                  label: Text(
+                    'SI : ${campaign.information.systemName.trim().isEmpty ? 'non renseigné' : campaign.information.systemName}',
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    'Directeur : ${_projectDirectorLabel(campaign.information)}',
+                  ),
+                ),
                 Chip(label: Text('Référentiel : ${referential.id}')),
                 Chip(label: Text('Version : ${referential.version}')),
                 Chip(label: Text('Réponses cotées : $answeredCount')),
                 Chip(label: Text('Justifications : $justificationCount')),
                 Chip(label: Text('Évènements journal : $activityEventCount')),
                 Chip(label: Text('Affectations : $assignmentCount')),
-                Chip(label: Text('Critères exportés : ${referential.criteria.length}')),
+                Chip(
+                  label: Text(
+                    'Critères exportés : ${referential.criteria.length}',
+                  ),
+                ),
               ],
             ),
           ],
@@ -334,7 +362,6 @@ class _ExportWarningCard extends StatelessWidget {
 
   const _ExportWarningCard({required this.message});
 
-
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -342,7 +369,10 @@ class _ExportWarningCard extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Row(
           children: [
-            Icon(Icons.warning_amber_outlined, color: Theme.of(context).colorScheme.error),
+            Icon(
+              Icons.warning_amber_outlined,
+              color: Theme.of(context).colorScheme.error,
+            ),
             const SizedBox(width: 10),
             Expanded(child: Text(message)),
           ],
@@ -357,7 +387,6 @@ class _JsonPreviewCard extends StatelessWidget {
 
   const _JsonPreviewCard({required this.jsonPayload});
 
-
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -370,7 +399,10 @@ class _JsonPreviewCard extends StatelessWidget {
               children: [
                 const Icon(Icons.preview_outlined),
                 const SizedBox(width: 8),
-                Text('Aperçu JSON', style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  'Aperçu JSON',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
               ],
             ),
             const SizedBox(height: 12),

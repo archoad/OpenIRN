@@ -4,7 +4,9 @@ import '../../domain/models/app_user.dart';
 import 'local_user_repository.dart';
 
 class LocalSessionRepository {
-  const LocalSessionRepository({this.userRepository = const LocalUserRepository()});
+  const LocalSessionRepository({
+    this.userRepository = const LocalUserRepository(),
+  });
 
   static const _activeUserIdKey = 'openirn.localSession.activeUserId';
 
@@ -35,7 +37,9 @@ class LocalSessionRepository {
         return user;
       }
     }
-    throw const LocalSessionRepositoryException('Utilisateur actif introuvable ou inactif.');
+    throw const LocalSessionRepositoryException(
+      'Utilisateur actif introuvable ou inactif.',
+    );
   }
 
   Future<void> clearActiveUser() async {

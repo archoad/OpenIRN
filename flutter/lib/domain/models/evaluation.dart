@@ -7,7 +7,7 @@ enum InternalMaturityLevel {
   intention,
   moyen,
   resultat,
-  notConcerned
+  notConcerned,
 }
 
 enum ConfidenceLevel { low, medium, high }

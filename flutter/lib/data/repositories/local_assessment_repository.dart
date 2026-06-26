@@ -16,8 +16,9 @@ class LocalAssessmentRepository {
     String? campaignId,
   }) async {
     final preferences = await SharedPreferences.getInstance();
-    var rawPayload =
-        preferences.getString(_storageKey(referentialId, campaignId));
+    var rawPayload = preferences.getString(
+      _storageKey(referentialId, campaignId),
+    );
 
     // Migration douce depuis les patches 009–012 : l'évaluation était stockée
     // uniquement par référentiel, sans identifiant de campagne.
@@ -114,7 +115,9 @@ class LocalAssessmentRepository {
     };
 
     await preferences.setString(
-        _storageKey(referentialId, campaignId), jsonEncode(payload));
+      _storageKey(referentialId, campaignId),
+      jsonEncode(payload),
+    );
   }
 
   Future<void> saveAnswers({
@@ -180,10 +183,7 @@ class LocalAssessmentRepository {
       return null;
     }
 
-    return CriterionAnswer(
-      criterionId: criterionId,
-      answer: answer,
-    );
+    return CriterionAnswer(criterionId: criterionId, answer: answer);
   }
 
   IrnAnswer? _answerFromStoredValue(String? value) {

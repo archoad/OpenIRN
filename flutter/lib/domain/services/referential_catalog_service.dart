@@ -4,7 +4,8 @@ class ReferentialCatalogService {
   const ReferentialCatalogService();
 
   Map<IrnPillar, List<IrnCriterion>> criteriaByPillar(
-      IrnReferential referential) {
+    IrnReferential referential,
+  ) {
     final byPillarId = <String, List<IrnCriterion>>{};
     for (final criterion in referential.criteria) {
       byPillarId
@@ -18,8 +19,9 @@ class ReferentialCatalogService {
 
     return {
       for (final pillar in referential.pillars)
-        pillar:
-            List.unmodifiable(byPillarId[pillar.id] ?? const <IrnCriterion>[]),
+        pillar: List.unmodifiable(
+          byPillarId[pillar.id] ?? const <IrnCriterion>[],
+        ),
     };
   }
 

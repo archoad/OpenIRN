@@ -5,10 +5,7 @@ import '../models/irn_referential.dart';
 import '../models/local_activity_event.dart';
 import '../models/local_campaign.dart';
 
-enum SyncPullImportMode {
-  copy,
-  replaceLocal,
-}
+enum SyncPullImportMode { copy, replaceLocal }
 
 class SyncPullImportService {
   const SyncPullImportService();
@@ -35,12 +32,15 @@ class SyncPullImportService {
 
     final schemaVersion = _asInt(payload['schemaVersion']);
     if (schemaVersion == null || schemaVersion < 1) {
-      throw const SyncPullImportException('Le snapshot distant ne contient pas de schemaVersion valide.');
+      throw const SyncPullImportException(
+        'Le snapshot distant ne contient pas de schemaVersion valide.',
+      );
     }
 
     final referentialPayload = _asMap(payload['referential']);
     final exportedReferentialId = _asString(referentialPayload['id']);
-    if (exportedReferentialId.isNotEmpty && exportedReferentialId != referential.id) {
+    if (exportedReferentialId.isNotEmpty &&
+        exportedReferentialId != referential.id) {
       throw SyncPullImportException(
         'Le snapshot distant cible le référentiel $exportedReferentialId, alors que le référentiel chargé est ${referential.id}.',
       );
@@ -48,7 +48,9 @@ class SyncPullImportService {
 
     final exportedChecksum = _asString(referentialPayload['checksumSha256']);
     final currentChecksum = referential.checksumSha256 ?? '';
-    if (exportedChecksum.isNotEmpty && currentChecksum.isNotEmpty && exportedChecksum != currentChecksum) {
+    if (exportedChecksum.isNotEmpty &&
+        currentChecksum.isNotEmpty &&
+        exportedChecksum != currentChecksum) {
       throw const SyncPullImportException(
         'Le checksum du référentiel distant ne correspond pas au référentiel actuellement chargé.',
       );
@@ -63,7 +65,9 @@ class SyncPullImportService {
 
     final rawCampaigns = payload['campaigns'];
     if (rawCampaigns is! List) {
-      throw const SyncPullImportException('Le snapshot distant ne contient pas de liste campaigns valide.');
+      throw const SyncPullImportException(
+        'Le snapshot distant ne contient pas de liste campaigns valide.',
+      );
     }
 
     final importedCampaigns = <ImportedRemoteCampaign>[];
@@ -71,13 +75,17 @@ class SyncPullImportService {
     for (final rawCampaign in rawCampaigns) {
       index += 1;
       if (rawCampaign is! Map) {
-        warnings.add('Une campagne distante a été ignorée car son format est invalide.');
+        warnings.add(
+          'Une campagne distante a été ignorée car son format est invalide.',
+        );
         continue;
       }
       final campaignItem = _asMap(rawCampaign);
       final campaignPayload = _asMap(campaignItem['campaign']);
       if (campaignPayload.isEmpty) {
-        warnings.add('Une campagne distante a été ignorée car son bloc campaign est absent.');
+        warnings.add(
+          'Une campagne distante a été ignorée car son bloc campaign est absent.',
+        );
         continue;
       }
 
@@ -86,8 +94,11 @@ class SyncPullImportService {
         warnings.add('Une campagne distante sans identifiant a été ignorée.');
         continue;
       }
-      if (sourceCampaign.referentialId.isNotEmpty && sourceCampaign.referentialId != referential.id) {
-        warnings.add('La campagne distante ${sourceCampaign.id} ne correspond pas au référentiel actif et a été ignorée.');
+      if (sourceCampaign.referentialId.isNotEmpty &&
+          sourceCampaign.referentialId != referential.id) {
+        warnings.add(
+          'La campagne distante ${sourceCampaign.id} ne correspond pas au référentiel actif et a été ignorée.',
+        );
         continue;
       }
 
@@ -135,7 +146,9 @@ class SyncPullImportService {
     }
 
     if (importedCampaigns.isEmpty) {
-      throw const SyncPullImportException('Aucune campagne exploitable trouvée dans le snapshot distant.');
+      throw const SyncPullImportException(
+        'Aucune campagne exploitable trouvée dans le snapshot distant.',
+      );
     }
 
     return SyncPullImportResult(
@@ -149,7 +162,9 @@ class SyncPullImportService {
 
   List<AppUser> _parseUsers(Object? rawUsers, List<String> warnings) {
     if (rawUsers == null) {
-      warnings.add('Le snapshot distant ne contient pas de liste users. Les affectations peuvent être incomplètes.');
+      warnings.add(
+        'Le snapshot distant ne contient pas de liste users. Les affectations peuvent être incomplètes.',
+      );
       return const <AppUser>[];
     }
     if (rawUsers is! List) {
@@ -160,7 +175,9 @@ class SyncPullImportService {
     final usersById = <String, AppUser>{};
     for (final rawUser in rawUsers) {
       if (rawUser is! Map) {
-        warnings.add('Un utilisateur distant a été ignoré car son format est invalide.');
+        warnings.add(
+          'Un utilisateur distant a été ignoré car son format est invalide.',
+        );
         continue;
       }
       final user = AppUser.fromJson(_asMap(rawUser));
@@ -186,17 +203,25 @@ class SyncPullImportService {
       return sourceCampaign.copyWith(updatedAt: importedAt);
     }
     final safeReferentialId = _safeIdPart(referential.id);
-    final safeSyncId = _safeIdPart(serverSyncId.isEmpty ? 'remote' : serverSyncId);
+    final safeSyncId = _safeIdPart(
+      serverSyncId.isEmpty ? 'remote' : serverSyncId,
+    );
     final safeCampaignId = _safeIdPart(sourceCampaign.id);
-    final safeTimestamp = importedAt.toIso8601String().replaceAll(RegExp(r'[^0-9]'), '');
-    final shortSyncId = serverSyncId.length > 12 ? serverSyncId.substring(0, 12) : serverSyncId;
-    final importDescription = 'Importée depuis le snapshot serveur ${serverSyncId.isEmpty ? 'inconnu' : serverSyncId}'
+    final safeTimestamp = importedAt.toIso8601String().replaceAll(
+          RegExp(r'[^0-9]'),
+          '',
+        );
+    final shortSyncId =
+        serverSyncId.length > 12 ? serverSyncId.substring(0, 12) : serverSyncId;
+    final importDescription =
+        'Importée depuis le snapshot serveur ${serverSyncId.isEmpty ? 'inconnu' : serverSyncId}'
         '${sourceDeviceId.isEmpty ? '' : ' émis par $sourceDeviceId'}.';
 
     return LocalCampaign(
       id: 'remote-import-$safeReferentialId-$safeSyncId-$safeCampaignId-$safeTimestamp-$index',
       referentialId: referential.id,
-      name: '${sourceCampaign.name} — serveur ${shortSyncId.isEmpty ? safeTimestamp : shortSyncId}',
+      name:
+          '${sourceCampaign.name} — serveur ${shortSyncId.isEmpty ? safeTimestamp : shortSyncId}',
       description: sourceCampaign.description.trim().isEmpty
           ? importDescription
           : '${sourceCampaign.description.trim()}\n\n$importDescription',
@@ -224,7 +249,9 @@ class SyncPullImportService {
     final answers = <String, CriterionAnswer>{};
     for (final rawAnswer in rawAnswers) {
       if (rawAnswer is! Map) {
-        warnings.add('Une réponse distante a été ignorée car son format est invalide.');
+        warnings.add(
+          'Une réponse distante a été ignorée car son format est invalide.',
+        );
         continue;
       }
       final answerPayload = _asMap(rawAnswer);
@@ -234,14 +261,18 @@ class SyncPullImportService {
         continue;
       }
       if (!activeCriterionIds.contains(criterionId)) {
-        warnings.add('La réponse distante pour $criterionId a été ignorée car le critère n’existe pas dans le référentiel actif.');
+        warnings.add(
+          'La réponse distante pour $criterionId a été ignorée car le critère n’existe pas dans le référentiel actif.',
+        );
         continue;
       }
 
       final answer = _answerFromValue(answerPayload['answer']);
       var justification = _asString(answerPayload['justification']);
       if (answer == IrnAnswer.notAnswered && justification.isNotEmpty) {
-        warnings.add('La justification distante du critère $criterionId a été ignorée car la réponse est N.C.');
+        warnings.add(
+          'La justification distante du critère $criterionId a été ignorée car la réponse est N.C.',
+        );
         justification = '';
       }
       if (answer == IrnAnswer.notAnswered && justification.isEmpty) {
@@ -269,14 +300,18 @@ class SyncPullImportService {
       return const <CriterionAssignment>[];
     }
     if (rawAssignments is! List) {
-      warnings.add('Une liste assignments distante est invalide et a été ignorée.');
+      warnings.add(
+        'Une liste assignments distante est invalide et a été ignorée.',
+      );
       return const <CriterionAssignment>[];
     }
 
     final assignments = <CriterionAssignment>[];
     for (final rawAssignment in rawAssignments) {
       if (rawAssignment is! Map) {
-        warnings.add('Une affectation distante a été ignorée car son format est invalide.');
+        warnings.add(
+          'Une affectation distante a été ignorée car son format est invalide.',
+        );
         continue;
       }
       final payload = _asMap(rawAssignment);
@@ -287,11 +322,15 @@ class SyncPullImportService {
         continue;
       }
       if (!activeCriterionIds.contains(criterionId)) {
-        warnings.add('L’affectation distante du critère $criterionId a été ignorée car le critère est inconnu.');
+        warnings.add(
+          'L’affectation distante du critère $criterionId a été ignorée car le critère est inconnu.',
+        );
         continue;
       }
       if (!userIds.contains(userId)) {
-        warnings.add('L’affectation distante du critère $criterionId vers $userId a été ignorée car l’utilisateur est absent du snapshot.');
+        warnings.add(
+          'L’affectation distante du critère $criterionId vers $userId a été ignorée car l’utilisateur est absent du snapshot.',
+        );
         continue;
       }
       assignments.add(
@@ -323,7 +362,8 @@ class SyncPullImportService {
         campaignId: campaignId,
         type: LocalActivityType.campaignCreated,
         title: 'Campagne importée depuis le serveur',
-        description: 'Snapshot $serverSyncId${sourceDeviceId.isEmpty ? '' : ' depuis $sourceDeviceId'}.',
+        description:
+            'Snapshot $serverSyncId${sourceDeviceId.isEmpty ? '' : ' depuis $sourceDeviceId'}.',
         now: importedAt,
       ),
     ];
@@ -334,7 +374,9 @@ class SyncPullImportService {
       return events;
     }
     if (rawEvents is! List) {
-      warnings.add('Le journal d’activité distant a été ignoré car son format est invalide.');
+      warnings.add(
+        'Le journal d’activité distant a été ignoré car son format est invalide.',
+      );
       return events;
     }
 
@@ -342,12 +384,17 @@ class SyncPullImportService {
     for (final rawEvent in rawEvents) {
       index += 1;
       if (rawEvent is! Map) {
-        warnings.add('Un évènement distant a été ignoré car son format est invalide.');
+        warnings.add(
+          'Un évènement distant a été ignoré car son format est invalide.',
+        );
         continue;
       }
       final sourceEvent = LocalActivityEvent.fromJson(_asMap(rawEvent));
       final createdAt = sourceEvent.createdAt;
-      final safeTimestamp = createdAt.toIso8601String().replaceAll(RegExp(r'[^0-9]'), '');
+      final safeTimestamp = createdAt.toIso8601String().replaceAll(
+            RegExp(r'[^0-9]'),
+            '',
+          );
       events.add(
         LocalActivityEvent(
           id: 'activity-remote-$safeTimestamp-${index.toString().padLeft(3, '0')}',
@@ -368,7 +415,11 @@ class SyncPullImportService {
   }
 
   IrnAnswer _answerFromValue(Object? value) {
-    final raw = value?.toString().trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_') ?? '';
+    final raw = value?.toString().trim().toLowerCase().replaceAll(
+              RegExp(r'[^a-z0-9]+'),
+              '_',
+            ) ??
+        '';
     switch (raw) {
       case 'r':
       case 'resilient':
@@ -416,7 +467,10 @@ class SyncPullImportService {
   }
 
   String _safeIdPart(String value) {
-    final normalized = value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-');
+    final normalized = value.toLowerCase().replaceAll(
+          RegExp(r'[^a-z0-9]+'),
+          '-',
+        );
     final trimmed = normalized.replaceAll(RegExp(r'^-+|-+$'), '');
     return trimmed.isEmpty ? 'unknown' : trimmed;
   }
@@ -438,9 +492,18 @@ class SyncPullImportResult {
   });
 
   int get campaignCount => campaigns.length;
-  int get answerCount => campaigns.fold<int>(0, (total, campaign) => total + campaign.criterionAnswers.length);
-  int get assignmentCount => campaigns.fold<int>(0, (total, campaign) => total + campaign.assignments.length);
-  int get activityEventCount => campaigns.fold<int>(0, (total, campaign) => total + campaign.activityEvents.length);
+  int get answerCount => campaigns.fold<int>(
+        0,
+        (total, campaign) => total + campaign.criterionAnswers.length,
+      );
+  int get assignmentCount => campaigns.fold<int>(
+        0,
+        (total, campaign) => total + campaign.assignments.length,
+      );
+  int get activityEventCount => campaigns.fold<int>(
+        0,
+        (total, campaign) => total + campaign.activityEvents.length,
+      );
 }
 
 class ImportedRemoteCampaign {

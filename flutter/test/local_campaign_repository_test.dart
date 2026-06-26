@@ -40,15 +40,18 @@ void main() {
         ),
       );
 
-      final campaigns =
-          await repository.loadCampaigns(referentialId: 'adri-irn-v1.1');
+      final campaigns = await repository.loadCampaigns(
+        referentialId: 'adri-irn-v1.1',
+      );
 
       expect(campaigns, hasLength(1));
       expect(campaigns.first.id, campaign.id);
       expect(campaigns.first.name, 'Test IRN');
       expect(campaigns.first.information.systemName, 'SI Achat');
-      expect(campaigns.first.information.projectDirectorEmail,
-          'claire.moreau@example.test');
+      expect(
+        campaigns.first.information.projectDirectorEmail,
+        'claire.moreau@example.test',
+      );
       expect(campaigns.first.status, LocalCampaignStatus.draft);
     });
 
@@ -70,8 +73,9 @@ void main() {
       expect(updated!.status, LocalCampaignStatus.validated);
       expect(updated.isReadOnly, isTrue);
 
-      final campaigns =
-          await repository.loadCampaigns(referentialId: 'adri-irn-v1.1');
+      final campaigns = await repository.loadCampaigns(
+        referentialId: 'adri-irn-v1.1',
+      );
       expect(campaigns.single.status, LocalCampaignStatus.validated);
     });
 
@@ -101,11 +105,14 @@ void main() {
       expect(updated!.name, 'Campagne documentée');
       expect(updated.information.systemName, 'SI RH');
 
-      final campaigns =
-          await repository.loadCampaigns(referentialId: 'adri-irn-v1.1');
+      final campaigns = await repository.loadCampaigns(
+        referentialId: 'adri-irn-v1.1',
+      );
       expect(campaigns.single.description, 'Description campagne.');
       expect(
-          campaigns.single.information.projectDirectorFullName, 'Denis Petit');
+        campaigns.single.information.projectDirectorFullName,
+        'Denis Petit',
+      );
     });
 
     test('deletes one local campaign', () async {
@@ -121,8 +128,9 @@ void main() {
         campaignId: campaign.id,
       );
 
-      final campaigns =
-          await repository.loadCampaigns(referentialId: 'adri-irn-v1.1');
+      final campaigns = await repository.loadCampaigns(
+        referentialId: 'adri-irn-v1.1',
+      );
       expect(campaigns, isEmpty);
     });
   });

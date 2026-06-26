@@ -29,10 +29,7 @@ class PillarRadarDatum {
 class PillarRadarChart extends StatelessWidget {
   final List<PillarRadarDatum> data;
 
-  const PillarRadarChart({
-    required this.data,
-    super.key,
-  });
+  const PillarRadarChart({required this.data, super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -188,8 +185,10 @@ class _PillarRadarPainter extends CustomPainter {
     double angle,
     String text,
   ) {
-    final labelStyle =
-        textStyle.copyWith(color: textColor, fontWeight: FontWeight.w600);
+    final labelStyle = textStyle.copyWith(
+      color: textColor,
+      fontWeight: FontWeight.w600,
+    );
     final textPainter = TextPainter(
       text: TextSpan(text: text, style: labelStyle),
       textAlign: TextAlign.center,
@@ -197,10 +196,14 @@ class _PillarRadarPainter extends CustomPainter {
     )..layout();
 
     final anchor = _point(center, radius, angle);
-    final dx = (anchor.dx - textPainter.width / 2)
-        .clamp(0.0, size.width - textPainter.width);
-    final dy = (anchor.dy - textPainter.height / 2)
-        .clamp(0.0, size.height - textPainter.height);
+    final dx = (anchor.dx - textPainter.width / 2).clamp(
+      0.0,
+      size.width - textPainter.width,
+    );
+    final dy = (anchor.dy - textPainter.height / 2).clamp(
+      0.0,
+      size.height - textPainter.height,
+    );
     textPainter.paint(canvas, Offset(dx, dy));
   }
 
@@ -214,8 +217,10 @@ class _PillarRadarPainter extends CustomPainter {
 
     textPainter.paint(
       canvas,
-      Offset(center.dx - textPainter.width / 2,
-          center.dy - textPainter.height / 2),
+      Offset(
+        center.dx - textPainter.width / 2,
+        center.dy - textPainter.height / 2,
+      ),
     );
   }
 

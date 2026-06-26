@@ -56,7 +56,8 @@ class AssessmentQualityService {
   }
 
   List<CampaignInformationIssue> _missingCampaignInformation(
-      LocalCampaign? campaign) {
+    LocalCampaign? campaign,
+  ) {
     if (campaign == null) {
       return const <CampaignInformationIssue>[];
     }
@@ -144,18 +145,12 @@ class AssessmentQualityIssue {
   final IrnCriterion criterion;
   final IrnAnswer answer;
 
-  const AssessmentQualityIssue({
-    required this.criterion,
-    required this.answer,
-  });
+  const AssessmentQualityIssue({required this.criterion, required this.answer});
 }
 
 class CampaignInformationIssue {
   final String field;
   final String label;
 
-  const CampaignInformationIssue({
-    required this.field,
-    required this.label,
-  });
+  const CampaignInformationIssue({required this.field, required this.label});
 }

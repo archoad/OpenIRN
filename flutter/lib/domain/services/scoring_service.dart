@@ -14,8 +14,9 @@ class ScoringService {
 
   double? internalAverage(List<Evaluation> evaluations) {
     final values = evaluations
-        .where((e) =>
-            e.internalMaturityLevel != InternalMaturityLevel.notConcerned)
+        .where(
+          (e) => e.internalMaturityLevel != InternalMaturityLevel.notConcerned,
+        )
         .map((e) => e.internalScore)
         .whereType<double>()
         .toList();

@@ -32,7 +32,9 @@ class LocalUserRepository {
         if (rawUser is! Map) {
           continue;
         }
-        final user = AppUser.fromJson(rawUser.map((key, value) => MapEntry(key.toString(), value)));
+        final user = AppUser.fromJson(
+          rawUser.map((key, value) => MapEntry(key.toString(), value)),
+        );
         if (user.id.trim().isEmpty) {
           continue;
         }
@@ -46,7 +48,9 @@ class LocalUserRepository {
         if (b.isDefaultAdministrator) {
           return 1;
         }
-        return a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase());
+        return a.displayName.toLowerCase().compareTo(
+              b.displayName.toLowerCase(),
+            );
       });
       return users;
     } on FormatException {
@@ -56,7 +60,9 @@ class LocalUserRepository {
 
   Future<List<AppUser>> ensureDefaultUsers() async {
     final users = await loadUsers();
-    final hasDefaultAdmin = users.any((user) => user.id == AppUser.defaultAdministratorId);
+    final hasDefaultAdmin = users.any(
+      (user) => user.id == AppUser.defaultAdministratorId,
+    );
     if (hasDefaultAdmin) {
       return users;
     }
@@ -76,7 +82,9 @@ class LocalUserRepository {
     final normalizedEmail = email.trim().toLowerCase();
     final existing = users.where((user) => user.email == normalizedEmail);
     if (existing.isNotEmpty) {
-      throw const LocalUserRepositoryException('Un utilisateur avec cet email existe déjà.');
+      throw const LocalUserRepositoryException(
+        'Un utilisateur avec cet email existe déjà.',
+      );
     }
 
     final user = AppUser.create(
@@ -113,10 +121,14 @@ class LocalUserRepository {
 
   Future<void> deleteUser({required String userId}) async {
     if (userId == AppUser.defaultAdministratorId) {
-      throw const LocalUserRepositoryException('L’administrateur local ne peut pas être supprimé.');
+      throw const LocalUserRepositoryException(
+        'L’administrateur local ne peut pas être supprimé.',
+      );
     }
     final users = await ensureDefaultUsers();
-    await saveUsers(users.where((user) => user.id != userId).toList(growable: false));
+    await saveUsers(
+      users.where((user) => user.id != userId).toList(growable: false),
+    );
   }
 
   Future<void> saveUsers(List<AppUser> users) async {
@@ -124,9 +136,7 @@ class LocalUserRepository {
     final payload = <String, dynamic>{
       'schemaVersion': _schemaVersion,
       'updatedAt': DateTime.now().toUtc().toIso8601String(),
-      'users': <Map<String, dynamic>>[
-        for (final user in users) user.toJson(),
-      ],
+      'users': <Map<String, dynamic>>[for (final user in users) user.toJson()],
     };
     await preferences.setString(_storageKey, jsonEncode(payload));
   }

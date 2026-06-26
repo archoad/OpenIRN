@@ -6,64 +6,67 @@ import 'package:openirn/domain/services/assessment_quality_service.dart';
 
 void main() {
   test(
-      'buildReport détecte les critères non cotés et les justifications manquantes',
-      () {
-    final referential = _sampleReferential();
-    final report = const AssessmentQualityService().buildReport(
-      referential: referential,
-      criterionAnswers: const <String, CriterionAnswer>{
-        'RES-1.1': CriterionAnswer(
-          criterionId: 'RES-1.1',
-          answer: IrnAnswer.resilient,
-          justification: 'Gouvernance documentée.',
-        ),
-        'RES-1.2': CriterionAnswer(
-          criterionId: 'RES-1.2',
-          answer: IrnAnswer.nonResilient,
-        ),
-      },
-    );
+    'buildReport détecte les critères non cotés et les justifications manquantes',
+    () {
+      final referential = _sampleReferential();
+      final report = const AssessmentQualityService().buildReport(
+        referential: referential,
+        criterionAnswers: const <String, CriterionAnswer>{
+          'RES-1.1': CriterionAnswer(
+            criterionId: 'RES-1.1',
+            answer: IrnAnswer.resilient,
+            justification: 'Gouvernance documentée.',
+          ),
+          'RES-1.2': CriterionAnswer(
+            criterionId: 'RES-1.2',
+            answer: IrnAnswer.nonResilient,
+          ),
+        },
+      );
 
-    expect(report.totalCriteria, 3);
-    expect(report.answeredCriteria, 2);
-    expect(report.justifiedCriteria, 1);
-    expect(report.missingAnswerCount, 1);
-    expect(report.missingAnswers.single.id, 'RES-2.1');
-    expect(report.missingJustificationCount, 1);
-    expect(report.missingJustifications.single.criterion.id, 'RES-1.2');
-    expect(report.isReadyForReview, isFalse);
-  });
+      expect(report.totalCriteria, 3);
+      expect(report.answeredCriteria, 2);
+      expect(report.justifiedCriteria, 1);
+      expect(report.missingAnswerCount, 1);
+      expect(report.missingAnswers.single.id, 'RES-2.1');
+      expect(report.missingJustificationCount, 1);
+      expect(report.missingJustifications.single.criterion.id, 'RES-1.2');
+      expect(report.isReadyForReview, isFalse);
+    },
+  );
 
-  test('buildReport considère la campagne prête si tout est coté et justifié',
-      () {
-    final referential = _sampleReferential();
-    final report = const AssessmentQualityService().buildReport(
-      referential: referential,
-      criterionAnswers: const <String, CriterionAnswer>{
-        'RES-1.1': CriterionAnswer(
-          criterionId: 'RES-1.1',
-          answer: IrnAnswer.resilient,
-          justification: 'Documenté.',
-        ),
-        'RES-1.2': CriterionAnswer(
-          criterionId: 'RES-1.2',
-          answer: IrnAnswer.nonResilient,
-          justification: 'Plan de remédiation à ouvrir.',
-        ),
-        'RES-2.1': CriterionAnswer(
-          criterionId: 'RES-2.1',
-          answer: IrnAnswer.resilient,
-          justification: 'Preuve disponible.',
-        ),
-      },
-    );
+  test(
+    'buildReport considère la campagne prête si tout est coté et justifié',
+    () {
+      final referential = _sampleReferential();
+      final report = const AssessmentQualityService().buildReport(
+        referential: referential,
+        criterionAnswers: const <String, CriterionAnswer>{
+          'RES-1.1': CriterionAnswer(
+            criterionId: 'RES-1.1',
+            answer: IrnAnswer.resilient,
+            justification: 'Documenté.',
+          ),
+          'RES-1.2': CriterionAnswer(
+            criterionId: 'RES-1.2',
+            answer: IrnAnswer.nonResilient,
+            justification: 'Plan de remédiation à ouvrir.',
+          ),
+          'RES-2.1': CriterionAnswer(
+            criterionId: 'RES-2.1',
+            answer: IrnAnswer.resilient,
+            justification: 'Preuve disponible.',
+          ),
+        },
+      );
 
-    expect(report.missingAnswerCount, 0);
-    expect(report.missingJustificationCount, 0);
-    expect(report.answerCompletionRate, 1);
-    expect(report.justificationCompletionRate, 1);
-    expect(report.isReadyForReview, isTrue);
-  });
+      expect(report.missingAnswerCount, 0);
+      expect(report.missingJustificationCount, 0);
+      expect(report.answerCompletionRate, 1);
+      expect(report.justificationCompletionRate, 1);
+      expect(report.isReadyForReview, isTrue);
+    },
+  );
 
   test('buildReport ignore les critères inactifs', () {
     final referential = _sampleReferential(includeInactiveCriterion: true);
@@ -93,37 +96,38 @@ void main() {
   });
 
   test(
-      'buildReport contrôle aussi les informations de campagne quand une campagne est fournie',
-      () {
-    final referential = _sampleReferential();
-    final report = const AssessmentQualityService().buildReport(
-      referential: referential,
-      campaign: LocalCampaign.defaultForReferential(
-        referentialId: 'adri-irn-v1.1',
-        referentialVersion: 'v1.1',
-      ),
-      criterionAnswers: const <String, CriterionAnswer>{
-        'RES-1.1': CriterionAnswer(
-          criterionId: 'RES-1.1',
-          answer: IrnAnswer.resilient,
-          justification: 'Documenté.',
+    'buildReport contrôle aussi les informations de campagne quand une campagne est fournie',
+    () {
+      final referential = _sampleReferential();
+      final report = const AssessmentQualityService().buildReport(
+        referential: referential,
+        campaign: LocalCampaign.defaultForReferential(
+          referentialId: 'adri-irn-v1.1',
+          referentialVersion: 'v1.1',
         ),
-        'RES-1.2': CriterionAnswer(
-          criterionId: 'RES-1.2',
-          answer: IrnAnswer.nonResilient,
-          justification: 'Documenté.',
-        ),
-        'RES-2.1': CriterionAnswer(
-          criterionId: 'RES-2.1',
-          answer: IrnAnswer.resilient,
-          justification: 'Documenté.',
-        ),
-      },
-    );
+        criterionAnswers: const <String, CriterionAnswer>{
+          'RES-1.1': CriterionAnswer(
+            criterionId: 'RES-1.1',
+            answer: IrnAnswer.resilient,
+            justification: 'Documenté.',
+          ),
+          'RES-1.2': CriterionAnswer(
+            criterionId: 'RES-1.2',
+            answer: IrnAnswer.nonResilient,
+            justification: 'Documenté.',
+          ),
+          'RES-2.1': CriterionAnswer(
+            criterionId: 'RES-2.1',
+            answer: IrnAnswer.resilient,
+            justification: 'Documenté.',
+          ),
+        },
+      );
 
-    expect(report.missingCampaignInformationCount, 5);
-    expect(report.isReadyForReview, isFalse);
-  });
+      expect(report.missingCampaignInformationCount, 5);
+      expect(report.isReadyForReview, isFalse);
+    },
+  );
 
   test('buildReport accepte une campagne complète', () {
     final referential = _sampleReferential();

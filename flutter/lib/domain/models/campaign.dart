@@ -4,7 +4,7 @@ enum CampaignStatus {
   assessment,
   review,
   validated,
-  archived
+  archived,
 }
 
 enum TargetType { organization, businessFunction, criticalSystem, asset }

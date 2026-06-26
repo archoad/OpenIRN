@@ -102,7 +102,9 @@ class _SyncLogScreenState extends State<SyncLogScreen> {
             return Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),
-                child: Text('Impossible de charger le journal : ${snapshot.error}'),
+                child: Text(
+                  'Impossible de charger le journal : ${snapshot.error}',
+                ),
               ),
             );
           }
@@ -143,9 +145,16 @@ class _EmptySyncLog extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.sync_alt_outlined, size: 52, color: Theme.of(context).colorScheme.outline),
+            Icon(
+              Icons.sync_alt_outlined,
+              size: 52,
+              color: Theme.of(context).colorScheme.outline,
+            ),
             const SizedBox(height: 12),
-            Text('Aucun évènement de synchronisation', style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              'Aucun évènement de synchronisation',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 6),
             const Text(
               'Les tests de connexion, push, pull et imports de snapshots apparaîtront ici.',
@@ -207,8 +216,12 @@ class _SyncLogEventCard extends StatelessWidget {
     return Card(
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor: success ? colorScheme.primaryContainer : colorScheme.errorContainer,
-          foregroundColor: success ? colorScheme.onPrimaryContainer : colorScheme.onErrorContainer,
+          backgroundColor: success
+              ? colorScheme.primaryContainer
+              : colorScheme.errorContainer,
+          foregroundColor: success
+              ? colorScheme.onPrimaryContainer
+              : colorScheme.onErrorContainer,
           child: Icon(_iconFor(event.type)),
         ),
         title: Text(event.title.isEmpty ? event.type.label : event.title),
@@ -224,13 +237,26 @@ class _SyncLogEventCard extends StatelessWidget {
                 runSpacing: 8,
                 children: [
                   Chip(label: Text(event.type.label)),
-                  Chip(label: Text('Tenant : ${event.tenantId.isEmpty ? '—' : event.tenantId}')),
-                  Chip(label: Text('Appareil : ${event.deviceId.isEmpty ? '—' : event.deviceId}')),
-                  if (event.statusCode != null) Chip(label: Text('HTTP ${event.statusCode}')),
-                  if (event.serverSyncId != null) Chip(label: Text('serverSyncId : ${event.serverSyncId}')),
-                  if (event.sourceDeviceId != null) Chip(label: Text('Source : ${event.sourceDeviceId}')),
-                  if (event.campaignCount != null) Chip(label: Text('${event.campaignCount} campagne(s)')),
-                  if (event.snapshotCount != null) Chip(label: Text('${event.snapshotCount} snapshot(s)')),
+                  Chip(
+                    label: Text(
+                      'Tenant : ${event.tenantId.isEmpty ? '—' : event.tenantId}',
+                    ),
+                  ),
+                  Chip(
+                    label: Text(
+                      'Appareil : ${event.deviceId.isEmpty ? '—' : event.deviceId}',
+                    ),
+                  ),
+                  if (event.statusCode != null)
+                    Chip(label: Text('HTTP ${event.statusCode}')),
+                  if (event.serverSyncId != null)
+                    Chip(label: Text('serverSyncId : ${event.serverSyncId}')),
+                  if (event.sourceDeviceId != null)
+                    Chip(label: Text('Source : ${event.sourceDeviceId}')),
+                  if (event.campaignCount != null)
+                    Chip(label: Text('${event.campaignCount} campagne(s)')),
+                  if (event.snapshotCount != null)
+                    Chip(label: Text('${event.snapshotCount} snapshot(s)')),
                 ],
               ),
             ],
@@ -263,8 +289,10 @@ class _SyncLogEventCard extends StatelessWidget {
 
   String _formatDate(DateTime value) {
     final local = value.toLocal();
-    final date = '${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')}/${local.year}';
-    final time = '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+    final date =
+        '${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')}/${local.year}';
+    final time =
+        '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
     return '$date\n$time';
   }
 }

@@ -5,11 +5,7 @@ import 'dart:io';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/sync_configuration.dart';
 
-enum OpenIrnApiReachability {
-  ready,
-  reachable,
-  unreachable,
-}
+enum OpenIrnApiReachability { ready, reachable, unreachable }
 
 class OpenIrnApiConnectionResult {
   final OpenIrnApiReachability reachability;
@@ -32,11 +28,7 @@ class OpenIrnApiConnectionResult {
   bool get isReady => reachability == OpenIrnApiReachability.ready;
 }
 
-enum OpenIrnApiPushStatus {
-  accepted,
-  rejected,
-  unreachable,
-}
+enum OpenIrnApiPushStatus { accepted, rejected, unreachable }
 
 class OpenIrnApiPushResult {
   final OpenIrnApiPushStatus status;
@@ -58,12 +50,7 @@ class OpenIrnApiPushResult {
   bool get isAccepted => status == OpenIrnApiPushStatus.accepted;
 }
 
-enum OpenIrnApiPullStatus {
-  available,
-  empty,
-  rejected,
-  unreachable,
-}
+enum OpenIrnApiPullStatus { available, empty, rejected, unreachable }
 
 class OpenIrnApiPullSnapshot {
   final String serverSyncId;
@@ -90,7 +77,9 @@ class OpenIrnApiPullSnapshot {
       serverSyncId: json['serverSyncId']?.toString() ?? '',
       tenantId: json['tenantId']?.toString() ?? '',
       deviceId: json['deviceId']?.toString() ?? '',
-      receivedAt: DateTime.tryParse(json['receivedAt']?.toString() ?? '')?.toUtc(),
+      receivedAt: DateTime.tryParse(
+        json['receivedAt']?.toString() ?? '',
+      )?.toUtc(),
       payloadSha256: json['payloadSha256']?.toString() ?? '',
       campaignCount: campaignCountValue is num ? campaignCountValue.toInt() : 0,
       payload: _jsonObject(json['payload']),
@@ -108,12 +97,7 @@ class OpenIrnApiPullSnapshot {
   }
 }
 
-
-enum OpenIrnApiStatusState {
-  available,
-  rejected,
-  unreachable,
-}
+enum OpenIrnApiStatusState { available, rejected, unreachable }
 
 class OpenIrnApiStatusSnapshot {
   final String serverSyncId;
@@ -138,7 +122,9 @@ class OpenIrnApiStatusSnapshot {
       serverSyncId: json['serverSyncId']?.toString() ?? '',
       tenantId: json['tenantId']?.toString() ?? '',
       deviceId: json['deviceId']?.toString() ?? '',
-      receivedAt: DateTime.tryParse(json['receivedAt']?.toString() ?? '')?.toUtc(),
+      receivedAt: DateTime.tryParse(
+        json['receivedAt']?.toString() ?? '',
+      )?.toUtc(),
       payloadSha256: json['payloadSha256']?.toString() ?? '',
       campaignCount: campaignCountValue is num ? campaignCountValue.toInt() : 0,
     );
@@ -177,7 +163,6 @@ class OpenIrnApiStatusResult {
   bool get isAvailable => status == OpenIrnApiStatusState.available;
 }
 
-
 class OpenIrnSyncEvent {
   final String type;
   final String serverSyncId;
@@ -204,27 +189,36 @@ class OpenIrnSyncEvent {
     final snapshot = rawSnapshot is Map
         ? Map<String, dynamic>.from(rawSnapshot)
         : <String, dynamic>{};
-    final campaignCountValue = snapshot['campaignCount'] ?? json['campaignCount'];
+    final campaignCountValue =
+        snapshot['campaignCount'] ?? json['campaignCount'];
     return OpenIrnSyncEvent(
       type: json['type']?.toString() ?? 'openirn.syncEvent',
-      serverSyncId: snapshot['serverSyncId']?.toString() ?? json['serverSyncId']?.toString() ?? '',
-      tenantId: snapshot['tenantId']?.toString() ?? json['tenantId']?.toString() ?? '',
-      deviceId: snapshot['deviceId']?.toString() ?? json['deviceId']?.toString() ?? '',
-      receivedAt: DateTime.tryParse(snapshot['receivedAt']?.toString() ?? json['receivedAt']?.toString() ?? '')?.toUtc(),
-      payloadSha256: snapshot['payloadSha256']?.toString() ?? json['payloadSha256']?.toString() ?? '',
-      campaignCount: campaignCountValue is num ? campaignCountValue.toInt() : int.tryParse(campaignCountValue?.toString() ?? '') ?? 0,
+      serverSyncId: snapshot['serverSyncId']?.toString() ??
+          json['serverSyncId']?.toString() ??
+          '',
+      tenantId: snapshot['tenantId']?.toString() ??
+          json['tenantId']?.toString() ??
+          '',
+      deviceId: snapshot['deviceId']?.toString() ??
+          json['deviceId']?.toString() ??
+          '',
+      receivedAt: DateTime.tryParse(
+        snapshot['receivedAt']?.toString() ??
+            json['receivedAt']?.toString() ??
+            '',
+      )?.toUtc(),
+      payloadSha256: snapshot['payloadSha256']?.toString() ??
+          json['payloadSha256']?.toString() ??
+          '',
+      campaignCount: campaignCountValue is num
+          ? campaignCountValue.toInt()
+          : int.tryParse(campaignCountValue?.toString() ?? '') ?? 0,
       raw: json,
     );
   }
 }
 
-
-enum OpenIrnApiUsersStatus {
-  available,
-  empty,
-  rejected,
-  unreachable,
-}
+enum OpenIrnApiUsersStatus { available, empty, rejected, unreachable }
 
 class OpenIrnApiUsersResult {
   final OpenIrnApiUsersStatus status;
@@ -251,11 +245,7 @@ class OpenIrnApiUsersResult {
   bool get isAvailable => status == OpenIrnApiUsersStatus.available;
 }
 
-enum OpenIrnApiAuthStatus {
-  accepted,
-  rejected,
-  unreachable,
-}
+enum OpenIrnApiAuthStatus { accepted, rejected, unreachable }
 
 class OpenIrnApiAuthResult {
   final OpenIrnApiAuthStatus status;
@@ -285,13 +275,7 @@ class OpenIrnApiAuthResult {
   bool get isAccepted => status == OpenIrnApiAuthStatus.accepted;
 }
 
-
-
-enum OpenIrnApiPinUpdateStatus {
-  accepted,
-  rejected,
-  unreachable,
-}
+enum OpenIrnApiPinUpdateStatus { accepted, rejected, unreachable }
 
 class OpenIrnApiPinUpdateResult {
   final OpenIrnApiPinUpdateStatus status;
@@ -372,7 +356,8 @@ class OpenIrnApiClient {
           url: healthUri.toString(),
           statusCode: healthStatus,
           title: 'Serveur joignable',
-          message: 'Le serveur répond, mais le endpoint /health est protégé. C’est acceptable pour cette étape.',
+          message:
+              'Le serveur répond, mais le endpoint /health est protégé. C’est acceptable pour cette étape.',
           responseBody: decodedBody,
         );
       }
@@ -385,7 +370,8 @@ class OpenIrnApiClient {
             url: healthUri.toString(),
             statusCode: healthStatus,
             title: 'Serveur joignable, endpoint OpenIRN absent',
-            message: 'Le serveur répond, mais /health n’existe pas encore. Il faudra l’ajouter côté API serveur.',
+            message:
+                'Le serveur répond, mais /health n’existe pas encore. Il faudra l’ajouter côté API serveur.',
             responseBody: decodedBody,
           );
         }
@@ -396,7 +382,8 @@ class OpenIrnApiClient {
         url: healthUri.toString(),
         statusCode: healthStatus,
         title: 'Serveur joignable',
-        message: 'Le serveur a répondu avec le statut HTTP $healthStatus. Le endpoint /health devra être normalisé côté API.',
+        message:
+            'Le serveur a répondu avec le statut HTTP $healthStatus. Le endpoint /health devra être normalisé côté API.',
         responseBody: decodedBody,
       );
     } on TimeoutException {
@@ -453,11 +440,7 @@ class OpenIrnApiClient {
     final pushUri = Uri.parse('$normalizedBaseUrl/sync/push');
 
     try {
-      final response = await _postJson(
-        pushUri,
-        payload,
-        bearerToken: apiToken,
-      );
+      final response = await _postJson(pushUri, payload, bearerToken: apiToken);
       final decodedBody = _decodeJsonObject(response.body);
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
@@ -480,7 +463,8 @@ class OpenIrnApiClient {
           url: pushUri.toString(),
           statusCode: response.statusCode,
           title: 'Authentification refusée',
-          message: 'Le serveur a refusé le token API. Vérifie le token configuré dans OpenIRN et côté serveur.',
+          message:
+              'Le serveur a refusé le token API. Vérifie le token configuré dans OpenIRN et côté serveur.',
           responseBody: decodedBody,
         );
       }
@@ -490,7 +474,8 @@ class OpenIrnApiClient {
         url: pushUri.toString(),
         statusCode: response.statusCode,
         title: 'Synchronisation refusée',
-        message: 'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        message:
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
         responseBody: decodedBody,
       );
     } on TimeoutException {
@@ -546,19 +531,20 @@ class OpenIrnApiClient {
     );
     final statusUri = Uri.parse('$normalizedBaseUrl/sync/status').replace(
       queryParameters: <String, String>{
-        'tenantId': tenantId.trim().isEmpty ? SyncConfiguration.defaultTenantId : tenantId.trim(),
+        'tenantId': tenantId.trim().isEmpty
+            ? SyncConfiguration.defaultTenantId
+            : tenantId.trim(),
       },
     );
 
     try {
-      final response = await _get(
-        statusUri,
-        bearerToken: apiToken,
-      );
+      final response = await _get(statusUri, bearerToken: apiToken);
       final decodedBody = _decodeJsonObject(response.body);
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
-        final latestSnapshot = OpenIrnApiPullSnapshot._jsonObject(decodedBody?['latestSnapshot']);
+        final latestSnapshot = OpenIrnApiPullSnapshot._jsonObject(
+          decodedBody?['latestSnapshot'],
+        );
         final snapshotCount = _intFromJson(decodedBody?['snapshotCount']);
         final deviceCount = _intFromJson(decodedBody?['deviceCount']);
         final campaignCount = _intFromJson(decodedBody?['campaignCount']);
@@ -573,11 +559,15 @@ class OpenIrnApiClient {
               : 'Le serveur contient $snapshotCount snapshot(s) pour ce tenant.',
           responseBody: decodedBody,
           tenantId: tenant,
-          serverTime: DateTime.tryParse(decodedBody?['serverTime']?.toString() ?? '')?.toUtc(),
+          serverTime: DateTime.tryParse(
+            decodedBody?['serverTime']?.toString() ?? '',
+          )?.toUtc(),
           snapshotCount: snapshotCount,
           deviceCount: deviceCount,
           campaignCount: campaignCount,
-          latestSnapshot: latestSnapshot == null ? null : OpenIrnApiStatusSnapshot.fromJson(latestSnapshot),
+          latestSnapshot: latestSnapshot == null
+              ? null
+              : OpenIrnApiStatusSnapshot.fromJson(latestSnapshot),
         );
       }
 
@@ -587,7 +577,8 @@ class OpenIrnApiClient {
           url: statusUri.toString(),
           statusCode: response.statusCode,
           title: 'Authentification refusée',
-          message: 'Le serveur a refusé le token API. Vérifie le token configuré dans OpenIRN et côté serveur.',
+          message:
+              'Le serveur a refusé le token API. Vérifie le token configuré dans OpenIRN et côté serveur.',
           responseBody: decodedBody,
           tenantId: tenantId,
           snapshotCount: 0,
@@ -601,7 +592,8 @@ class OpenIrnApiClient {
         url: statusUri.toString(),
         statusCode: response.statusCode,
         title: 'Statut serveur refusé',
-        message: 'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        message:
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
         responseBody: decodedBody,
         tenantId: tenantId,
         snapshotCount: 0,
@@ -683,16 +675,15 @@ class OpenIrnApiClient {
     final safeLimit = limit.clamp(1, 50);
     final pullUri = Uri.parse('$normalizedBaseUrl/sync/pull').replace(
       queryParameters: <String, String>{
-        'tenantId': tenantId.trim().isEmpty ? SyncConfiguration.defaultTenantId : tenantId.trim(),
+        'tenantId': tenantId.trim().isEmpty
+            ? SyncConfiguration.defaultTenantId
+            : tenantId.trim(),
         'limit': safeLimit.toString(),
       },
     );
 
     try {
-      final response = await _get(
-        pullUri,
-        bearerToken: apiToken,
-      );
+      final response = await _get(pullUri, bearerToken: apiToken);
       final decodedBody = _decodeJsonObject(response.body);
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
@@ -700,7 +691,11 @@ class OpenIrnApiClient {
         final snapshots = rawSnapshots is List
             ? rawSnapshots
                 .whereType<Map>()
-                .map((item) => OpenIrnApiPullSnapshot.fromJson(Map<String, dynamic>.from(item)))
+                .map(
+                  (item) => OpenIrnApiPullSnapshot.fromJson(
+                    Map<String, dynamic>.from(item),
+                  ),
+                )
                 .toList(growable: false)
             : const <OpenIrnApiPullSnapshot>[];
         if (snapshots.isEmpty) {
@@ -709,7 +704,8 @@ class OpenIrnApiClient {
             url: pullUri.toString(),
             statusCode: response.statusCode,
             title: 'Aucun snapshot distant',
-            message: 'Le serveur est joignable mais ne contient encore aucun snapshot pour ce tenant.',
+            message:
+                'Le serveur est joignable mais ne contient encore aucun snapshot pour ce tenant.',
             responseBody: decodedBody,
             snapshots: snapshots,
           );
@@ -719,7 +715,8 @@ class OpenIrnApiClient {
           url: pullUri.toString(),
           statusCode: response.statusCode,
           title: 'Snapshots distants récupérés',
-          message: '${snapshots.length} snapshot(s) disponible(s) côté serveur.',
+          message:
+              '${snapshots.length} snapshot(s) disponible(s) côté serveur.',
           responseBody: decodedBody,
           snapshots: snapshots,
         );
@@ -731,7 +728,8 @@ class OpenIrnApiClient {
           url: pullUri.toString(),
           statusCode: response.statusCode,
           title: 'Authentification refusée',
-          message: 'Le serveur a refusé le token API. Vérifie le token configuré dans OpenIRN et côté serveur.',
+          message:
+              'Le serveur a refusé le token API. Vérifie le token configuré dans OpenIRN et côté serveur.',
           responseBody: decodedBody,
           snapshots: const <OpenIrnApiPullSnapshot>[],
         );
@@ -742,7 +740,8 @@ class OpenIrnApiClient {
         url: pullUri.toString(),
         statusCode: response.statusCode,
         title: 'Récupération refusée',
-        message: 'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        message:
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
         responseBody: decodedBody,
         snapshots: const <OpenIrnApiPullSnapshot>[],
       );
@@ -802,18 +801,15 @@ class OpenIrnApiClient {
     final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
       baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
     );
-    final safeTenantId = tenantId.trim().isEmpty ? SyncConfiguration.defaultTenantId : tenantId.trim();
-    final usersUri = Uri.parse('$normalizedBaseUrl/users').replace(
-      queryParameters: <String, String>{
-        'tenantId': safeTenantId,
-      },
-    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final usersUri = Uri.parse(
+      '$normalizedBaseUrl/users',
+    ).replace(queryParameters: <String, String>{'tenantId': safeTenantId});
 
     try {
-      final response = await _get(
-        usersUri,
-        bearerToken: apiToken,
-      );
+      final response = await _get(usersUri, bearerToken: apiToken);
       final decodedBody = _decodeJsonObject(response.body);
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
@@ -821,7 +817,9 @@ class OpenIrnApiClient {
         final users = rawUsers is List
             ? rawUsers
                 .whereType<Map>()
-                .map((item) => AppUser.fromJson(Map<String, dynamic>.from(item)))
+                .map(
+                  (item) => AppUser.fromJson(Map<String, dynamic>.from(item)),
+                )
                 .where((user) => user.id.trim().isNotEmpty)
                 .toList(growable: false)
             : const <AppUser>[];
@@ -831,7 +829,8 @@ class OpenIrnApiClient {
             url: usersUri.toString(),
             statusCode: response.statusCode,
             title: 'Aucun utilisateur central',
-            message: 'Le serveur est joignable, mais la base utilisateurs centrale est vide pour ce tenant.',
+            message:
+                'Le serveur est joignable, mais la base utilisateurs centrale est vide pour ce tenant.',
             tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
             users: users,
             responseBody: decodedBody,
@@ -842,7 +841,8 @@ class OpenIrnApiClient {
           url: usersUri.toString(),
           statusCode: response.statusCode,
           title: 'Utilisateurs centraux récupérés',
-          message: '${users.length} utilisateur(s) disponible(s) dans la base centrale.',
+          message:
+              '${users.length} utilisateur(s) disponible(s) dans la base centrale.',
           tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
           users: users,
           responseBody: decodedBody,
@@ -855,7 +855,8 @@ class OpenIrnApiClient {
           url: usersUri.toString(),
           statusCode: response.statusCode,
           title: 'Authentification refusée',
-          message: 'Le serveur a refusé le token API lors du chargement de la base utilisateurs centrale.',
+          message:
+              'Le serveur a refusé le token API lors du chargement de la base utilisateurs centrale.',
           tenantId: safeTenantId,
           users: const <AppUser>[],
           responseBody: decodedBody,
@@ -867,7 +868,8 @@ class OpenIrnApiClient {
         url: usersUri.toString(),
         statusCode: response.statusCode,
         title: 'Base utilisateurs refusée',
-        message: 'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        message:
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
         tenantId: safeTenantId,
         users: const <AppUser>[],
         responseBody: decodedBody,
@@ -935,25 +937,28 @@ class OpenIrnApiClient {
     final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
       baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
     );
-    final safeTenantId = tenantId.trim().isEmpty ? SyncConfiguration.defaultTenantId : tenantId.trim();
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
     final safeUserId = userId.trim();
     final authUri = Uri.parse('$normalizedBaseUrl/auth/verify');
 
     try {
       final response = await _postJson(
-        authUri,
-        <String, dynamic>{
-          'tenantId': safeTenantId,
-          'userId': safeUserId,
-          'pin': pin,
-        },
-        bearerToken: apiToken,
-      );
+          authUri,
+          <String, dynamic>{
+            'tenantId': safeTenantId,
+            'userId': safeUserId,
+            'pin': pin,
+          },
+          bearerToken: apiToken);
       final decodedBody = _decodeJsonObject(response.body);
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
         final rawUser = decodedBody?['user'];
-        final user = rawUser is Map ? AppUser.fromJson(Map<String, dynamic>.from(rawUser)) : null;
+        final user = rawUser is Map
+            ? AppUser.fromJson(Map<String, dynamic>.from(rawUser))
+            : null;
         final mustChangePin = decodedBody?['mustChangePin'] == true;
         return OpenIrnApiAuthResult(
           status: OpenIrnApiAuthStatus.accepted,
@@ -977,7 +982,8 @@ class OpenIrnApiClient {
           url: authUri.toString(),
           statusCode: response.statusCode,
           title: 'Authentification refusée',
-          message: decodedBody?['detail']?.toString() ?? 'Le code utilisateur est incorrect ou l’utilisateur est inactif.',
+          message: decodedBody?['detail']?.toString() ??
+              'Le code utilisateur est incorrect ou l’utilisateur est inactif.',
           tenantId: safeTenantId,
           userId: safeUserId,
           mustChangePin: false,
@@ -990,7 +996,8 @@ class OpenIrnApiClient {
         url: authUri.toString(),
         statusCode: response.statusCode,
         title: 'Authentification refusée',
-        message: 'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        message:
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
         tenantId: safeTenantId,
         userId: safeUserId,
         mustChangePin: false,
@@ -1054,8 +1061,6 @@ class OpenIrnApiClient {
     }
   }
 
-
-
   Future<OpenIrnApiPinUpdateResult> updateUserPin({
     String? baseUrl,
     required String tenantId,
@@ -1066,20 +1071,21 @@ class OpenIrnApiClient {
     final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
       baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
     );
-    final safeTenantId = tenantId.trim().isEmpty ? SyncConfiguration.defaultTenantId : tenantId.trim();
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
     final safeUserId = userId.trim();
     final pinUri = Uri.parse('$normalizedBaseUrl/users/pin');
 
     try {
       final response = await _postJson(
-        pinUri,
-        <String, dynamic>{
-          'tenantId': safeTenantId,
-          'userId': safeUserId,
-          'pin': pin,
-        },
-        bearerToken: apiToken,
-      );
+          pinUri,
+          <String, dynamic>{
+            'tenantId': safeTenantId,
+            'userId': safeUserId,
+            'pin': pin,
+          },
+          bearerToken: apiToken);
       final decodedBody = _decodeJsonObject(response.body);
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
@@ -1101,7 +1107,8 @@ class OpenIrnApiClient {
           url: pinUri.toString(),
           statusCode: response.statusCode,
           title: 'Modification refusée',
-          message: decodedBody?['detail']?.toString() ?? 'Le serveur a refusé la modification du code.',
+          message: decodedBody?['detail']?.toString() ??
+              'Le serveur a refusé la modification du code.',
           tenantId: safeTenantId,
           userId: safeUserId,
           responseBody: decodedBody,
@@ -1113,7 +1120,8 @@ class OpenIrnApiClient {
         url: pinUri.toString(),
         statusCode: response.statusCode,
         title: 'Modification refusée',
-        message: 'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        message:
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
         tenantId: safeTenantId,
         userId: safeUserId,
         responseBody: decodedBody,
@@ -1182,15 +1190,17 @@ class OpenIrnApiClient {
       baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
     );
     final queryParameters = <String, String>{
-      'tenantId': tenantId.trim().isEmpty ? SyncConfiguration.defaultTenantId : tenantId.trim(),
+      'tenantId': tenantId.trim().isEmpty
+          ? SyncConfiguration.defaultTenantId
+          : tenantId.trim(),
     };
     final since = sinceServerSyncId?.trim();
     if (since != null && since.isNotEmpty) {
       queryParameters['since'] = since;
     }
-    final eventsUri = Uri.parse('$normalizedBaseUrl/sync/events').replace(
-      queryParameters: queryParameters,
-    );
+    final eventsUri = Uri.parse(
+      '$normalizedBaseUrl/sync/events',
+    ).replace(queryParameters: queryParameters);
 
     while (true) {
       final client = HttpClient();
@@ -1201,7 +1211,10 @@ class OpenIrnApiClient {
         request.headers.set(HttpHeaders.userAgentHeader, 'OpenIRN');
         final trimmedToken = apiToken.trim();
         if (trimmedToken.isNotEmpty) {
-          request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $trimmedToken');
+          request.headers.set(
+            HttpHeaders.authorizationHeader,
+            'Bearer $trimmedToken',
+          );
         }
 
         final response = await request.close().timeout(timeout);
@@ -1210,7 +1223,9 @@ class OpenIrnApiClient {
         }
 
         final dataLines = <String>[];
-        await for (final line in response.transform(utf8.decoder).transform(const LineSplitter())) {
+        await for (final line in response
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())) {
           if (line.trim().isEmpty) {
             final rawData = dataLines.join('\n').trim();
             dataLines.clear();
@@ -1248,7 +1263,9 @@ class OpenIrnApiClient {
     }
   }
 
-  Future<OpenIrnApiConnectionResult> _tryBaseUrl(String normalizedBaseUrl) async {
+  Future<OpenIrnApiConnectionResult> _tryBaseUrl(
+    String normalizedBaseUrl,
+  ) async {
     final baseUri = Uri.parse(normalizedBaseUrl);
     try {
       final response = await _get(baseUri);
@@ -1257,7 +1274,8 @@ class OpenIrnApiClient {
         url: baseUri.toString(),
         statusCode: response.statusCode,
         title: 'Serveur joignable',
-        message: 'Le serveur a répondu sur l’URL API de base avec le statut HTTP ${response.statusCode}.',
+        message:
+            'Le serveur a répondu sur l’URL API de base avec le statut HTTP ${response.statusCode}.',
         responseBody: _decodeJsonObject(response.body),
       );
     } catch (_) {
@@ -1271,10 +1289,7 @@ class OpenIrnApiClient {
     }
   }
 
-  Future<_HttpResponse> _get(
-    Uri uri, {
-    String bearerToken = '',
-  }) async {
+  Future<_HttpResponse> _get(Uri uri, {String bearerToken = ''}) async {
     final client = HttpClient();
     try {
       final request = await client.getUrl(uri).timeout(timeout);
@@ -1282,10 +1297,14 @@ class OpenIrnApiClient {
       request.headers.set(HttpHeaders.userAgentHeader, 'OpenIRN');
       final trimmedToken = bearerToken.trim();
       if (trimmedToken.isNotEmpty) {
-        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $trimmedToken');
+        request.headers.set(
+          HttpHeaders.authorizationHeader,
+          'Bearer $trimmedToken',
+        );
       }
       final response = await request.close().timeout(timeout);
-      final body = await response.transform(utf8.decoder).join().timeout(timeout);
+      final body =
+          await response.transform(utf8.decoder).join().timeout(timeout);
       return _HttpResponse(statusCode: response.statusCode, body: body);
     } finally {
       client.close(force: true);
@@ -1301,15 +1320,22 @@ class OpenIrnApiClient {
     try {
       final request = await client.postUrl(uri).timeout(timeout);
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      request.headers.set(HttpHeaders.contentTypeHeader, 'application/json; charset=utf-8');
+      request.headers.set(
+        HttpHeaders.contentTypeHeader,
+        'application/json; charset=utf-8',
+      );
       request.headers.set(HttpHeaders.userAgentHeader, 'OpenIRN');
       final trimmedToken = bearerToken.trim();
       if (trimmedToken.isNotEmpty) {
-        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $trimmedToken');
+        request.headers.set(
+          HttpHeaders.authorizationHeader,
+          'Bearer $trimmedToken',
+        );
       }
       request.add(utf8.encode(jsonEncode(payload)));
       final response = await request.close().timeout(timeout);
-      final body = await response.transform(utf8.decoder).join().timeout(timeout);
+      final body =
+          await response.transform(utf8.decoder).join().timeout(timeout);
       return _HttpResponse(statusCode: response.statusCode, body: body);
     } finally {
       client.close(force: true);

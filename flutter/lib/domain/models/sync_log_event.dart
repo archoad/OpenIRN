@@ -132,8 +132,13 @@ class SyncLogEvent {
     DateTime? now,
   }) {
     final timestamp = (now ?? DateTime.now()).toUtc();
-    final safeTimestamp = timestamp.toIso8601String().replaceAll(RegExp(r'[^0-9]'), '');
-    final safeTenant = _safeIdPart(tenantId.trim().isEmpty ? 'tenant' : tenantId.trim());
+    final safeTimestamp = timestamp.toIso8601String().replaceAll(
+          RegExp(r'[^0-9]'),
+          '',
+        );
+    final safeTenant = _safeIdPart(
+      tenantId.trim().isEmpty ? 'tenant' : tenantId.trim(),
+    );
     return SyncLogEvent(
       id: 'sync-$safeTimestamp-${type.jsonValue}-$safeTenant',
       type: type,
@@ -163,8 +168,9 @@ class SyncLogEvent {
       statusCode: _intOrNull(json['statusCode']),
       campaignCount: _intOrNull(json['campaignCount']),
       snapshotCount: _intOrNull(json['snapshotCount']),
-      createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '')?.toUtc() ??
-          DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+      createdAt:
+          DateTime.tryParse(json['createdAt']?.toString() ?? '')?.toUtc() ??
+              DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
     );
   }
 

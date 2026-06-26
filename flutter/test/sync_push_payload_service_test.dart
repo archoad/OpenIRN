@@ -75,10 +75,17 @@ void main() {
 
       expect(payload['type'], 'openirn.syncPush');
       expect((payload['sync'] as Map<String, dynamic>)['isConfigured'], isTrue);
-      expect((payload['sync'] as Map<String, dynamic>).containsKey('apiToken'), isFalse);
+      expect(
+        (payload['sync'] as Map<String, dynamic>).containsKey('apiToken'),
+        isFalse,
+      );
       expect((payload['summary'] as Map<String, dynamic>)['campaignCount'], 1);
       expect((payload['summary'] as Map<String, dynamic>)['answerCount'], 1);
-      expect(((payload['campaigns'] as List).first as Map<String, dynamic>)['localSummary'], isA<Map<String, dynamic>>());
+      expect(
+        ((payload['campaigns'] as List).first
+            as Map<String, dynamic>)['localSummary'],
+        isA<Map<String, dynamic>>(),
+      );
     });
   });
 }

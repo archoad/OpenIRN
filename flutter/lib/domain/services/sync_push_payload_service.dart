@@ -19,8 +19,10 @@ class CampaignSyncSnapshot {
     required this.activityEvents,
   });
 
-  int get answeredCount => criterionAnswers.values.where((answer) => answer.answer.isCounted).length;
-  int get justifiedCount => criterionAnswers.values.where((answer) => answer.hasJustification).length;
+  int get answeredCount =>
+      criterionAnswers.values.where((answer) => answer.answer.isCounted).length;
+  int get justifiedCount =>
+      criterionAnswers.values.where((answer) => answer.hasJustification).length;
 }
 
 class SyncPushPayloadService {
@@ -64,9 +66,18 @@ class SyncPushPayloadService {
       'summary': <String, dynamic>{
         'userCount': users.length,
         'campaignCount': campaigns.length,
-        'answerCount': campaigns.fold<int>(0, (total, campaign) => total + campaign.criterionAnswers.length),
-        'assignmentCount': campaigns.fold<int>(0, (total, campaign) => total + campaign.assignments.length),
-        'activityEventCount': campaigns.fold<int>(0, (total, campaign) => total + campaign.activityEvents.length),
+        'answerCount': campaigns.fold<int>(
+          0,
+          (total, campaign) => total + campaign.criterionAnswers.length,
+        ),
+        'assignmentCount': campaigns.fold<int>(
+          0,
+          (total, campaign) => total + campaign.assignments.length,
+        ),
+        'activityEventCount': campaigns.fold<int>(
+          0,
+          (total, campaign) => total + campaign.activityEvents.length,
+        ),
       },
     };
   }
@@ -74,11 +85,17 @@ class SyncPushPayloadService {
   Map<String, dynamic> _campaignToJson(CampaignSyncSnapshot snapshot) {
     return <String, dynamic>{
       'campaign': snapshot.campaign.toJson(),
-      'answers': snapshot.criterionAnswers.values.map(_answerToJson).toList(growable: false),
-      'assignments': snapshot.assignments.map((assignment) => assignment.toJson()).toList(growable: false),
+      'answers': snapshot.criterionAnswers.values
+          .map(_answerToJson)
+          .toList(growable: false),
+      'assignments': snapshot.assignments
+          .map((assignment) => assignment.toJson())
+          .toList(growable: false),
       'activityLog': <String, dynamic>{
         'eventCount': snapshot.activityEvents.length,
-        'events': snapshot.activityEvents.map((event) => event.toJson()).toList(growable: false),
+        'events': snapshot.activityEvents
+            .map((event) => event.toJson())
+            .toList(growable: false),
       },
       'localSummary': <String, dynamic>{
         'answeredCount': snapshot.answeredCount,

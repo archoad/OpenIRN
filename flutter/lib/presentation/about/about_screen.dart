@@ -7,10 +7,7 @@ import '../common/openirn_app_bar.dart';
 class AboutScreen extends StatefulWidget {
   final IrnReferential referential;
 
-  const AboutScreen({
-    required this.referential,
-    super.key,
-  });
+  const AboutScreen({required this.referential, super.key});
 
   @override
   State<AboutScreen> createState() => _AboutScreenState();
@@ -40,7 +37,9 @@ class _AboutScreenState extends State<AboutScreen> {
               _LicenseCard(referential: widget.referential),
               if (widget.referential.importWarnings.isNotEmpty) ...[
                 const SizedBox(height: 12),
-                _ImportWarningsCard(warnings: widget.referential.importWarnings),
+                _ImportWarningsCard(
+                  warnings: widget.referential.importWarnings,
+                ),
               ],
             ],
           ),
@@ -103,7 +102,9 @@ class _ApplicationCard extends StatelessWidget {
                   children: [
                     Chip(label: Text('OpenIRN $versionLabel')),
                     Chip(label: Text('${referential.pillars.length} piliers')),
-                    Chip(label: Text('${referential.criteria.length} critères')),
+                    Chip(
+                      label: Text('${referential.criteria.length} critères'),
+                    ),
                     Chip(label: Text('Référentiel ${referential.version}')),
                   ],
                 );

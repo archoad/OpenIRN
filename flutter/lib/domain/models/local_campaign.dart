@@ -101,9 +101,10 @@ class CampaignInformation {
       hasProjectDirectorEmail;
 
   String get projectDirectorFullName {
-    return [projectDirectorFirstName.trim(), projectDirectorLastName.trim()]
-        .where((part) => part.isNotEmpty)
-        .join(' ');
+    return [
+      projectDirectorFirstName.trim(),
+      projectDirectorLastName.trim(),
+    ].where((part) => part.isNotEmpty).join(' ');
   }
 
   factory CampaignInformation.fromJson(Map<String, dynamic> json) {
@@ -183,8 +184,10 @@ class LocalCampaign {
   }) {
     final timestamp = (now ?? DateTime.now()).toUtc();
     final safeReferentialId = _safeIdPart(referentialId);
-    final safeTimestamp =
-        timestamp.toIso8601String().replaceAll(RegExp(r'[^0-9]'), '');
+    final safeTimestamp = timestamp.toIso8601String().replaceAll(
+          RegExp(r'[^0-9]'),
+          '',
+        );
 
     return LocalCampaign(
       id: 'local-$safeReferentialId-$safeTimestamp',
@@ -295,8 +298,9 @@ class LocalCampaign {
         : const <String, dynamic>{};
     final projectDirectorPayload = json['projectDirector'];
     final projectDirector = projectDirectorPayload is Map
-        ? projectDirectorPayload
-            .map((key, value) => MapEntry(key.toString(), value))
+        ? projectDirectorPayload.map(
+            (key, value) => MapEntry(key.toString(), value),
+          )
         : const <String, dynamic>{};
 
     // Compatibilité avec les exports locaux qui exposent les informations
@@ -333,8 +337,10 @@ class LocalCampaign {
   }
 
   static String _safeIdPart(String value) {
-    final normalized =
-        value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-');
+    final normalized = value.toLowerCase().replaceAll(
+          RegExp(r'[^a-z0-9]+'),
+          '-',
+        );
     return normalized.replaceAll(RegExp(r'^-+|-+$'), '');
   }
 }

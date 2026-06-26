@@ -32,9 +32,9 @@ class LocalSyncConfigurationRepository {
         return SyncConfiguration.empty(deviceId: deviceId);
       }
 
-      final configuration = SyncConfiguration.fromJson(Map<String, dynamic>.from(rawConfiguration)).copyWith(
-        apiBaseUrl: SyncConfiguration.fixedApiBaseUrl,
-      );
+      final configuration = SyncConfiguration.fromJson(
+        Map<String, dynamic>.from(rawConfiguration),
+      ).copyWith(apiBaseUrl: SyncConfiguration.fixedApiBaseUrl);
       if (configuration.deviceId.trim().isEmpty) {
         return configuration.copyWith(deviceId: deviceId);
       }
@@ -44,7 +44,9 @@ class LocalSyncConfigurationRepository {
     }
   }
 
-  Future<SyncConfiguration> saveConfiguration(SyncConfiguration configuration) async {
+  Future<SyncConfiguration> saveConfiguration(
+    SyncConfiguration configuration,
+  ) async {
     final preferences = await SharedPreferences.getInstance();
     final deviceId = configuration.deviceId.trim().isEmpty
         ? await _ensureDeviceId(preferences)
@@ -91,10 +93,14 @@ class LocalSyncConfigurationRepository {
 
   String _generateDeviceId() {
     final random = Random.secure();
-    final timestamp = DateTime.now().toUtc().toIso8601String().replaceAll(RegExp(r'[^0-9]'), '');
-    final suffix = List<int>.generate(8, (_) => random.nextInt(256))
-        .map((value) => value.toRadixString(16).padLeft(2, '0'))
-        .join();
+    final timestamp = DateTime.now().toUtc().toIso8601String().replaceAll(
+          RegExp(r'[^0-9]'),
+          '',
+        );
+    final suffix = List<int>.generate(
+      8,
+      (_) => random.nextInt(256),
+    ).map((value) => value.toRadixString(16).padLeft(2, '0')).join();
     return 'openirn-$timestamp-$suffix';
   }
 }

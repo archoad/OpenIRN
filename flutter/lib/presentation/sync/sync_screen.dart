@@ -25,10 +25,7 @@ import '../common/openirn_app_bar.dart';
 class SyncScreen extends StatefulWidget {
   final IrnReferential referential;
 
-  const SyncScreen({
-    required this.referential,
-    super.key,
-  });
+  const SyncScreen({required this.referential, super.key});
 
   @override
   State<SyncScreen> createState() => _SyncScreenState();
@@ -96,7 +93,8 @@ class _SyncScreenState extends State<SyncScreen> {
   }
 
   Future<_SyncScreenStateData> _load() async {
-    final configuration = await _syncConfigurationRepository.loadConfiguration();
+    final configuration =
+        await _syncConfigurationRepository.loadConfiguration();
     final activeUser = await _sessionRepository.getActiveUser();
     final users = await _userRepository.ensureDefaultUsers();
     final campaigns = await _campaignRepository.ensureDefaultCampaign(
@@ -120,7 +118,9 @@ class _SyncScreenState extends State<SyncScreen> {
     );
   }
 
-  Future<List<CampaignSyncSnapshot>> _loadCampaignSnapshots(List<LocalCampaign> campaigns) async {
+  Future<List<CampaignSyncSnapshot>> _loadCampaignSnapshots(
+    List<LocalCampaign> campaigns,
+  ) async {
     final snapshots = <CampaignSyncSnapshot>[];
     for (final campaign in campaigns) {
       final criterionAnswers = await _assessmentRepository.loadCriterionAnswers(
@@ -175,7 +175,9 @@ class _SyncScreenState extends State<SyncScreen> {
       enabled: _enabled,
       apiToken: _apiTokenController.text,
     );
-    final saved = await _syncConfigurationRepository.saveConfiguration(configuration);
+    final saved = await _syncConfigurationRepository.saveConfiguration(
+      configuration,
+    );
     if (!mounted) {
       return;
     }
@@ -192,7 +194,9 @@ class _SyncScreenState extends State<SyncScreen> {
       _future = _load();
     });
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Configuration de synchronisation sauvegardée.')),
+      const SnackBar(
+        content: Text('Configuration de synchronisation sauvegardée.'),
+      ),
     );
   }
 
@@ -274,9 +278,11 @@ class _SyncScreenState extends State<SyncScreen> {
     );
   }
 
-
-  Future<Map<String, dynamic>> _buildPayloadMap(_SyncScreenStateData data) async {
-    final configuration = await _syncConfigurationRepository.loadConfiguration();
+  Future<Map<String, dynamic>> _buildPayloadMap(
+    _SyncScreenStateData data,
+  ) async {
+    final configuration =
+        await _syncConfigurationRepository.loadConfiguration();
     return _payloadService.buildPushPayload(
       referential: widget.referential,
       configuration: configuration,
@@ -311,7 +317,8 @@ class _SyncScreenState extends State<SyncScreen> {
       _pushResult = null;
     });
 
-    final configuration = await _syncConfigurationRepository.loadConfiguration();
+    final configuration =
+        await _syncConfigurationRepository.loadConfiguration();
     final payload = await _buildPayloadMap(data);
     const encoder = JsonEncoder.withIndent('  ');
     final result = await _apiClient.pushPayload(
@@ -321,7 +328,9 @@ class _SyncScreenState extends State<SyncScreen> {
     );
     final responseBody = result.responseBody;
     await _appendSyncLogEvent(
-      type: result.isAccepted ? SyncLogEventType.pushSucceeded : SyncLogEventType.pushFailed,
+      type: result.isAccepted
+          ? SyncLogEventType.pushSucceeded
+          : SyncLogEventType.pushFailed,
       title: result.title,
       message: result.message,
       serverSyncId: responseBody?['serverSyncId']?.toString(),
@@ -337,9 +346,9 @@ class _SyncScreenState extends State<SyncScreen> {
       _pushingPayload = false;
       _pushResult = result;
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(result.title)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(result.title)));
   }
 
   Future<void> _runSmartSync(_SyncScreenStateData data) async {
@@ -353,7 +362,8 @@ class _SyncScreenState extends State<SyncScreen> {
     });
 
     try {
-      final configuration = await _syncConfigurationRepository.loadConfiguration();
+      final configuration =
+          await _syncConfigurationRepository.loadConfiguration();
       final result = await _apiClient.loadSyncStatus(
         baseUrl: configuration.apiBaseUrl,
         tenantId: configuration.tenantId,
@@ -367,7 +377,9 @@ class _SyncScreenState extends State<SyncScreen> {
       );
 
       await _appendSyncLogEvent(
-        type: result.isAvailable ? SyncLogEventType.pullSucceeded : SyncLogEventType.pullFailed,
+        type: result.isAvailable
+            ? SyncLogEventType.pullSucceeded
+            : SyncLogEventType.pullFailed,
         title: 'Assistant de synchronisation : ${result.title}',
         message: result.message,
         statusCode: result.statusCode,
@@ -386,15 +398,19 @@ class _SyncScreenState extends State<SyncScreen> {
       });
 
       if (!result.isAvailable) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result.title)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(result.title)));
         return;
       }
 
       if (freshnessInfo.state == _ServerFreshnessState.remoteNewer) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Snapshot distant détecté : récupération du dernier snapshot.')),
+          const SnackBar(
+            content: Text(
+              'Snapshot distant détecté : récupération du dernier snapshot.',
+            ),
+          ),
         );
         await _pullAndImportLatestSnapshot();
         return;
@@ -419,7 +435,8 @@ class _SyncScreenState extends State<SyncScreen> {
       _serverStatusResult = null;
     });
 
-    final configuration = await _syncConfigurationRepository.loadConfiguration();
+    final configuration =
+        await _syncConfigurationRepository.loadConfiguration();
     final result = await _apiClient.loadSyncStatus(
       baseUrl: configuration.apiBaseUrl,
       tenantId: configuration.tenantId,
@@ -433,7 +450,9 @@ class _SyncScreenState extends State<SyncScreen> {
     );
 
     await _appendSyncLogEvent(
-      type: result.isAvailable ? SyncLogEventType.pullSucceeded : SyncLogEventType.pullFailed,
+      type: result.isAvailable
+          ? SyncLogEventType.pullSucceeded
+          : SyncLogEventType.pullFailed,
       title: result.title,
       message: result.message,
       statusCode: result.statusCode,
@@ -452,9 +471,9 @@ class _SyncScreenState extends State<SyncScreen> {
       _serverFreshnessInfo = freshnessInfo;
     });
     if (showSnackBar) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result.title)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(result.title)));
     }
   }
 
@@ -467,14 +486,16 @@ class _SyncScreenState extends State<SyncScreen> {
       _pullResult = null;
     });
 
-    final configuration = await _syncConfigurationRepository.loadConfiguration();
+    final configuration =
+        await _syncConfigurationRepository.loadConfiguration();
     final result = await _apiClient.pullSnapshots(
       baseUrl: configuration.apiBaseUrl,
       tenantId: configuration.tenantId,
       apiToken: configuration.apiToken,
     );
     await _appendSyncLogEvent(
-      type: result.status == OpenIrnApiPullStatus.rejected || result.status == OpenIrnApiPullStatus.unreachable
+      type: result.status == OpenIrnApiPullStatus.rejected ||
+              result.status == OpenIrnApiPullStatus.unreachable
           ? SyncLogEventType.pullFailed
           : SyncLogEventType.pullSucceeded,
       title: result.title,
@@ -490,9 +511,9 @@ class _SyncScreenState extends State<SyncScreen> {
       _pullingSnapshots = false;
       _pullResult = result;
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(result.title)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(result.title)));
   }
 
   Future<void> _pullAndImportLatestSnapshot() async {
@@ -505,7 +526,8 @@ class _SyncScreenState extends State<SyncScreen> {
       _lastImportResult = null;
     });
 
-    final configuration = await _syncConfigurationRepository.loadConfiguration();
+    final configuration =
+        await _syncConfigurationRepository.loadConfiguration();
     final result = await _apiClient.pullSnapshots(
       baseUrl: configuration.apiBaseUrl,
       tenantId: configuration.tenantId,
@@ -513,16 +535,22 @@ class _SyncScreenState extends State<SyncScreen> {
       limit: 1,
     );
     await _appendSyncLogEvent(
-      type: result.status == OpenIrnApiPullStatus.rejected || result.status == OpenIrnApiPullStatus.unreachable
+      type: result.status == OpenIrnApiPullStatus.rejected ||
+              result.status == OpenIrnApiPullStatus.unreachable
           ? SyncLogEventType.pullFailed
           : SyncLogEventType.pullSucceeded,
       title: result.title,
       message: '${result.message} Mode import rapide du dernier snapshot.',
       statusCode: result.statusCode,
       snapshotCount: result.snapshots.length,
-      campaignCount: result.snapshots.fold<int>(0, (total, snapshot) => total + snapshot.campaignCount),
-      serverSyncId: result.snapshots.isEmpty ? null : result.snapshots.first.serverSyncId,
-      sourceDeviceId: result.snapshots.isEmpty ? null : result.snapshots.first.deviceId,
+      campaignCount: result.snapshots.fold<int>(
+        0,
+        (total, snapshot) => total + snapshot.campaignCount,
+      ),
+      serverSyncId:
+          result.snapshots.isEmpty ? null : result.snapshots.first.serverSyncId,
+      sourceDeviceId:
+          result.snapshots.isEmpty ? null : result.snapshots.first.deviceId,
     );
 
     if (!mounted) {
@@ -535,9 +563,9 @@ class _SyncScreenState extends State<SyncScreen> {
     });
 
     if (!result.hasSnapshots) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result.title)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(result.title)));
       return;
     }
 
@@ -545,7 +573,11 @@ class _SyncScreenState extends State<SyncScreen> {
     final payload = latestSnapshot.payload;
     if (payload == null || payload.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Le dernier snapshot serveur ne contient pas de payload importable.')),
+        const SnackBar(
+          content: Text(
+            'Le dernier snapshot serveur ne contient pas de payload importable.',
+          ),
+        ),
       );
       return;
     }
@@ -557,7 +589,11 @@ class _SyncScreenState extends State<SyncScreen> {
     final payload = snapshot.payload;
     if (payload == null || payload.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Le snapshot sélectionné ne contient pas de payload importable.')),
+        const SnackBar(
+          content: Text(
+            'Le snapshot sélectionné ne contient pas de payload importable.',
+          ),
+        ),
       );
       return;
     }
@@ -608,7 +644,8 @@ class _SyncScreenState extends State<SyncScreen> {
       await _campaignRepository.saveCampaigns(
         referentialId: widget.referential.id,
         campaigns: <LocalCampaign>[
-          for (final importedCampaign in result.campaigns) importedCampaign.campaign,
+          for (final importedCampaign in result.campaigns)
+            importedCampaign.campaign,
         ],
       );
 
@@ -632,7 +669,8 @@ class _SyncScreenState extends State<SyncScreen> {
       await _appendSyncLogEvent(
         type: SyncLogEventType.importSucceeded,
         title: 'Snapshot distant importé',
-        message: '${result.campaignCount} campagne(s) remplacée(s) par la version serveur.',
+        message:
+            '${result.campaignCount} campagne(s) remplacée(s) par la version serveur.',
         serverSyncId: snapshot.serverSyncId,
         sourceDeviceId: snapshot.deviceId,
         campaignCount: result.campaignCount,
@@ -647,7 +685,11 @@ class _SyncScreenState extends State<SyncScreen> {
         _future = _load();
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${result.campaignCount} campagne(s) remplacée(s) par la version serveur.')),
+        SnackBar(
+          content: Text(
+            '${result.campaignCount} campagne(s) remplacée(s) par la version serveur.',
+          ),
+        ),
       );
     } on SyncPullImportException catch (error) {
       await _appendSyncLogEvent(
@@ -663,9 +705,9 @@ class _SyncScreenState extends State<SyncScreen> {
       setState(() {
         _importingSnapshotId = null;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.message)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
     } catch (error) {
       await _appendSyncLogEvent(
         type: SyncLogEventType.importFailed,
@@ -711,8 +753,11 @@ class _SyncScreenState extends State<SyncScreen> {
       _testingConnection = true;
       _connectionResult = null;
     });
-    final configuration = await _syncConfigurationRepository.loadConfiguration();
-    final result = await _apiClient.testConnection(baseUrl: configuration.apiBaseUrl);
+    final configuration =
+        await _syncConfigurationRepository.loadConfiguration();
+    final result = await _apiClient.testConnection(
+      baseUrl: configuration.apiBaseUrl,
+    );
     await _appendSyncLogEvent(
       type: SyncLogEventType.connectionTest,
       title: result.title,
@@ -726,9 +771,9 @@ class _SyncScreenState extends State<SyncScreen> {
       _testingConnection = false;
       _connectionResult = result;
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(result.title)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(result.title)));
   }
 
   Future<void> _copyPayload() async {
@@ -748,9 +793,7 @@ class _SyncScreenState extends State<SyncScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const OpenIrnAppBar(
-        title: 'Synchronisation API',
-      ),
+      appBar: const OpenIrnAppBar(title: 'Synchronisation API'),
       body: FutureBuilder<_SyncScreenStateData>(
         future: _future,
         builder: (context, snapshot) {
@@ -758,15 +801,23 @@ class _SyncScreenState extends State<SyncScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return _ErrorState(error: snapshot.error.toString(), onRetry: _refresh);
+            return _ErrorState(
+              error: snapshot.error.toString(),
+              onRetry: _refresh,
+            );
           }
 
           final data = snapshot.data;
           if (data == null) {
-            return _ErrorState(error: 'État de synchronisation vide.', onRetry: _refresh);
+            return _ErrorState(
+              error: 'État de synchronisation vide.',
+              onRetry: _refresh,
+            );
           }
 
-          final canManageSync = _accessPolicy.canManageCampaigns(data.activeUser);
+          final canManageSync = _accessPolicy.canManageCampaigns(
+            data.activeUser,
+          );
 
           return Center(
             child: ConstrainedBox(
@@ -832,7 +883,12 @@ class _SyncScreenState extends State<SyncScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text('Interface simplifiée', style: Theme.of(context).textTheme.titleMedium),
+                                  Text(
+                                    'Interface simplifiée',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.titleMedium,
+                                  ),
                                   const SizedBox(height: 4),
                                   const Text(
                                     'La synchronisation courante est automatique. Les outils techniques de push/pull restent retirés de l’interface utilisateur.',
@@ -860,12 +916,14 @@ class _SyncScreenState extends State<SyncScreen> {
                           ),
                           _RemoteSnapshotsCard(
                             pullingSnapshots: _pullingSnapshots,
-                            pullingAndImportingLatest: _pullingAndImportingLatest,
+                            pullingAndImportingLatest:
+                                _pullingAndImportingLatest,
                             importingSnapshotId: _importingSnapshotId,
                             pullResult: _pullResult,
                             lastImportResult: _lastImportResult,
                             onPullSnapshots: _pullSnapshots,
-                            onPullAndImportLatestSnapshot: _pullAndImportLatestSnapshot,
+                            onPullAndImportLatestSnapshot:
+                                _pullAndImportLatestSnapshot,
                             onImportSnapshot: _importSnapshot,
                           ),
                         ],
@@ -910,7 +968,9 @@ class _ServerFreshnessInfo {
   });
 
   bool get shouldPull => state == _ServerFreshnessState.remoteNewer;
-  bool get isOk => state == _ServerFreshnessState.upToDate || state == _ServerFreshnessState.noRemoteSnapshot;
+  bool get isOk =>
+      state == _ServerFreshnessState.upToDate ||
+      state == _ServerFreshnessState.noRemoteSnapshot;
 
   factory _ServerFreshnessInfo.fromStatus({
     required OpenIrnApiStatusResult statusResult,
@@ -921,7 +981,8 @@ class _ServerFreshnessInfo {
       return const _ServerFreshnessInfo(
         state: _ServerFreshnessState.unavailable,
         title: 'Comparaison impossible',
-        message: 'Le statut serveur n’est pas disponible. Corrige la connexion ou le token, puis relance le contrôle.',
+        message:
+            'Le statut serveur n’est pas disponible. Corrige la connexion ou le token, puis relance le contrôle.',
       );
     }
 
@@ -930,7 +991,8 @@ class _ServerFreshnessInfo {
       return const _ServerFreshnessInfo(
         state: _ServerFreshnessState.noRemoteSnapshot,
         title: 'Aucun snapshot serveur',
-        message: 'Le serveur ne contient pas encore de snapshot pour ce tenant.',
+        message:
+            'Le serveur ne contient pas encore de snapshot pour ce tenant.',
       );
     }
 
@@ -938,14 +1000,16 @@ class _ServerFreshnessInfo {
     final knownLocally = syncEvents.any(
       (event) =>
           event.serverSyncId == latestServerSyncId &&
-          (event.type == SyncLogEventType.pushSucceeded || event.type == SyncLogEventType.importSucceeded),
+          (event.type == SyncLogEventType.pushSucceeded ||
+              event.type == SyncLogEventType.importSucceeded),
     );
 
     if (knownLocally) {
       return _ServerFreshnessInfo(
         state: _ServerFreshnessState.upToDate,
         title: 'Synchronisation à jour',
-        message: 'Le dernier snapshot serveur est déjà connu sur ce terminal par un push ou un import.',
+        message:
+            'Le dernier snapshot serveur est déjà connu sur ce terminal par un push ou un import.',
         latestServerSyncId: latestServerSyncId,
         latestDeviceId: latest.deviceId,
       );
@@ -953,11 +1017,13 @@ class _ServerFreshnessInfo {
 
     final normalizedLocalDeviceId = localDeviceId.trim();
     final latestDeviceId = latest.deviceId.trim();
-    if (latestDeviceId.isNotEmpty && latestDeviceId == normalizedLocalDeviceId) {
+    if (latestDeviceId.isNotEmpty &&
+        latestDeviceId == normalizedLocalDeviceId) {
       return _ServerFreshnessInfo(
         state: _ServerFreshnessState.localDeviceUntracked,
         title: 'Snapshot de cet appareil non journalisé',
-        message: 'Le serveur indique que le dernier snapshot vient de cet appareil, mais il n’apparaît pas dans le journal de ce terminal. Cela peut arriver après une réinstallation ou un nettoyage local.',
+        message:
+            'Le serveur indique que le dernier snapshot vient de cet appareil, mais il n’apparaît pas dans le journal de ce terminal. Cela peut arriver après une réinstallation ou un nettoyage local.',
         latestServerSyncId: latestServerSyncId,
         latestDeviceId: latestDeviceId,
       );
@@ -966,7 +1032,8 @@ class _ServerFreshnessInfo {
     return _ServerFreshnessInfo(
       state: _ServerFreshnessState.remoteNewer,
       title: 'Snapshot distant plus récent disponible',
-      message: 'Le serveur contient un snapshot qui n’a pas encore été importé sur ce terminal. Utilise “Récupérer”, puis “Importer” sur le snapshot concerné.',
+      message:
+          'Le serveur contient un snapshot qui n’a pas encore été importé sur ce terminal. Utilise “Récupérer”, puis “Importer” sur le snapshot concerné.',
       latestServerSyncId: latestServerSyncId,
       latestDeviceId: latestDeviceId.isEmpty ? null : latestDeviceId,
     );
@@ -987,9 +1054,18 @@ class _SyncScreenStateData {
   });
 
   int get campaignCount => snapshots.length;
-  int get answerCount => snapshots.fold<int>(0, (total, snapshot) => total + snapshot.criterionAnswers.length);
-  int get assignmentCount => snapshots.fold<int>(0, (total, snapshot) => total + snapshot.assignments.length);
-  int get activityEventCount => snapshots.fold<int>(0, (total, snapshot) => total + snapshot.activityEvents.length);
+  int get answerCount => snapshots.fold<int>(
+        0,
+        (total, snapshot) => total + snapshot.criterionAnswers.length,
+      );
+  int get assignmentCount => snapshots.fold<int>(
+        0,
+        (total, snapshot) => total + snapshot.assignments.length,
+      );
+  int get activityEventCount => snapshots.fold<int>(
+        0,
+        (total, snapshot) => total + snapshot.activityEvents.length,
+      );
 }
 
 class _IntroCard extends StatelessWidget {
@@ -1006,7 +1082,9 @@ class _IntroCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Icon(
-              configuration.isConfigured ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
+              configuration.isConfigured
+                  ? Icons.cloud_done_outlined
+                  : Icons.cloud_off_outlined,
               size: 38,
             ),
             const SizedBox(width: 14),
@@ -1014,7 +1092,10 @@ class _IntroCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Préparation synchronisation API', style: Theme.of(context).textTheme.titleLarge),
+                  Text(
+                    'Préparation synchronisation API',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
                   const SizedBox(height: 6),
                   const Text(
                     'OpenIRN fonctionne maintenant en mode automatisé : l’application contrôle régulièrement le serveur, '
@@ -1026,10 +1107,23 @@ class _IntroCard extends StatelessWidget {
                     runSpacing: 8,
                     children: [
                       Chip(
-                        avatar: Icon(configuration.isConfigured ? Icons.check_circle_outline : Icons.info_outline, size: 18),
-                        label: Text(configuration.isConfigured ? 'Configuration prête' : 'Configuration incomplète'),
+                        avatar: Icon(
+                          configuration.isConfigured
+                              ? Icons.check_circle_outline
+                              : Icons.info_outline,
+                          size: 18,
+                        ),
+                        label: Text(
+                          configuration.isConfigured
+                              ? 'Configuration prête'
+                              : 'Configuration incomplète',
+                        ),
                       ),
-                      Chip(label: Text('Mode : ${configuration.enabled ? 'activé' : 'désactivé'}')),
+                      Chip(
+                        label: Text(
+                          'Mode : ${configuration.enabled ? 'activé' : 'désactivé'}',
+                        ),
+                      ),
                     ],
                   ),
                 ],
@@ -1091,14 +1185,19 @@ class _ConfigurationCard extends StatelessWidget {
                 children: [
                   const Icon(Icons.settings_ethernet_outlined),
                   const SizedBox(width: 10),
-                  Text('Configuration API', style: Theme.of(context).textTheme.titleMedium),
+                  Text(
+                    'Configuration API',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                 ],
               ),
               const SizedBox(height: 14),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Activer la synchronisation'),
-                subtitle: const Text('Prépare les payloads pour le serveur OpenIRN hébergé sur l’infrastructure Archoad.'),
+                subtitle: const Text(
+                  'Prépare les payloads pour le serveur OpenIRN hébergé sur l’infrastructure Archoad.',
+                ),
                 value: enabled,
                 onChanged: onEnabledChanged,
               ),
@@ -1133,12 +1232,19 @@ class _ConfigurationCard extends StatelessWidget {
                 obscureText: obscureApiToken,
                 decoration: InputDecoration(
                   labelText: 'Token API OpenIRN',
-                  helperText: 'Utilisé pour POST /sync/push et GET /sync/pull. Le endpoint /health reste public.',
+                  helperText:
+                      'Utilisé pour POST /sync/push et GET /sync/pull. Le endpoint /health reste public.',
                   border: const OutlineInputBorder(),
                   suffixIcon: IconButton(
-                    tooltip: obscureApiToken ? 'Afficher le token' : 'Masquer le token',
+                    tooltip: obscureApiToken
+                        ? 'Afficher le token'
+                        : 'Masquer le token',
                     onPressed: () => onObscureApiTokenChanged(!obscureApiToken),
-                    icon: Icon(obscureApiToken ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+                    icon: Icon(
+                      obscureApiToken
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                    ),
                   ),
                 ),
                 validator: (value) {
@@ -1241,7 +1347,10 @@ class _FixedApiEndpointTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Serveur API OpenIRN', style: Theme.of(context).textTheme.titleSmall),
+                    Text(
+                      'Serveur API OpenIRN',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
                     const SizedBox(height: 4),
                     SelectableText(configuration.apiBaseUrl),
                     const SizedBox(height: 4),
@@ -1275,12 +1384,18 @@ class _FixedApiEndpointTile extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(result.title, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: resultColor)),
+                      Text(
+                        result.title,
+                        style: Theme.of(
+                          context,
+                        ).textTheme.titleSmall?.copyWith(color: resultColor),
+                      ),
                       const SizedBox(height: 3),
                       Text(result.message),
                       const SizedBox(height: 3),
                       Text('URL testée : ${result.url}'),
-                      if (result.statusCode != null) Text('HTTP ${result.statusCode}'),
+                      if (result.statusCode != null)
+                        Text('HTTP ${result.statusCode}'),
                     ],
                   ),
                 ),
@@ -1310,7 +1425,10 @@ class _LocalDataCard extends StatelessWidget {
               children: [
                 const Icon(Icons.inventory_2_outlined),
                 const SizedBox(width: 10),
-                Text('Données de ce terminal prêtes à synchroniser', style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  'Données de ce terminal prêtes à synchroniser',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -1333,7 +1451,6 @@ class _LocalDataCard extends StatelessWidget {
     );
   }
 }
-
 
 class _ResponsiveCardHeader extends StatelessWidget {
   final IconData icon;
@@ -1374,11 +1491,7 @@ class _ResponsiveCardHeader extends StatelessWidget {
         if (compact) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              titleRow,
-              const SizedBox(height: 10),
-              actionWrap,
-            ],
+            children: [titleRow, const SizedBox(height: 10), actionWrap],
           );
         }
 
@@ -1478,7 +1591,9 @@ class _PayloadCard extends StatelessWidget {
                 child: SingleChildScrollView(
                   child: SelectableText(
                     payload,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
                   ),
                 ),
               ),
@@ -1498,7 +1613,9 @@ class _PushResultNotice extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final color = result.isAccepted ? colorScheme.primary : colorScheme.error;
-    final icon = result.isAccepted ? Icons.cloud_done_outlined : Icons.cloud_off_outlined;
+    final icon = result.isAccepted
+        ? Icons.cloud_done_outlined
+        : Icons.cloud_off_outlined;
 
     return Container(
       width: double.infinity,
@@ -1516,12 +1633,18 @@ class _PushResultNotice extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(result.title, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: color)),
+                Text(
+                  result.title,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(color: color),
+                ),
                 const SizedBox(height: 3),
                 Text(result.message),
                 const SizedBox(height: 3),
                 Text('URL : ${result.url}'),
-                if (result.statusCode != null) Text('HTTP ${result.statusCode}'),
+                if (result.statusCode != null)
+                  Text('HTTP ${result.statusCode}'),
               ],
             ),
           ),
@@ -1540,14 +1663,15 @@ class _EmptyPayloadNotice extends StatelessWidget {
       children: [
         Icon(Icons.info_outline),
         SizedBox(width: 8),
-        Expanded(child: Text('Clique sur “Préparer” pour générer un exemple de payload de synchronisation.')),
+        Expanded(
+          child: Text(
+            'Clique sur “Préparer” pour générer un exemple de payload de synchronisation.',
+          ),
+        ),
       ],
     );
   }
 }
-
-
-
 
 class _NonAdministratorSyncNotice extends StatelessWidget {
   const _NonAdministratorSyncNotice();
@@ -1575,7 +1699,6 @@ class _NonAdministratorSyncNotice extends StatelessWidget {
   }
 }
 
-
 class _SmartSyncCard extends StatelessWidget {
   final bool runningSmartSync;
   final bool pushingPayload;
@@ -1595,7 +1718,10 @@ class _SmartSyncCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final busy = runningSmartSync || pushingPayload || pullingAndImportingLatest || importingSnapshotId != null;
+    final busy = runningSmartSync ||
+        pushingPayload ||
+        pullingAndImportingLatest ||
+        importingSnapshotId != null;
     final info = freshnessInfo;
     final colorScheme = Theme.of(context).colorScheme;
 
@@ -1617,7 +1743,11 @@ class _SmartSyncCard extends StatelessWidget {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.sync_outlined),
-                  label: Text(runningSmartSync ? 'Synchronisation…' : 'Synchroniser maintenant'),
+                  label: Text(
+                    runningSmartSync
+                        ? 'Synchronisation…'
+                        : 'Synchroniser maintenant',
+                  ),
                 ),
               ],
             ),
@@ -1631,7 +1761,9 @@ class _SmartSyncCard extends StatelessWidget {
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
+                color: colorScheme.surfaceContainerHighest.withValues(
+                  alpha: 0.45,
+                ),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
@@ -1698,7 +1830,9 @@ class _ServerStatusCard extends StatelessWidget {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.query_stats_outlined),
-                  label: Text(loadingServerStatus ? 'Lecture…' : 'Statut serveur'),
+                  label: Text(
+                    loadingServerStatus ? 'Lecture…' : 'Statut serveur',
+                  ),
                 ),
               ],
             ),
@@ -1713,7 +1847,11 @@ class _ServerStatusCard extends StatelessWidget {
                 children: [
                   Icon(Icons.info_outline),
                   SizedBox(width: 8),
-                  Expanded(child: Text('Clique sur “Statut serveur” pour interroger /sync/status.')),
+                  Expanded(
+                    child: Text(
+                      'Clique sur “Statut serveur” pour interroger /sync/status.',
+                    ),
+                  ),
                 ],
               )
             else ...[
@@ -1750,7 +1888,8 @@ class _ServerFreshnessNotice extends StatelessWidget {
       _ServerFreshnessState.upToDate => Icons.verified_outlined,
       _ServerFreshnessState.noRemoteSnapshot => Icons.cloud_queue_outlined,
       _ServerFreshnessState.remoteNewer => Icons.sync_problem_outlined,
-      _ServerFreshnessState.localDeviceUntracked => Icons.history_toggle_off_outlined,
+      _ServerFreshnessState.localDeviceUntracked =>
+        Icons.history_toggle_off_outlined,
       _ServerFreshnessState.unavailable => Icons.error_outline,
       _ServerFreshnessState.notChecked => Icons.info_outline,
     };
@@ -1772,17 +1911,27 @@ class _ServerFreshnessNotice extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(info.title, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: color)),
+                Text(
+                  info.title,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(color: color),
+                ),
                 const SizedBox(height: 3),
                 Text(info.message),
-                if (info.latestServerSyncId != null || info.latestDeviceId != null) ...[
+                if (info.latestServerSyncId != null ||
+                    info.latestDeviceId != null) ...[
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
                     children: [
-                      if (info.latestServerSyncId != null) Chip(label: Text('Dernier : ${info.latestServerSyncId}')),
-                      if (info.latestDeviceId != null) Chip(label: Text('Appareil : ${info.latestDeviceId}')),
+                      if (info.latestServerSyncId != null)
+                        Chip(
+                          label: Text('Dernier : ${info.latestServerSyncId}'),
+                        ),
+                      if (info.latestDeviceId != null)
+                        Chip(label: Text('Appareil : ${info.latestDeviceId}')),
                     ],
                   ),
                 ],
@@ -1804,7 +1953,9 @@ class _ServerStatusNotice extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final color = result.isAvailable ? colorScheme.primary : colorScheme.error;
-    final icon = result.isAvailable ? Icons.cloud_done_outlined : Icons.cloud_off_outlined;
+    final icon = result.isAvailable
+        ? Icons.cloud_done_outlined
+        : Icons.cloud_off_outlined;
     final latest = result.latestSnapshot;
 
     return Container(
@@ -1826,12 +1977,18 @@ class _ServerStatusNotice extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(result.title, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: color)),
+                    Text(
+                      result.title,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.titleSmall?.copyWith(color: color),
+                    ),
                     const SizedBox(height: 3),
                     Text(result.message),
                     const SizedBox(height: 3),
                     Text('URL : ${result.url}'),
-                    if (result.statusCode != null) Text('HTTP ${result.statusCode}'),
+                    if (result.statusCode != null)
+                      Text('HTTP ${result.statusCode}'),
                   ],
                 ),
               ),
@@ -1842,16 +1999,26 @@ class _ServerStatusNotice extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
-              Chip(label: Text('Tenant : ${result.tenantId.isEmpty ? '—' : result.tenantId}')),
+              Chip(
+                label: Text(
+                  'Tenant : ${result.tenantId.isEmpty ? '—' : result.tenantId}',
+                ),
+              ),
               Chip(label: Text('Snapshots : ${result.snapshotCount}')),
               Chip(label: Text('Appareils : ${result.deviceCount}')),
               Chip(label: Text('Campagnes : ${result.campaignCount}')),
-              if (result.serverTime != null) Chip(label: Text('Serveur : ${_formatDate(result.serverTime!)}')),
+              if (result.serverTime != null)
+                Chip(
+                  label: Text('Serveur : ${_formatDate(result.serverTime!)}'),
+                ),
             ],
           ),
           if (latest != null) ...[
             const SizedBox(height: 12),
-            Text('Dernier snapshot', style: Theme.of(context).textTheme.titleSmall),
+            Text(
+              'Dernier snapshot',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
             const SizedBox(height: 6),
             Wrap(
               spacing: 8,
@@ -1860,7 +2027,10 @@ class _ServerStatusNotice extends StatelessWidget {
                 Chip(label: Text('serverSyncId : ${latest.serverSyncId}')),
                 Chip(label: Text('Appareil : ${latest.deviceId}')),
                 Chip(label: Text('${latest.campaignCount} campagne(s)')),
-                if (latest.receivedAt != null) Chip(label: Text('Reçu : ${_formatDate(latest.receivedAt!)}')),
+                if (latest.receivedAt != null)
+                  Chip(
+                    label: Text('Reçu : ${_formatDate(latest.receivedAt!)}'),
+                  ),
               ],
             ),
           ],
@@ -1921,7 +2091,9 @@ class _RemoteSnapshotsCard extends StatelessWidget {
                   label: Text(pullingSnapshots ? 'Récupération…' : 'Récupérer'),
                 ),
                 FilledButton.icon(
-                  onPressed: pullingSnapshots || pullingAndImportingLatest || importingSnapshotId != null
+                  onPressed: pullingSnapshots ||
+                          pullingAndImportingLatest ||
+                          importingSnapshotId != null
                       ? null
                       : onPullAndImportLatestSnapshot,
                   icon: pullingAndImportingLatest
@@ -1930,7 +2102,11 @@ class _RemoteSnapshotsCard extends StatelessWidget {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.download_done_outlined),
-                  label: Text(pullingAndImportingLatest ? 'Préparation…' : 'Importer le dernier'),
+                  label: Text(
+                    pullingAndImportingLatest
+                        ? 'Préparation…'
+                        : 'Importer le dernier',
+                  ),
                 ),
               ],
             ),
@@ -1945,7 +2121,11 @@ class _RemoteSnapshotsCard extends StatelessWidget {
                 children: [
                   Icon(Icons.info_outline),
                   SizedBox(width: 8),
-                  Expanded(child: Text('Clique sur “Récupérer” pour interroger le endpoint /sync/pull.')),
+                  Expanded(
+                    child: Text(
+                      'Clique sur “Récupérer” pour interroger le endpoint /sync/pull.',
+                    ),
+                  ),
                 ],
               )
             else ...[
@@ -1957,8 +2137,16 @@ class _RemoteSnapshotsCard extends StatelessWidget {
                   runSpacing: 8,
                   children: [
                     Chip(label: Text('Snapshots : ${result.snapshots.length}')),
-                    Chip(label: Text('Dernier : ${result.snapshots.first.serverSyncId}')),
-                    Chip(label: Text('Appareil : ${result.snapshots.first.deviceId}')),
+                    Chip(
+                      label: Text(
+                        'Dernier : ${result.snapshots.first.serverSyncId}',
+                      ),
+                    ),
+                    Chip(
+                      label: Text(
+                        'Appareil : ${result.snapshots.first.deviceId}',
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -2019,12 +2207,18 @@ class _PullResultNotice extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(result.title, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: color)),
+                Text(
+                  result.title,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(color: color),
+                ),
                 const SizedBox(height: 3),
                 Text(result.message),
                 const SizedBox(height: 3),
                 Text('URL : ${result.url}'),
-                if (result.statusCode != null) Text('HTTP ${result.statusCode}'),
+                if (result.statusCode != null)
+                  Text('HTTP ${result.statusCode}'),
               ],
             ),
           ),
@@ -2050,7 +2244,10 @@ class _RemoteSnapshotList extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Snapshots disponibles', style: Theme.of(context).textTheme.titleSmall),
+        Text(
+          'Snapshots disponibles',
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
         const SizedBox(height: 8),
         for (final snapshot in snapshots) ...[
           _RemoteSnapshotTile(
@@ -2079,7 +2276,8 @@ class _RemoteSnapshotTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final receivedAt = snapshot.receivedAt;
-    final payloadAvailable = snapshot.payload != null && snapshot.payload!.isNotEmpty;
+    final payloadAvailable =
+        snapshot.payload != null && snapshot.payload!.isNotEmpty;
     final importButton = FilledButton.icon(
       onPressed: importing || !payloadAvailable ? null : onImport,
       icon: importing
@@ -2113,10 +2311,16 @@ class _RemoteSnapshotTile extends StatelessWidget {
                 spacing: 8,
                 runSpacing: 6,
                 children: [
-                  Chip(label: Text('Appareil : ${snapshot.deviceId.isEmpty ? 'inconnu' : snapshot.deviceId}')),
+                  Chip(
+                    label: Text(
+                      'Appareil : ${snapshot.deviceId.isEmpty ? 'inconnu' : snapshot.deviceId}',
+                    ),
+                  ),
                   Chip(label: Text('Campagnes : ${snapshot.campaignCount}')),
-                  if (receivedAt != null) Chip(label: Text('Reçu : ${receivedAt.toLocal()}')),
-                  if (snapshot.payloadSha256.isNotEmpty) Chip(label: Text('SHA-256 : ${snapshot.payloadSha256}')),
+                  if (receivedAt != null)
+                    Chip(label: Text('Reçu : ${receivedAt.toLocal()}')),
+                  if (snapshot.payloadSha256.isNotEmpty)
+                    Chip(label: Text('SHA-256 : ${snapshot.payloadSha256}')),
                 ],
               ),
               if (compact) ...[
@@ -2179,7 +2383,9 @@ class _ImportResultNotice extends StatelessWidget {
               children: [
                 Text(
                   'Snapshot importé sur ce terminal',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(color: colorScheme.primary),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(color: colorScheme.primary),
                 ),
                 const SizedBox(height: 3),
                 Text(
@@ -2188,9 +2394,12 @@ class _ImportResultNotice extends StatelessWidget {
                 ),
                 if (result.warnings.isNotEmpty) ...[
                   const SizedBox(height: 6),
-                  Text('${result.warnings.length} avertissement(s) pendant l’import.'),
+                  Text(
+                    '${result.warnings.length} avertissement(s) pendant l’import.',
+                  ),
                   const SizedBox(height: 4),
-                  for (final warning in result.warnings.take(5)) Text('• $warning'),
+                  for (final warning in result.warnings.take(5))
+                    Text('• $warning'),
                 ],
               ],
             ),
@@ -2209,7 +2418,9 @@ class _RemoteSnapshotPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const encoder = JsonEncoder.withIndent('  ');
-    final body = result.responseBody == null ? '{}' : encoder.convert(result.responseBody);
+    final body = result.responseBody == null
+        ? '{}'
+        : encoder.convert(result.responseBody);
     return Container(
       width: double.infinity,
       constraints: const BoxConstraints(maxHeight: 360),
@@ -2221,7 +2432,9 @@ class _RemoteSnapshotPreview extends StatelessWidget {
       child: SingleChildScrollView(
         child: SelectableText(
           body,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
         ),
       ),
     );

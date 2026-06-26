@@ -39,9 +39,14 @@ class CriterionDetailScreen extends StatelessWidget {
                         runSpacing: 8,
                         children: [
                           Chip(label: Text(pillar.label)),
-                          Chip(label: Text('Portée : ${criterion.scope.label}')),
-                          Chip(label: Text('Réponse : ${criterion.answerMode}')),
-                          if (!criterion.active) const Chip(label: Text('Inactif')),
+                          Chip(
+                            label: Text('Portée : ${criterion.scope.label}'),
+                          ),
+                          Chip(
+                            label: Text('Réponse : ${criterion.answerMode}'),
+                          ),
+                          if (!criterion.active)
+                            const Chip(label: Text('Inactif')),
                         ],
                       ),
                     ],
@@ -69,11 +74,16 @@ class CriterionDetailScreen extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Traçabilité', style: Theme.of(context).textTheme.titleMedium),
+                      Text(
+                        'Traçabilité',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
                       const SizedBox(height: 8),
                       SelectableText('Code source : ${criterion.sourceCode}'),
                       if (criterion.sourceScope.isNotEmpty)
-                        SelectableText('Portée source : ${criterion.sourceScope}'),
+                        SelectableText(
+                          'Portée source : ${criterion.sourceScope}',
+                        ),
                       if (criterion.source.sheet.isNotEmpty)
                         SelectableText('Onglet : ${criterion.source.sheet}'),
                       if (criterion.source.row != null)
