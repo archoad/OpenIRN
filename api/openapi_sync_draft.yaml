@@ -1,0 +1,169 @@
+openapi: 3.1.0
+info:
+  title: OpenIRN Sync API
+  version: 0.4.0
+  description: |
+    Brouillon de contrat API pour OpenIRN. Le endpoint /health est public.
+    Les endpoints /sync/push et /sync/pull exigent un token Bearer.
+servers:
+  - url: https://www.archoad.io/api
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      security: []
+      summary: Vérifie la disponibilité de l'API OpenIRN.
+      responses:
+        '200':
+          description: API disponible.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  application:
+                    type: string
+                    example: OpenIRN API
+                  version:
+                    type: string
+                    example: 0.4.0
+                  authRequired:
+                    type: boolean
+                    example: true
+                  authMode:
+                    type: string
+                    example: bearer_token
+                  endpoints:
+                    type: array
+                    items:
+                      type: string
+                  timestamp:
+                    type: string
+                    format: date-time
+  /sync/push:
+    post:
+      summary: Envoie un snapshot local complet OpenIRN.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, sync, campaigns]
+              properties:
+                type:
+                  type: string
+                  const: openirn.syncPush
+                sync:
+                  type: object
+                  required: [tenantId, deviceId]
+                  properties:
+                    tenantId:
+                      type: string
+                    deviceId:
+                      type: string
+                campaigns:
+                  type: array
+                  items:
+                    type: object
+      responses:
+        '200':
+          description: Snapshot accepté et stocké.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: accepted
+                  serverSyncId:
+                    type: string
+                  tenantId:
+                    type: string
+                  deviceId:
+                    type: string
+                  payloadSha256:
+                    type: string
+                  campaignCount:
+                    type: integer
+        '401':
+          description: Token Bearer manquant.
+        '403':
+          description: Token Bearer invalide.
+  /sync/pull:
+    get:
+      summary: Récupère les derniers snapshots serveur d'un tenant.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tenantId
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 80
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        '200':
+          description: Liste des snapshots disponibles.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  type:
+                    type: string
+                    example: openirn.syncPull
+                  tenantId:
+                    type: string
+                  snapshotCount:
+                    type: integer
+                  availableSnapshotCount:
+                    type: integer
+                  snapshots:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        serverSyncId:
+                          type: string
+                        receivedAt:
+                          type: string
+                          format: date-time
+                        tenantId:
+                          type: string
+                        deviceId:
+                          type: string
+                        payloadSha256:
+                          type: string
+                        campaignCount:
+                          type: integer
+                        payload:
+                          type: object
+        '401':
+          description: Token Bearer manquant.
+        '403':
+          description: Token Bearer invalide.
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer

@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../models/app_user.dart';
+import '../models/criterion_assignment.dart';
 import '../models/irn_assessment.dart';
 import '../models/irn_referential.dart';
 import '../models/local_activity_event.dart';
@@ -18,6 +20,8 @@ class AssessmentExportService {
     required Map<String, CriterionAnswer> criterionAnswers,
     LocalCampaign? campaign,
     List<LocalActivityEvent> activityEvents = const <LocalActivityEvent>[],
+    List<AppUser> users = const <AppUser>[],
+    List<CriterionAssignment> assignments = const <CriterionAssignment>[],
     DateTime? exportedAt,
   }) {
     const encoder = JsonEncoder.withIndent('  ');
@@ -27,6 +31,8 @@ class AssessmentExportService {
         campaign: campaign,
         criterionAnswers: criterionAnswers,
         activityEvents: activityEvents,
+        users: users,
+        assignments: assignments,
         exportedAt: exportedAt,
       ),
     );
@@ -37,18 +43,18 @@ class AssessmentExportService {
     required Map<String, CriterionAnswer> criterionAnswers,
     LocalCampaign? campaign,
     List<LocalActivityEvent> activityEvents = const <LocalActivityEvent>[],
+    List<AppUser> users = const <AppUser>[],
+    List<CriterionAssignment> assignments = const <CriterionAssignment>[],
     DateTime? exportedAt,
   }) {
     final exportedAtUtc = (exportedAt ?? DateTime.now()).toUtc();
     final answers = _answersFromCriterionAnswers(criterionAnswers);
     final globalSummary = scoringService.computeSummary(referential, answers);
-    final pillarSummaries =
-        scoringService.computeSummariesByPillar(referential, answers);
-    final scopeSummaries =
-        scoringService.computeSummariesByScope(referential, answers);
+    final pillarSummaries = scoringService.computeSummariesByPillar(referential, answers);
+    final scopeSummaries = scoringService.computeSummariesByScope(referential, answers);
 
     return <String, dynamic>{
-      'schemaVersion': 5,
+      'schemaVersion': 6,
       'type': 'openirn.localAssessmentExport',
       'application': 'OpenIRN',
       'exportedAt': exportedAtUtc.toIso8601String(),
@@ -102,6 +108,15 @@ class AssessmentExportService {
             },
         ],
       },
+      'collaboration': <String, dynamic>{
+        'mode': 'local_users_and_assignments',
+        'users': <Map<String, dynamic>>[
+          for (final user in users) _userToJson(user),
+        ],
+        'assignments': <Map<String, dynamic>>[
+          for (final assignment in assignments) _assignmentToJson(assignment),
+        ],
+      },
       'activityLog': <String, dynamic>{
         'included': true,
         'eventCount': activityEvents.length,
@@ -125,11 +140,9 @@ class AssessmentExportService {
     };
   }
 
-  Map<String, IrnAnswer> _answersFromCriterionAnswers(
-      Map<String, CriterionAnswer> criterionAnswers) {
+  Map<String, IrnAnswer> _answersFromCriterionAnswers(Map<String, CriterionAnswer> criterionAnswers) {
     return <String, IrnAnswer>{
-      for (final entry in criterionAnswers.entries)
-        entry.key: entry.value.answer,
+      for (final entry in criterionAnswers.entries) entry.key: entry.value.answer,
     };
   }
 
@@ -141,8 +154,31 @@ class AssessmentExportService {
       'nonResilientCriteria': summary.nonResilientCriteria,
       'notAnsweredCriteria': summary.notAnsweredCriteria,
       'completionRate': _round(summary.completionRate),
-      'officialScore':
-          summary.officialScore == null ? null : _round(summary.officialScore!),
+      'officialScore': summary.officialScore == null ? null : _round(summary.officialScore!),
+    };
+  }
+
+
+  Map<String, dynamic> _userToJson(AppUser user) {
+    return <String, dynamic>{
+      'id': user.id,
+      'firstName': user.firstName,
+      'lastName': user.lastName,
+      'email': user.email,
+      'role': user.role.jsonValue,
+      'roleLabel': user.role.label,
+      'active': user.active,
+    };
+  }
+
+  Map<String, dynamic> _assignmentToJson(CriterionAssignment assignment) {
+    return <String, dynamic>{
+      'id': assignment.id,
+      'criterionId': assignment.criterionId,
+      'userId': assignment.userId,
+      if (assignment.assignedByUserId.trim().isNotEmpty) 'assignedByUserId': assignment.assignedByUserId,
+      'createdAt': assignment.createdAt.toUtc().toIso8601String(),
+      'updatedAt': assignment.updatedAt.toUtc().toIso8601String(),
     };
   }
 

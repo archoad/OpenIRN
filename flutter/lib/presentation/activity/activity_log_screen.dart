@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/repositories/local_activity_repository.dart';
 import '../../domain/models/irn_referential.dart';
 import '../../domain/models/local_activity_event.dart';
+import '../common/openirn_app_bar.dart';
 import '../../domain/models/local_campaign.dart';
 
 class ActivityLogScreen extends StatefulWidget {
@@ -46,15 +47,15 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Journal d’activité'),
+      appBar: OpenIrnAppBar(
+        title: 'Journal d’activité',
         actions: [
-          TextButton.icon(
-            onPressed: _refresh,
-            icon: const Icon(Icons.refresh),
-            label: const Text('Actualiser'),
+          OpenIrnAppBarAction(
+            id: 'refresh',
+            label: 'Actualiser',
+            icon: Icons.refresh,
+            onSelected: _refresh,
           ),
-          const SizedBox(width: 8),
         ],
       ),
       body: FutureBuilder<List<LocalActivityEvent>>(
@@ -64,8 +65,7 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return _ErrorState(
-                error: snapshot.error.toString(), onRetry: _refresh);
+            return _ErrorState(error: snapshot.error.toString(), onRetry: _refresh);
           }
 
           final events = snapshot.data ?? <LocalActivityEvent>[];
@@ -84,8 +84,7 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
                   if (events.isEmpty)
                     const _EmptyState()
                   else
-                    for (final event in events)
-                      _ActivityEventCard(event: event),
+                    for (final event in events) _ActivityEventCard(event: event),
                 ],
               ),
             ),
@@ -125,8 +124,7 @@ class _HeaderCard extends StatelessWidget {
                 children: [
                   Text(campaign.name, style: theme.textTheme.titleLarge),
                   const SizedBox(height: 4),
-                  Text(
-                      'Référentiel ${referential.version} · ${campaign.status.label}'),
+                  Text('Référentiel ${referential.version} · ${campaign.status.label}'),
                   const SizedBox(height: 8),
                   Text(
                     '$eventCount évènement(s) enregistré(s) localement pour cette campagne.',
@@ -181,12 +179,9 @@ class _ActivityEventCard extends StatelessWidget {
                     runSpacing: 8,
                     children: [
                       Chip(label: Text(_formatDate(event.createdAt))),
-                      if (event.criterionId != null)
-                        Chip(label: Text(event.criterionId!)),
+                      if (event.criterionId != null) Chip(label: Text(event.criterionId!)),
                       if (event.fromValue != null || event.toValue != null)
-                        Chip(
-                            label: Text(
-                                '${event.fromValue ?? '—'} → ${event.toValue ?? '—'}')),
+                        Chip(label: Text('${event.fromValue ?? '—'} → ${event.toValue ?? '—'}')),
                     ],
                   ),
                 ],
@@ -208,6 +203,8 @@ class _ActivityEventCard extends StatelessWidget {
         return Icons.flag_outlined;
       case LocalActivityType.campaignInformationUpdated:
         return Icons.info_outline;
+      case LocalActivityType.assignmentChanged:
+        return Icons.assignment_ind_outlined;
       case LocalActivityType.answerChanged:
         return Icons.check_circle_outline;
       case LocalActivityType.justificationChanged:

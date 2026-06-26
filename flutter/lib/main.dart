@@ -23,7 +23,7 @@ class OpenIrnApp extends StatelessWidget {
         appBarTheme: AppBarTheme(
           backgroundColor: colorScheme.surface,
           foregroundColor: colorScheme.onSurface,
-          centerTitle: false,
+          centerTitle: true,
         ),
         cardTheme: CardThemeData(
           clipBehavior: Clip.antiAlias,

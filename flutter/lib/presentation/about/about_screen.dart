@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../domain/models/irn_referential.dart';
+import '../common/openirn_app_bar.dart';
 
 class AboutScreen extends StatefulWidget {
   final IrnReferential referential;
@@ -22,9 +23,7 @@ class _AboutScreenState extends State<AboutScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('À propos'),
-      ),
+      appBar: const OpenIrnAppBar(title: 'À propos'),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 920),
@@ -112,7 +111,7 @@ class _ApplicationCard extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             const Text(
-              'OpenIRN distingue clairement le code de l’application, le référentiel officiel aDRI importé, et les campagnes locales créées par l’utilisateur.',
+              'OpenIRN distingue clairement le code de l’application, le référentiel officiel aDRI importé, et les campagnes créées par l’utilisateur.',
             ),
           ],
         ),
@@ -216,7 +215,7 @@ class _LicenseCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Les campagnes, réponses, justifications, scores et journaux produits dans OpenIRN sont des données locales distinctes du référentiel officiel.',
+              'Les campagnes, réponses, justifications, scores et journaux produits dans OpenIRN sont des données de ce terminal distinctes du référentiel officiel.',
             ),
           ],
         ),

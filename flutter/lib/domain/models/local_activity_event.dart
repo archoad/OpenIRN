@@ -3,6 +3,7 @@ enum LocalActivityType {
   campaignDeleted,
   campaignStatusChanged,
   campaignInformationUpdated,
+  assignmentChanged,
   answerChanged,
   justificationChanged,
   answersReset;
@@ -17,6 +18,8 @@ enum LocalActivityType {
         return 'campaign_status_changed';
       case LocalActivityType.campaignInformationUpdated:
         return 'campaign_information_updated';
+      case LocalActivityType.assignmentChanged:
+        return 'assignment_changed';
       case LocalActivityType.answerChanged:
         return 'answer_changed';
       case LocalActivityType.justificationChanged:
@@ -36,6 +39,8 @@ enum LocalActivityType {
         return 'Statut';
       case LocalActivityType.campaignInformationUpdated:
         return 'Informations';
+      case LocalActivityType.assignmentChanged:
+        return 'Affectation';
       case LocalActivityType.answerChanged:
         return 'Réponse';
       case LocalActivityType.justificationChanged:
@@ -56,6 +61,8 @@ enum LocalActivityType {
         return LocalActivityType.campaignStatusChanged;
       case 'campaign_information_updated':
         return LocalActivityType.campaignInformationUpdated;
+      case 'assignment_changed':
+        return LocalActivityType.assignmentChanged;
       case 'answer_changed':
         return LocalActivityType.answerChanged;
       case 'justification_changed':
@@ -105,8 +112,7 @@ class LocalActivityEvent {
     DateTime? now,
   }) {
     final timestamp = (now ?? DateTime.now()).toUtc();
-    final safeTimestamp =
-        timestamp.toIso8601String().replaceAll(RegExp(r'[^0-9]'), '');
+    final safeTimestamp = timestamp.toIso8601String().replaceAll(RegExp(r'[^0-9]'), '');
     final safeType = type.jsonValue.replaceAll(RegExp(r'[^a-z0-9]+'), '-');
 
     return LocalActivityEvent(
@@ -124,8 +130,7 @@ class LocalActivityEvent {
   }
 
   factory LocalActivityEvent.fromJson(Map<String, dynamic> json) {
-    final createdAt = _parseDate(json['createdAt']) ??
-        DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+    final createdAt = _parseDate(json['createdAt']) ?? DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
 
     return LocalActivityEvent(
       id: json['id']?.toString() ?? '',

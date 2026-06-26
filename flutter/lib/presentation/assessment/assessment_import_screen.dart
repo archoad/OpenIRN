@@ -8,6 +8,7 @@ import '../../data/repositories/local_campaign_repository.dart';
 import '../../domain/models/irn_referential.dart';
 import '../../domain/models/local_campaign.dart';
 import '../../domain/services/assessment_import_service.dart';
+import '../common/openirn_app_bar.dart';
 
 class AssessmentImportScreen extends StatefulWidget {
   final IrnReferential referential;
@@ -101,8 +102,7 @@ class _AssessmentImportScreenState extends State<AssessmentImportScreen> {
     }
     if (text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Le presse-papiers ne contient pas de texte JSON.')),
+        const SnackBar(content: Text('Le presse-papiers ne contient pas de texte JSON.')),
       );
       return;
     }
@@ -117,8 +117,7 @@ class _AssessmentImportScreenState extends State<AssessmentImportScreen> {
     final rawJson = _controller.text;
     if (rawJson.trim().isEmpty) {
       setState(() {
-        _errorMessage =
-            'Ouvre un fichier .json ou colle d’abord un export JSON OpenIRN.';
+        _errorMessage = 'Ouvre un fichier .json ou colle d’abord un export JSON OpenIRN.';
         _result = null;
       });
       return;
@@ -161,7 +160,7 @@ class _AssessmentImportScreenState extends State<AssessmentImportScreen> {
         _result = result;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Campagne importée localement.')),
+        const SnackBar(content: Text('Campagne importée sur ce terminal.')),
       );
     } on AssessmentImportException catch (error) {
       if (!mounted) {
@@ -189,26 +188,23 @@ class _AssessmentImportScreenState extends State<AssessmentImportScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Importer un JSON OpenIRN'),
+      appBar: OpenIrnAppBar(
+        title: 'Importer un JSON OpenIRN',
         actions: [
-          TextButton.icon(
-            onPressed: (_isImporting || _isLoadingFile) ? null : _loadFromFile,
-            icon: _isLoadingFile
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.folder_open_outlined),
-            label: Text(_isLoadingFile ? 'Ouverture…' : 'Ouvrir fichier'),
+          OpenIrnAppBarAction(
+            id: 'open_file',
+            label: _isLoadingFile ? 'Ouverture…' : 'Ouvrir fichier',
+            icon: Icons.folder_open_outlined,
+            enabled: !_isImporting && !_isLoadingFile,
+            onSelected: _loadFromFile,
           ),
-          TextButton.icon(
-            onPressed: _isImporting ? null : _pasteFromClipboard,
-            icon: const Icon(Icons.content_paste_outlined),
-            label: const Text('Coller'),
+          OpenIrnAppBarAction(
+            id: 'paste',
+            label: 'Coller',
+            icon: Icons.content_paste_outlined,
+            enabled: !_isImporting,
+            onSelected: _pasteFromClipboard,
           ),
-          const SizedBox(width: 8),
         ],
       ),
       body: Center(
@@ -264,14 +260,13 @@ class _ImportIntroCard extends StatelessWidget {
                 const Icon(Icons.upload_file_outlined),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text('Import JSON local',
-                      style: Theme.of(context).textTheme.titleLarge),
+                  child: Text('Import JSON local', style: Theme.of(context).textTheme.titleLarge),
                 ),
               ],
             ),
             const SizedBox(height: 12),
             const Text(
-              'Ouvre un fichier .json exporté depuis OpenIRN ou colle son contenu. L’import vérifie que le référentiel cible correspond au référentiel actuellement chargé, puis crée une nouvelle campagne locale avec ses réponses, ses justifications et son journal d’activité.',
+              'Ouvre un fichier .json exporté depuis OpenIRN ou colle son contenu. L’import vérifie que le référentiel cible correspond au référentiel actuellement chargé, puis crée une nouvelle campagne avec ses réponses, ses justifications et son journal d’activité.',
             ),
             const SizedBox(height: 12),
             Wrap(
@@ -316,8 +311,7 @@ class _JsonInputCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Contenu JSON',
-                style: Theme.of(context).textTheme.titleMedium),
+            Text('Contenu JSON', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 12),
             TextField(
               controller: controller,
@@ -326,8 +320,7 @@ class _JsonInputCard extends StatelessWidget {
               enabled: !isImporting,
               decoration: const InputDecoration(
                 border: OutlineInputBorder(),
-                hintText:
-                    '{\n  "schemaVersion": 5,\n  "type": "openirn.localAssessmentExport"\n}',
+                hintText: '{\n  "schemaVersion": 5,\n  "type": "openirn.localAssessmentExport"\n}',
               ),
               style: const TextStyle(fontFamily: 'monospace'),
             ),
@@ -392,12 +385,10 @@ class _ImportSuccessCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.check_circle_outline,
-                    color: Theme.of(context).colorScheme.primary),
+                Icon(Icons.check_circle_outline, color: Theme.of(context).colorScheme.primary),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text('Import terminé',
-                      style: Theme.of(context).textTheme.titleLarge),
+                  child: Text('Import terminé', style: Theme.of(context).textTheme.titleLarge),
                 ),
                 FilledButton.icon(
                   onPressed: onReturn,
@@ -414,24 +405,17 @@ class _ImportSuccessCard extends StatelessWidget {
               runSpacing: 8,
               children: [
                 Chip(label: Text('Réponses cotées : ${result.answeredCount}')),
-                Chip(
-                    label:
-                        Text('Justifications : ${result.justificationCount}')),
-                Chip(
-                    label: Text(
-                        'Évènements journal : ${result.activityEvents.length}')),
+                Chip(label: Text('Justifications : ${result.justificationCount}')),
+                Chip(label: Text('Évènements journal : ${result.activityEvents.length}')),
                 Chip(label: Text('Avertissements : ${result.warnings.length}')),
               ],
             ),
             if (result.warnings.isNotEmpty) ...[
               const SizedBox(height: 12),
-              Text('Avertissements',
-                  style: Theme.of(context).textTheme.titleSmall),
+              Text('Avertissements', style: Theme.of(context).textTheme.titleSmall),
               const SizedBox(height: 6),
               for (final warning in result.warnings.take(8)) Text('• $warning'),
-              if (result.warnings.length > 8)
-                Text(
-                    '• … ${result.warnings.length - 8} autre(s) avertissement(s)'),
+              if (result.warnings.length > 8) Text('• … ${result.warnings.length - 8} autre(s) avertissement(s)'),
             ],
           ],
         ),
@@ -453,8 +437,7 @@ class _ImportErrorCard extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.error_outline,
-                color: Theme.of(context).colorScheme.error),
+            Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error),
             const SizedBox(width: 10),
             Expanded(child: Text(message)),
           ],
