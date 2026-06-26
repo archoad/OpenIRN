@@ -212,7 +212,7 @@ class LocalCampaign {
       referentialId: referentialId,
       name: 'Évaluation locale — IRN $referentialVersion',
       description:
-          'Campagne locale créée automatiquement pour tester le référentiel officiel.',
+          'Campagne créée automatiquement pour tester le référentiel officiel.',
       status: LocalCampaignStatus.draft,
       createdAt: timestamp,
       updatedAt: timestamp,

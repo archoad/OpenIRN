@@ -8,9 +8,7 @@ import 'package:openirn/domain/models/local_campaign.dart';
 import 'package:openirn/domain/services/assessment_export_service.dart';
 
 void main() {
-  test(
-      'buildPayload exports referential metadata, answers, justifications and scoring',
-      () {
+  test('buildPayload exports referential metadata, answers, justifications and scoring', () {
     const referential = IrnReferential(
       id: 'adri-irn-vtest',
       version: 'vtest',
@@ -107,10 +105,10 @@ void main() {
       exportedAt: DateTime.utc(2026, 6, 22, 12),
     );
 
-    expect(payload['schemaVersion'], 5);
+    expect(payload['schemaVersion'], 6);
+    expect(payload['collaboration'], isA<Map<String, dynamic>>());
     expect(payload['type'], 'openirn.localAssessmentExport');
-    expect((payload['referential'] as Map<String, dynamic>)['checksumSha256'],
-        'abc123');
+    expect((payload['referential'] as Map<String, dynamic>)['checksumSha256'], 'abc123');
 
     final campaign = payload['campaign'] as Map<String, dynamic>;
     expect(campaign['status'], 'ready_for_review');

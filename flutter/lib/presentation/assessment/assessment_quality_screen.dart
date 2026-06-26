@@ -4,6 +4,7 @@ import '../../domain/models/irn_assessment.dart';
 import '../../domain/models/irn_referential.dart';
 import '../../domain/models/local_campaign.dart';
 import '../../domain/services/assessment_quality_service.dart';
+import '../common/openirn_app_bar.dart';
 
 class AssessmentQualityScreen extends StatelessWidget {
   final IrnReferential referential;
@@ -26,9 +27,7 @@ class AssessmentQualityScreen extends StatelessWidget {
     );
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Contrôle qualité'),
-      ),
+      appBar: const OpenIrnAppBar(title: 'Contrôle qualité'),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 1100),
@@ -73,12 +72,8 @@ class _QualityHeaderCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final icon = report.isReadyForReview
-        ? Icons.verified_outlined
-        : Icons.rule_folder_outlined;
-    final title = report.isReadyForReview
-        ? 'Campagne prête pour revue'
-        : 'Campagne à compléter';
+    final icon = report.isReadyForReview ? Icons.verified_outlined : Icons.rule_folder_outlined;
+    final title = report.isReadyForReview ? 'Campagne prête pour revue' : 'Campagne à compléter';
     final message = report.isReadyForReview
         ? 'Les informations de campagne sont complètes, tous les critères actifs sont cotés et chaque réponse R / NR dispose d’une justification.'
         : 'Complète les informations de campagne, les critères non cotés et les justifications avant revue ou export de référence.';
@@ -106,15 +101,9 @@ class _QualityHeaderCard extends StatelessWidget {
                       Chip(label: Text('Campagne : ${campaign.name}')),
                       Chip(label: Text('Référentiel : ${referential.version}')),
                       Chip(label: Text('Critères : ${report.totalCriteria}')),
-                      Chip(
-                          label: Text(
-                              'Infos campagne manquantes : ${report.missingCampaignInformationCount}')),
-                      Chip(
-                          label:
-                              Text('Non cotés : ${report.missingAnswerCount}')),
-                      Chip(
-                          label: Text(
-                              'Justifications manquantes : ${report.missingJustificationCount}')),
+                      Chip(label: Text('Infos campagne manquantes : ${report.missingCampaignInformationCount}')),
+                      Chip(label: Text('Non cotés : ${report.missingAnswerCount}')),
+                      Chip(label: Text('Justifications manquantes : ${report.missingJustificationCount}')),
                     ],
                   ),
                 ],
@@ -126,6 +115,7 @@ class _QualityHeaderCard extends StatelessWidget {
     );
   }
 }
+
 
 class _CampaignInformationQualityCard extends StatelessWidget {
   final LocalCampaign campaign;
@@ -144,26 +134,19 @@ class _CampaignInformationQualityCard extends StatelessWidget {
     return Card(
       child: ExpansionTile(
         initiallyExpanded: !isComplete,
-        leading:
-            Icon(isComplete ? Icons.check_circle_outline : Icons.info_outline),
-        title: Text(
-            'Informations de campagne (${isComplete ? 'complètes' : '${missingInformation.length} manquante(s)'})'),
-        subtitle: const Text(
-            'Ces éléments identifient le système évalué et le directeur de projet.'),
+        leading: Icon(isComplete ? Icons.check_circle_outline : Icons.info_outline),
+        title: Text('Informations de campagne (${isComplete ? 'complètes' : '${missingInformation.length} manquante(s)'})'),
+        subtitle: const Text('Ces éléments identifient le système évalué et le directeur de projet.'),
         children: [
           ListTile(
             dense: true,
             title: const Text('Système d’information'),
-            subtitle: Text(info.systemName.trim().isEmpty
-                ? 'Non renseigné'
-                : info.systemName),
+            subtitle: Text(info.systemName.trim().isEmpty ? 'Non renseigné' : info.systemName),
           ),
           ListTile(
             dense: true,
             title: const Text('Description du système d’information'),
-            subtitle: Text(info.systemDescription.trim().isEmpty
-                ? 'Non renseignée'
-                : info.systemDescription),
+            subtitle: Text(info.systemDescription.trim().isEmpty ? 'Non renseignée' : info.systemDescription),
           ),
           ListTile(
             dense: true,
@@ -176,8 +159,7 @@ class _CampaignInformationQualityCard extends StatelessWidget {
                 dense: true,
                 leading: const Icon(Icons.warning_amber_outlined),
                 title: Text(issue.label),
-                subtitle: const Text(
-                    'Champ obligatoire pour passer la campagne en revue.'),
+                subtitle: const Text('Champ obligatoire pour passer la campagne en revue.'),
               ),
         ],
       ),
@@ -213,8 +195,7 @@ class _QualityProgressCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Progression qualité',
-                style: Theme.of(context).textTheme.titleMedium),
+            Text('Progression qualité', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 16),
             _ProgressLine(
               label: 'Informations de campagne',
@@ -231,8 +212,7 @@ class _QualityProgressCard extends StatelessWidget {
             _ProgressLine(
               label: 'Réponses justifiées',
               value: report.justificationCompletionRate,
-              trailing:
-                  '${report.justifiedCriteria}/${report.answeredCriteria}',
+              trailing: '${report.justifiedCriteria}/${report.answeredCriteria}',
             ),
           ],
         ),
@@ -284,8 +264,7 @@ class _MissingAnswersCard extends StatelessWidget {
         initiallyExpanded: criteria.isNotEmpty,
         leading: const Icon(Icons.radio_button_unchecked),
         title: Text('Critères non cotés (${criteria.length})'),
-        subtitle: const Text(
-            'Ces critères sont encore en N.C. et ne contribuent pas au score.'),
+        subtitle: const Text('Ces critères sont encore en N.C. et ne contribuent pas au score.'),
         children: criteria.isEmpty
             ? const [
                 ListTile(
@@ -351,8 +330,7 @@ class _CriterionQualityTile extends StatelessWidget {
     return ListTile(
       dense: true,
       title: Text('${criterion.code} — ${criterion.label}'),
-      subtitle: Text(
-          'Pilier ${criterion.pillarId} · Portée : ${criterion.scope.label}'),
+      subtitle: Text('Pilier ${criterion.pillarId} · Portée : ${criterion.scope.label}'),
       trailing: Chip(label: Text(trailing)),
     );
   }
