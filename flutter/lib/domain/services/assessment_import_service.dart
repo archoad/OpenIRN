@@ -105,9 +105,9 @@ class AssessmentImportService {
     final information = _campaignInformationFromPayload(campaignPayload);
     final importedLabel = _formatCompactDate(importedAt);
     final safeTimestamp = importedAt.toIso8601String().replaceAll(
-          RegExp(r'[^0-9]'),
-          '',
-        );
+      RegExp(r'[^0-9]'),
+      '',
+    );
     final safeReferentialId = _safeIdPart(referential.id);
 
     return LocalCampaign(
@@ -262,9 +262,9 @@ class AssessmentImportService {
       final eventPayload = _asMap(rawEvent);
       final createdAt = _asDate(eventPayload['createdAt']) ?? importedAt;
       final safeTimestamp = createdAt.toIso8601String().replaceAll(
-            RegExp(r'[^0-9]'),
-            '',
-          );
+        RegExp(r'[^0-9]'),
+        '',
+      );
       final type = LocalActivityType.fromJson(eventPayload['type']);
 
       events.add(
@@ -363,9 +363,9 @@ class AssessmentImportService {
 
   String _safeIdPart(String value) {
     final normalized = value.toLowerCase().replaceAll(
-          RegExp(r'[^a-z0-9]+'),
-          '-',
-        );
+      RegExp(r'[^a-z0-9]+'),
+      '-',
+    );
     return normalized.replaceAll(RegExp(r'^-+|-+$'), '');
   }
 

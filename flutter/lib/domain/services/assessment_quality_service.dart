@@ -21,7 +21,8 @@ class AssessmentQualityService {
     var justifiedCriteria = 0;
 
     for (final criterion in activeCriteria) {
-      final criterionAnswer = criterionAnswers[criterion.id] ??
+      final criterionAnswer =
+          criterionAnswers[criterion.id] ??
           CriterionAnswer(
             criterionId: criterion.id,
             answer: IrnAnswer.notAnswered,

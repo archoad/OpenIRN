@@ -4,6 +4,7 @@ import '../../data/repositories/local_activity_repository.dart';
 import '../../domain/models/irn_referential.dart';
 import '../../domain/models/local_activity_event.dart';
 import '../common/openirn_app_bar.dart';
+import '../common/responsive_dialog.dart';
 import '../../domain/models/local_campaign.dart';
 
 class ActivityLogScreen extends StatefulWidget {
@@ -44,6 +45,53 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
     await _eventsFuture;
   }
 
+  Future<void> _clearJournal() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        insetPadding: responsiveDialogInsetPadding(context),
+        title: const Text('Effacer le journal ?'),
+        content: ResponsiveDialogContent(
+          maxWidth: 560,
+          child: Text(
+            'Le journal de la campagne “${widget.campaign.name}” sera supprimé de ce terminal.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(context).pop(true),
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Effacer'),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    await _repository.clearEvents(
+      referentialId: widget.referential.id,
+      campaignId: widget.campaign.id,
+    );
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Journal effacé.')));
+    await _refresh();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -55,6 +103,14 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
             label: 'Actualiser',
             icon: Icons.refresh,
             onSelected: _refresh,
+          ),
+          const OpenIrnAppBarAction.divider(),
+          OpenIrnAppBarAction(
+            id: 'clear',
+            label: 'Effacer le journal',
+            icon: Icons.delete_outline,
+            destructive: true,
+            onSelected: _clearJournal,
           ),
         ],
       ),

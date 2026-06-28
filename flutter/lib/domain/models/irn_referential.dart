@@ -71,15 +71,17 @@ class IrnReferential {
   });
 
   factory IrnReferential.fromJson(Map<String, dynamic> json) {
-    final pillars = (json['pillars'] as List<dynamic>? ?? const [])
-        .map((item) => IrnPillar.fromJson(_asMap(item)))
-        .toList(growable: false)
-      ..sort((a, b) => compareIrnCodes(a.code, b.code));
+    final pillars =
+        (json['pillars'] as List<dynamic>? ?? const [])
+            .map((item) => IrnPillar.fromJson(_asMap(item)))
+            .toList(growable: false)
+          ..sort((a, b) => compareIrnCodes(a.code, b.code));
 
-    final criteria = (json['criteria'] as List<dynamic>? ?? const [])
-        .map((item) => IrnCriterion.fromJson(_asMap(item)))
-        .toList(growable: false)
-      ..sort((a, b) => compareIrnCodes(a.code, b.code));
+    final criteria =
+        (json['criteria'] as List<dynamic>? ?? const [])
+            .map((item) => IrnCriterion.fromJson(_asMap(item)))
+            .toList(growable: false)
+          ..sort((a, b) => compareIrnCodes(a.code, b.code));
 
     return IrnReferential(
       id: _asString(json['id']),
@@ -239,8 +241,9 @@ class CriterionSourceLocation {
     final rowValue = json['row'];
     return CriterionSourceLocation(
       sheet: _asString(json['sheet']),
-      row:
-          rowValue is int ? rowValue : int.tryParse(rowValue?.toString() ?? ''),
+      row: rowValue is int
+          ? rowValue
+          : int.tryParse(rowValue?.toString() ?? ''),
     );
   }
 }

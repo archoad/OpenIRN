@@ -1,0 +1,13 @@
+[Unit]
+Description=OpenIRN SQLite backup
+Documentation=https://github.com/archoad/OpenIRN
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+EnvironmentFile=-/etc/openirn-api.env
+ExecStart=/opt/openirn-api/.venv/bin/python /opt/openirn-api/tools/backup_sqlite.py --verbose
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

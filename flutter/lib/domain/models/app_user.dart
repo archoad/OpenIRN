@@ -149,9 +149,9 @@ class AppUser {
     final timestamp = (now ?? DateTime.now()).toUtc();
     final safeEmail = _safeIdPart(email.trim().toLowerCase());
     final safeTimestamp = timestamp.toIso8601String().replaceAll(
-          RegExp(r'[^0-9]'),
-          '',
-        );
+      RegExp(r'[^0-9]'),
+      '',
+    );
     return AppUser(
       id: 'user-$safeTimestamp-$safeEmail',
       firstName: firstName.trim(),
@@ -165,7 +165,8 @@ class AppUser {
   }
 
   factory AppUser.fromJson(Map<String, dynamic> json) {
-    final createdAt = _parseDate(json['createdAt']) ??
+    final createdAt =
+        _parseDate(json['createdAt']) ??
         DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
     final updatedAt = _parseDate(json['updatedAt']) ?? createdAt;
     return AppUser(
@@ -224,9 +225,9 @@ class AppUser {
 
   static String _safeIdPart(String value) {
     final normalized = value.toLowerCase().replaceAll(
-          RegExp(r'[^a-z0-9]+'),
-          '-',
-        );
+      RegExp(r'[^a-z0-9]+'),
+      '-',
+    );
     return normalized.replaceAll(RegExp(r'^-+|-+$'), '');
   }
 }

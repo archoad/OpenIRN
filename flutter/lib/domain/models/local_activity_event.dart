@@ -113,9 +113,9 @@ class LocalActivityEvent {
   }) {
     final timestamp = (now ?? DateTime.now()).toUtc();
     final safeTimestamp = timestamp.toIso8601String().replaceAll(
-          RegExp(r'[^0-9]'),
-          '',
-        );
+      RegExp(r'[^0-9]'),
+      '',
+    );
     final safeType = type.jsonValue.replaceAll(RegExp(r'[^a-z0-9]+'), '-');
 
     return LocalActivityEvent(
@@ -133,7 +133,8 @@ class LocalActivityEvent {
   }
 
   factory LocalActivityEvent.fromJson(Map<String, dynamic> json) {
-    final createdAt = _parseDate(json['createdAt']) ??
+    final createdAt =
+        _parseDate(json['createdAt']) ??
         DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
 
     return LocalActivityEvent(

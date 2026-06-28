@@ -94,9 +94,9 @@ class LocalSyncConfigurationRepository {
   String _generateDeviceId() {
     final random = Random.secure();
     final timestamp = DateTime.now().toUtc().toIso8601String().replaceAll(
-          RegExp(r'[^0-9]'),
-          '',
-        );
+      RegExp(r'[^0-9]'),
+      '',
+    );
     final suffix = List<int>.generate(
       8,
       (_) => random.nextInt(256),

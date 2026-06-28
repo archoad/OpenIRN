@@ -65,20 +65,21 @@ void main() {
 
       final payload = const AssessmentExportService().buildPayload(
         referential: referential,
-        campaign: LocalCampaign.defaultForReferential(
-          referentialId: referential.id,
-          referentialVersion: referential.version,
-          now: DateTime.utc(2026, 6, 22),
-        ).copyWith(
-          status: LocalCampaignStatus.readyForReview,
-          information: const CampaignInformation(
-            systemName: 'SI Facturation',
-            systemDescription: 'Système critique de facturation.',
-            projectDirectorFirstName: 'Alice',
-            projectDirectorLastName: 'Martin',
-            projectDirectorEmail: 'alice.martin@example.test',
-          ),
-        ),
+        campaign:
+            LocalCampaign.defaultForReferential(
+              referentialId: referential.id,
+              referentialVersion: referential.version,
+              now: DateTime.utc(2026, 6, 22),
+            ).copyWith(
+              status: LocalCampaignStatus.readyForReview,
+              information: const CampaignInformation(
+                systemName: 'SI Facturation',
+                systemDescription: 'Système critique de facturation.',
+                projectDirectorFirstName: 'Alice',
+                projectDirectorLastName: 'Martin',
+                projectDirectorEmail: 'alice.martin@example.test',
+              ),
+            ),
         criterionAnswers: const <String, CriterionAnswer>{
           'RES-1.1': CriterionAnswer(
             criterionId: 'RES-1.1',

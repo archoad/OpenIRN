@@ -49,8 +49,8 @@ class LocalUserRepository {
           return 1;
         }
         return a.displayName.toLowerCase().compareTo(
-              b.displayName.toLowerCase(),
-            );
+          b.displayName.toLowerCase(),
+        );
       });
       return users;
     } on FormatException {

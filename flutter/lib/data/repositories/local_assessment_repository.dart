@@ -59,7 +59,7 @@ class LocalAssessmentRepository {
 
         final hasUsefulContent =
             criterionAnswer.answer != IrnAnswer.notAnswered ||
-                criterionAnswer.justification.trim().isNotEmpty;
+            criterionAnswer.justification.trim().isNotEmpty;
         if (hasUsefulContent) {
           answers[criterionId] = criterionAnswer;
         }

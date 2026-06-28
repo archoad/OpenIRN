@@ -45,7 +45,8 @@ class CriterionAssignment {
   }
 
   factory CriterionAssignment.fromJson(Map<String, dynamic> json) {
-    final createdAt = _parseDate(json['createdAt']) ??
+    final createdAt =
+        _parseDate(json['createdAt']) ??
         DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
     final updatedAt = _parseDate(json['updatedAt']) ?? createdAt;
     return CriterionAssignment(
@@ -109,9 +110,9 @@ class CriterionAssignment {
 
   static String _safeIdPart(String value) {
     final normalized = value.toLowerCase().replaceAll(
-          RegExp(r'[^a-z0-9]+'),
-          '-',
-        );
+      RegExp(r'[^a-z0-9]+'),
+      '-',
+    );
     return normalized.replaceAll(RegExp(r'^-+|-+$'), '');
   }
 }

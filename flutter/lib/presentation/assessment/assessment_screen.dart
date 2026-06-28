@@ -14,14 +14,18 @@ import '../../domain/models/local_activity_event.dart';
 import '../../domain/models/irn_referential.dart';
 import '../../domain/models/local_campaign.dart';
 import '../../domain/services/access_policy_service.dart';
+import '../../domain/services/app_sync_coordinator.dart';
 import '../../domain/services/official_rnr_scoring_service.dart';
 import '../../domain/services/referential_catalog_service.dart';
 import '../../domain/services/sync_automation_service.dart';
 import '../activity/activity_log_screen.dart';
+import '../admin/campaign_history_screen.dart';
+import '../admin/server_maintenance_screen.dart';
 import '../assignments/criterion_assignment_screen.dart';
 import '../common/openirn_app_bar.dart';
+import '../common/responsive_autofocus.dart';
+import '../common/responsive_dialog.dart';
 import '../sync/sync_screen.dart';
-import '../users/user_list_screen.dart';
 import 'assessment_export_screen.dart';
 import 'assessment_quality_screen.dart';
 import 'assessment_summary_screen.dart';
@@ -52,6 +56,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   final _userRepository = const LocalUserRepository();
   final _assignmentRepository = const LocalCriterionAssignmentRepository();
   final _syncAutomationService = const SyncAutomationService();
+  final _appSyncCoordinator = AppSyncCoordinator.instance;
   final Map<String, CriterionAnswer> _criterionAnswers =
       <String, CriterionAnswer>{};
   final Map<String, AppUser> _usersById = <String, AppUser>{};
@@ -70,11 +75,12 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   StreamSubscription<dynamic>? _remoteEventSubscription;
   String? _lastRemoteEventServerSyncId;
   bool _autoSyncRunning = false;
+  int _lastAppliedSyncSerial = 0;
 
   Map<String, IrnAnswer> get _answers => <String, IrnAnswer>{
-        for (final entry in _criterionAnswers.entries)
-          entry.key: entry.value.answer,
-      };
+    for (final entry in _criterionAnswers.entries)
+      entry.key: entry.value.answer,
+  };
 
   int get _justificationCount {
     return _criterionAnswers.values
@@ -88,16 +94,28 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     _campaign = widget.campaign;
     _loadLocalAnswers();
     _loadAssignments();
+    _lastAppliedSyncSerial = _appSyncCoordinator.changeSerial;
+    _appSyncCoordinator.addListener(_handleBackgroundSyncUpdate);
     _startAutomaticSynchronization();
   }
 
   @override
   void dispose() {
+    _appSyncCoordinator.removeListener(_handleBackgroundSyncUpdate);
     _autoPushDebounce?.cancel();
     _autoPullTimer?.cancel();
     _remoteEventReconnectTimer?.cancel();
     _remoteEventSubscription?.cancel();
     super.dispose();
+  }
+
+  void _handleBackgroundSyncUpdate() {
+    final serial = _appSyncCoordinator.changeSerial;
+    if (!mounted || serial == _lastAppliedSyncSerial) {
+      return;
+    }
+    _lastAppliedSyncSerial = serial;
+    _reloadCurrentCampaignAfterBackgroundImport();
   }
 
   Future<void> _loadLocalAnswers() async {
@@ -133,11 +151,11 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   Future<void> _loadAssignments() async {
     try {
       final users = await _userRepository.ensureDefaultUsers();
-      final assignments =
-          await _assignmentRepository.loadAssignmentsByCriterion(
-        referentialId: widget.referential.id,
-        campaignId: _campaign.id,
-      );
+      final assignments = await _assignmentRepository
+          .loadAssignmentsByCriterion(
+            referentialId: widget.referential.id,
+            campaignId: _campaign.id,
+          );
       if (!mounted) {
         return;
       }
@@ -177,23 +195,24 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   void _startRealtimeSynchronization() {
     _remoteEventReconnectTimer?.cancel();
     _remoteEventSubscription?.cancel();
-    _remoteEventSubscription =
-        _syncAutomationService.watchRemoteEvents().listen(
-      (event) {
-        final serverSyncId = event.serverSyncId.trim();
-        if (serverSyncId.isEmpty ||
-            serverSyncId == _lastRemoteEventServerSyncId) {
-          return;
-        }
-        _lastRemoteEventServerSyncId = serverSyncId;
-        _pullLatestRemoteVersion();
-      },
-      onError: (_) {
-        _scheduleRealtimeReconnect();
-      },
-      onDone: _scheduleRealtimeReconnect,
-      cancelOnError: false,
-    );
+    _remoteEventSubscription = _syncAutomationService
+        .watchRemoteEvents()
+        .listen(
+          (event) {
+            final serverSyncId = event.serverSyncId.trim();
+            if (serverSyncId.isEmpty ||
+                serverSyncId == _lastRemoteEventServerSyncId) {
+              return;
+            }
+            _lastRemoteEventServerSyncId = serverSyncId;
+            _pullLatestRemoteVersion();
+          },
+          onError: (_) {
+            _scheduleRealtimeReconnect();
+          },
+          onDone: _scheduleRealtimeReconnect,
+          cancelOnError: false,
+        );
   }
 
   void _scheduleRealtimeReconnect() {
@@ -303,6 +322,33 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     await _loadAssignments();
   }
 
+  Future<void> _reloadCurrentCampaignAfterBackgroundImport() async {
+    final campaigns = await _campaignRepository.loadCampaigns(
+      referentialId: widget.referential.id,
+    );
+    LocalCampaign? currentCampaign;
+    for (final campaign in campaigns) {
+      if (campaign.id == _campaign.id) {
+        currentCampaign = campaign;
+        break;
+      }
+    }
+    currentCampaign ??= campaigns.isEmpty ? null : campaigns.first;
+
+    if (!mounted || currentCampaign == null) {
+      return;
+    }
+
+    setState(() {
+      _campaign = currentCampaign!;
+      _isLoadingAnswers = true;
+      _isLoadingAssignments = true;
+      _localStatusMessage = _appSyncCoordinator.message;
+    });
+    await _loadLocalAnswers();
+    await _loadAssignments();
+  }
+
   Future<void> _openAssignments() async {
     if (!_accessPolicy.canManageAssignments(widget.activeUser, _campaign)) {
       _showForbidden('Ton rôle ne permet pas de modifier les affectations.');
@@ -327,7 +373,8 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       return;
     }
     final previousAnswers = Map<String, CriterionAnswer>.of(_criterionAnswers);
-    final current = _criterionAnswers[criterion.id] ??
+    final current =
+        _criterionAnswers[criterion.id] ??
         CriterionAnswer(
           criterionId: criterion.id,
           answer: IrnAnswer.notAnswered,
@@ -335,8 +382,9 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     final previousAnswer = current.answer;
     final updated = current.copyWith(
       answer: answer,
-      justification:
-          answer == IrnAnswer.notAnswered ? '' : current.justification,
+      justification: answer == IrnAnswer.notAnswered
+          ? ''
+          : current.justification,
     );
 
     setState(() {
@@ -367,7 +415,8 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       return;
     }
     final previousAnswers = Map<String, CriterionAnswer>.of(_criterionAnswers);
-    final current = _criterionAnswers[criterion.id] ??
+    final current =
+        _criterionAnswers[criterion.id] ??
         CriterionAnswer(
           criterionId: criterion.id,
           answer: IrnAnswer.notAnswered,
@@ -398,7 +447,8 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   }
 
   void _upsertCriterionAnswer(CriterionAnswer answer) {
-    final hasUsefulContent = answer.answer != IrnAnswer.notAnswered ||
+    final hasUsefulContent =
+        answer.answer != IrnAnswer.notAnswered ||
         answer.justification.trim().isNotEmpty;
     if (!hasUsefulContent) {
       _criterionAnswers.remove(answer.criterionId);
@@ -444,10 +494,14 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
+        insetPadding: responsiveDialogInsetPadding(dialogContext),
         title: const Text('Réinitialiser la campagne ?'),
-        content: const Text(
-          'Cette action supprimera toutes les réponses R / NR et toutes les justifications de cette campagne. '
-          'Elle ne peut pas être annulée.',
+        content: const ResponsiveDialogContent(
+          maxWidth: 620,
+          child: Text(
+            'Cette action supprimera toutes les réponses R / NR et toutes les justifications de cette campagne. '
+            'Elle ne peut pas être annulée.',
+          ),
         ),
         actions: [
           TextButton(
@@ -693,6 +747,40 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     );
   }
 
+  Future<void> _openCampaignHistory() async {
+    if (!_accessPolicy.canManageCampaigns(widget.activeUser)) {
+      _showForbidden(
+        'Seuls les administrateurs et pilotes IRN peuvent consulter l’historique serveur.',
+      );
+      return;
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CampaignHistoryScreen(
+          activeUser: widget.activeUser,
+          initialCampaignId: _campaign.id,
+          initialCampaignName: _campaign.name,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openServerMaintenance() async {
+    if (!_accessPolicy.canManageCampaigns(widget.activeUser)) {
+      _showForbidden(
+        'Seuls les administrateurs et pilotes IRN peuvent accéder à la maintenance serveur.',
+      );
+      return;
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ServerMaintenanceScreen(activeUser: widget.activeUser),
+      ),
+    );
+  }
+
   Future<void> _openActivityLog() async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -710,20 +798,6 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
         builder: (_) => SyncScreen(referential: widget.referential),
       ),
     );
-  }
-
-  Future<void> _openUsers() async {
-    if (!_accessPolicy.canManageCampaigns(widget.activeUser)) {
-      _showForbidden(
-        'Seuls les administrateurs et pilotes IRN peuvent accéder aux utilisateurs.',
-      );
-      return;
-    }
-
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => const UserListScreen()));
-    await _loadAssignments();
   }
 
   @override
@@ -774,14 +848,6 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
             enabled: !_isLoadingAnswers,
             onSelected: _openSync,
           ),
-          if (canManageCampaign)
-            OpenIrnAppBarAction(
-              id: 'users',
-              label: 'Utilisateurs',
-              icon: Icons.people_alt_outlined,
-              enabled: !_isLoadingAnswers,
-              onSelected: _openUsers,
-            ),
           OpenIrnAppBarAction(
             id: 'summary',
             label: 'Synthèse',
@@ -812,13 +878,31 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
               enabled: !_isLoadingAnswers,
               onSelected: _openActivityLog,
             ),
+
+          if (canManageCampaign)
+            OpenIrnAppBarAction(
+              id: 'history_conflicts',
+              label: 'Historique / conflits',
+              icon: Icons.manage_history_outlined,
+              enabled: !_isLoadingAnswers,
+              onSelected: _openCampaignHistory,
+            ),
+          if (canManageCampaign)
+            OpenIrnAppBarAction(
+              id: 'server_maintenance',
+              label: 'Maintenance serveur',
+              icon: Icons.admin_panel_settings_outlined,
+              enabled: !_isLoadingAnswers,
+              onSelected: _openServerMaintenance,
+            ),
           if (canManageCampaign) const OpenIrnAppBarAction.divider(),
           if (canManageCampaign)
             OpenIrnAppBarAction(
               id: 'reset',
               label: 'Réinitialiser',
               icon: Icons.refresh,
-              enabled: canEditCampaign &&
+              enabled:
+                  canEditCampaign &&
                   _criterionAnswers.isNotEmpty &&
                   !_isLoadingAnswers &&
                   !_isSavingAnswers,
@@ -847,10 +931,11 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
                 totalCriteria: widget.activeUser.role == AppUserRole.evaluator
                     ? visibleCriteriaCount
                     : widget.referential.criteria
-                        .where((criterion) => criterion.active)
-                        .length,
-                onOpenAssignments:
-                    canManageAssignments ? _openAssignments : null,
+                          .where((criterion) => criterion.active)
+                          .length,
+                onOpenAssignments: canManageAssignments
+                    ? _openAssignments
+                    : null,
               ),
               const SizedBox(height: 12),
               _ScoreCard(
@@ -1145,10 +1230,10 @@ class _CampaignInformationDialogState
         information: CampaignInformation(
           systemName: _systemNameController.text.trim(),
           systemDescription: _systemDescriptionController.text.trim(),
-          projectDirectorFirstName:
-              _projectDirectorFirstNameController.text.trim(),
-          projectDirectorLastName:
-              _projectDirectorLastNameController.text.trim(),
+          projectDirectorFirstName: _projectDirectorFirstNameController.text
+              .trim(),
+          projectDirectorLastName: _projectDirectorLastNameController.text
+              .trim(),
           projectDirectorEmail: _projectDirectorEmailController.text.trim(),
         ),
       ),
@@ -1158,9 +1243,10 @@ class _CampaignInformationDialogState
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
+      insetPadding: responsiveDialogInsetPadding(context),
       title: const Text('Informations de campagne'),
-      content: SizedBox(
-        width: 680,
+      content: ResponsiveDialogContent(
+        maxWidth: 880,
         child: Form(
           key: _formKey,
           child: SingleChildScrollView(
@@ -1175,7 +1261,7 @@ class _CampaignInformationDialogState
                 const SizedBox(height: 10),
                 TextFormField(
                   controller: _nameController,
-                  autofocus: true,
+                  autofocus: shouldAutofocusTextField(context),
                   decoration: const InputDecoration(
                     labelText: 'Nom de la campagne',
                     hintText: 'Ex. Évaluation IRN 2026 — SI Facturation',
@@ -1246,8 +1332,8 @@ class _CampaignInformationDialogState
                         ),
                         validator: (value) =>
                             value == null || value.trim().isEmpty
-                                ? 'Prénom obligatoire.'
-                                : null,
+                            ? 'Prénom obligatoire.'
+                            : null,
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -1260,8 +1346,8 @@ class _CampaignInformationDialogState
                         ),
                         validator: (value) =>
                             value == null || value.trim().isEmpty
-                                ? 'Nom obligatoire.'
-                                : null,
+                            ? 'Nom obligatoire.'
+                            : null,
                       ),
                     ),
                   ],
@@ -1269,7 +1355,14 @@ class _CampaignInformationDialogState
                 const SizedBox(height: 10),
                 TextFormField(
                   controller: _projectDirectorEmailController,
-                  keyboardType: TextInputType.emailAddress,
+                  keyboardType: safeKeyboardType(
+                    context,
+                    TextInputType.emailAddress,
+                  ),
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  smartDashesType: SmartDashesType.disabled,
+                  smartQuotesType: SmartQuotesType.disabled,
                   decoration: const InputDecoration(
                     labelText: 'Email',
                     hintText: 'prenom.nom@entreprise.fr',
@@ -1369,8 +1462,9 @@ class _AssignmentChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isAssigned = assignment != null;
-    final label =
-        isAssigned ? 'Évaluateur : $_assignedUserLabel' : 'Non affecté';
+    final label = isAssigned
+        ? 'Évaluateur : $_assignedUserLabel'
+        : 'Non affecté';
     final icon = isAssigned ? Icons.person_outline : Icons.person_off_outlined;
     final backgroundColor = isAssigned
         ? theme.colorScheme.secondaryContainer
@@ -1489,7 +1583,7 @@ class _LocalPersistenceCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final icon = isLoading || isSaving ? Icons.sync : Icons.save_outlined;
-    final label = message ?? 'Sauvegarde de ce terminal prête.';
+    final label = message ?? 'Sauvegarde prête.';
 
     return Card(
       child: Padding(
@@ -1524,7 +1618,7 @@ class _PillarAssessmentCard extends StatelessWidget {
   final String Function(IrnCriterion criterion) disabledReasonForCriterion;
   final void Function(IrnCriterion criterion, IrnAnswer answer) onAnswerChanged;
   final void Function(IrnCriterion criterion, String justification)
-      onJustificationChanged;
+  onJustificationChanged;
 
   const _PillarAssessmentCard({
     required this.pillar,
@@ -1663,8 +1757,9 @@ class _CriterionAnswerTile extends StatelessWidget {
                             label: Text(option.label),
                             tooltip: option.longLabel,
                             selected: answer == option,
-                            onSelected:
-                                canEdit ? (_) => onAnswerChanged(option) : null,
+                            onSelected: canEdit
+                                ? (_) => onAnswerChanged(option)
+                                : null,
                           ),
                       ],
                     );
@@ -1785,12 +1880,13 @@ class _JustificationDialogState extends State<_JustificationDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
+      insetPadding: responsiveDialogInsetPadding(context),
       title: Text('Justification — ${widget.criterionCode}'),
-      content: SizedBox(
-        width: 620,
+      content: ResponsiveDialogContent(
+        maxWidth: 780,
         child: TextField(
           controller: _controller,
-          autofocus: true,
+          autofocus: shouldAutofocusTextField(context),
           minLines: 5,
           maxLines: 10,
           decoration: const InputDecoration(
