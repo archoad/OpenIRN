@@ -133,9 +133,9 @@ class SyncLogEvent {
   }) {
     final timestamp = (now ?? DateTime.now()).toUtc();
     final safeTimestamp = timestamp.toIso8601String().replaceAll(
-          RegExp(r'[^0-9]'),
-          '',
-        );
+      RegExp(r'[^0-9]'),
+      '',
+    );
     final safeTenant = _safeIdPart(
       tenantId.trim().isEmpty ? 'tenant' : tenantId.trim(),
     );
@@ -170,7 +170,7 @@ class SyncLogEvent {
       snapshotCount: _intOrNull(json['snapshotCount']),
       createdAt:
           DateTime.tryParse(json['createdAt']?.toString() ?? '')?.toUtc() ??
-              DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+          DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
     );
   }
 

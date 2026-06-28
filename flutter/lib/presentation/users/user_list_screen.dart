@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../../data/api/openirn_api_client.dart';
-import '../../data/repositories/local_session_repository.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../data/repositories/local_user_repository.dart';
 import '../../domain/models/app_user.dart';
+import '../../domain/services/app_sync_coordinator.dart';
 import '../common/openirn_app_bar.dart';
+import '../common/responsive_autofocus.dart';
+import '../common/responsive_dialog.dart';
 
 class UserListScreen extends StatefulWidget {
   const UserListScreen({super.key});
@@ -16,50 +18,65 @@ class UserListScreen extends StatefulWidget {
 
 class _UserListScreenState extends State<UserListScreen> {
   final _repository = const LocalUserRepository();
-  final _sessionRepository = const LocalSessionRepository();
   final _syncConfigurationRepository = const LocalSyncConfigurationRepository();
   final _apiClient = const OpenIrnApiClient();
+  final _appSyncCoordinator = AppSyncCoordinator.instance;
   late Future<_UserListStateData> _usersFuture;
+  int _lastAppliedSyncSerial = 0;
+  bool _working = false;
 
   @override
   void initState() {
     super.initState();
     _usersFuture = _loadUsers();
+    _lastAppliedSyncSerial = _appSyncCoordinator.changeSerial;
+    _appSyncCoordinator.addListener(_handleBackgroundSyncUpdate);
+  }
+
+  @override
+  void dispose() {
+    _appSyncCoordinator.removeListener(_handleBackgroundSyncUpdate);
+    super.dispose();
+  }
+
+  void _handleBackgroundSyncUpdate() {
+    final serial = _appSyncCoordinator.changeSerial;
+    if (!mounted || serial == _lastAppliedSyncSerial) {
+      return;
+    }
+    _lastAppliedSyncSerial = serial;
+    _refresh();
   }
 
   Future<_UserListStateData> _loadUsers() async {
-    final localUsers = await _repository.ensureDefaultUsers();
-    final activeUser = await _sessionRepository.getActiveUser();
-    final configuration =
-        await _syncConfigurationRepository.loadConfiguration();
+    final cachedUsers = await _repository.ensureDefaultUsers();
+    final configuration = await _syncConfigurationRepository
+        .loadConfiguration();
 
-    if (configuration.isConfigured) {
-      final centralUsers = await _apiClient.loadUsers(
-        baseUrl: configuration.apiBaseUrl,
-        tenantId: configuration.tenantId,
-        apiToken: configuration.apiToken,
-      );
-
-      if (centralUsers.hasUsers) {
-        await _repository.saveUsers(centralUsers.users);
-        return _UserListStateData(
-          users: centralUsers.users,
-          activeUser: activeUser,
-          serverAvailable: true,
-          sourceLabel: 'Base centrale serveur',
-          sourceMessage: centralUsers.message,
-          apiBaseUrl: configuration.apiBaseUrl,
-          tenantId: configuration.tenantId,
-          apiToken: configuration.apiToken,
-        );
-      }
-
+    if (!configuration.isConfigured) {
       return _UserListStateData(
-        users: localUsers,
-        activeUser: activeUser,
+        users: cachedUsers,
         serverAvailable: false,
-        sourceLabel: 'Secours hors ligne',
-        sourceMessage: '${centralUsers.title} — ${centralUsers.message}',
+        sourceLabel: 'API non configurée',
+        sourceMessage:
+            'La base utilisateurs centrale n’est pas configurée. Les modifications sont désactivées sur ce terminal.',
+      );
+    }
+
+    final centralUsers = await _apiClient.loadUsers(
+      baseUrl: configuration.apiBaseUrl,
+      tenantId: configuration.tenantId,
+      apiToken: configuration.apiToken,
+    );
+
+    if (centralUsers.isAvailable ||
+        centralUsers.status == OpenIrnApiUsersStatus.empty) {
+      await _repository.saveUsers(centralUsers.users);
+      return _UserListStateData(
+        users: centralUsers.users,
+        serverAvailable: true,
+        sourceLabel: 'Base centrale serveur',
+        sourceMessage: centralUsers.message,
         apiBaseUrl: configuration.apiBaseUrl,
         tenantId: configuration.tenantId,
         apiToken: configuration.apiToken,
@@ -67,35 +84,15 @@ class _UserListScreenState extends State<UserListScreen> {
     }
 
     return _UserListStateData(
-      users: localUsers,
-      activeUser: activeUser,
+      users: cachedUsers,
       serverAvailable: false,
-      sourceLabel: 'Mode hors ligne',
+      sourceLabel: 'Lecture seule hors ligne',
       sourceMessage:
-          'La synchronisation API n’est pas configurée. Les codes centraux ne peuvent pas être modifiés depuis ce terminal.',
+          '${centralUsers.title} — ${centralUsers.message}. Les modifications utilisateurs doivent être faites avec le serveur disponible.',
+      apiBaseUrl: configuration.apiBaseUrl,
+      tenantId: configuration.tenantId,
+      apiToken: configuration.apiToken,
     );
-  }
-
-  Future<void> _setActiveUser(AppUser user) async {
-    try {
-      await _sessionRepository.setActiveUser(user.id);
-      await _refresh();
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Session de ce terminal active : ${user.displayName}'),
-        ),
-      );
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Changement de session impossible : $error')),
-      );
-    }
   }
 
   Future<void> _refresh() async {
@@ -103,6 +100,93 @@ class _UserListScreenState extends State<UserListScreen> {
       _usersFuture = _loadUsers();
     });
     await _usersFuture;
+  }
+
+  Future<_UserListStateData> _loadWritableCentralUsers() async {
+    final configuration = await _syncConfigurationRepository
+        .loadConfiguration();
+    if (!configuration.isConfigured) {
+      throw const _UserSyncException(
+        'Synchronisation impossible : la configuration API est incomplète.',
+      );
+    }
+
+    final centralUsers = await _apiClient.loadUsers(
+      baseUrl: configuration.apiBaseUrl,
+      tenantId: configuration.tenantId,
+      apiToken: configuration.apiToken,
+    );
+
+    if (!centralUsers.isAvailable &&
+        centralUsers.status != OpenIrnApiUsersStatus.empty) {
+      throw _UserSyncException(
+        '${centralUsers.title} — ${centralUsers.message}',
+      );
+    }
+
+    return _UserListStateData(
+      users: centralUsers.users,
+      serverAvailable: true,
+      sourceLabel: 'Base centrale serveur',
+      sourceMessage: centralUsers.message,
+      apiBaseUrl: configuration.apiBaseUrl,
+      tenantId: configuration.tenantId,
+      apiToken: configuration.apiToken,
+    );
+  }
+
+  Future<void> _replaceCentralUsers(
+    List<AppUser> users, {
+    required String successMessage,
+  }) async {
+    setState(() {
+      _working = true;
+    });
+
+    try {
+      final configuration = await _syncConfigurationRepository
+          .loadConfiguration();
+      if (!configuration.isConfigured) {
+        throw const _UserSyncException(
+          'Synchronisation impossible : la configuration API est incomplète.',
+        );
+      }
+
+      final result = await _apiClient.replaceUsers(
+        baseUrl: configuration.apiBaseUrl,
+        tenantId: configuration.tenantId,
+        apiToken: configuration.apiToken,
+        users: users,
+      );
+
+      if (!result.isAvailable && result.status != OpenIrnApiUsersStatus.empty) {
+        throw _UserSyncException('${result.title} — ${result.message}');
+      }
+
+      await _repository.saveUsers(result.users);
+      await _refresh();
+      await _appSyncCoordinator.pushNow();
+
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(successMessage)));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _working = false;
+        });
+      }
+    }
   }
 
   Future<void> _createUser() async {
@@ -115,22 +199,28 @@ class _UserListScreenState extends State<UserListScreen> {
     }
 
     try {
-      await _repository.createUser(
+      final state = await _loadWritableCentralUsers();
+      final normalizedEmail = result.email.trim().toLowerCase();
+      final duplicate = state.users.any(
+        (user) => user.email == normalizedEmail,
+      );
+      if (duplicate) {
+        throw const _UserSyncException(
+          'Un utilisateur avec cet email existe déjà dans la base centrale.',
+        );
+      }
+
+      final user = AppUser.create(
         firstName: result.firstName,
         lastName: result.lastName,
-        email: result.email,
+        email: normalizedEmail,
         role: result.role,
       );
-      await _refresh();
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Utilisateur ajouté localement. Lance une synchronisation pour l’envoyer au serveur.',
-          ),
-        ),
+
+      await _replaceCentralUsers(
+        <AppUser>[...state.users, user],
+        successMessage:
+            'Utilisateur créé et synchronisé immédiatement avec le serveur.',
       );
     } catch (error) {
       if (!mounted) {
@@ -151,18 +241,57 @@ class _UserListScreenState extends State<UserListScreen> {
       return;
     }
 
-    await _repository.updateUser(
-      user.copyWith(
-        firstName: result.firstName,
-        lastName: result.lastName,
-        email: result.email,
-        role: user.isDefaultAdministrator
-            ? AppUserRole.administrator
-            : result.role,
-        active: result.active,
-      ),
-    );
-    await _refresh();
+    try {
+      final state = await _loadWritableCentralUsers();
+      final normalizedEmail = result.email.trim().toLowerCase();
+      final duplicate = state.users.any(
+        (candidate) =>
+            candidate.id != user.id && candidate.email == normalizedEmail,
+      );
+      if (duplicate) {
+        throw const _UserSyncException(
+          'Un autre utilisateur utilise déjà cet email dans la base centrale.',
+        );
+      }
+
+      var updatedExistingUser = false;
+      final updatedUsers = state.users
+          .map((candidate) {
+            if (candidate.id != user.id) {
+              return candidate;
+            }
+            updatedExistingUser = true;
+            return candidate.copyWith(
+              firstName: result.firstName,
+              lastName: result.lastName,
+              email: normalizedEmail,
+              role: candidate.isDefaultAdministrator
+                  ? AppUserRole.administrator
+                  : result.role,
+              updatedAt: DateTime.now().toUtc(),
+            );
+          })
+          .toList(growable: false);
+
+      if (!updatedExistingUser) {
+        throw const _UserSyncException(
+          'Utilisateur introuvable dans la base centrale. Actualise la page puis réessaie.',
+        );
+      }
+
+      await _replaceCentralUsers(
+        updatedUsers,
+        successMessage:
+            'Utilisateur modifié et synchronisé immédiatement avec le serveur.',
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Modification impossible : $error')),
+      );
+    }
   }
 
   Future<void> _changeUserPin(AppUser user, _UserListStateData state) async {
@@ -209,9 +338,13 @@ class _UserListScreenState extends State<UserListScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
+        insetPadding: responsiveDialogInsetPadding(context),
         title: const Text('Supprimer l’utilisateur ?'),
-        content: Text(
-          'L’utilisateur « ${user.displayName} » sera retiré de l’annuaire local. La base centrale sera réalignée au prochain push de l’administrateur.',
+        content: ResponsiveDialogContent(
+          maxWidth: 560,
+          child: Text(
+            'L’utilisateur « ${user.displayName} » sera supprimé de la base centrale serveur.',
+          ),
         ),
         actions: [
           TextButton(
@@ -231,8 +364,21 @@ class _UserListScreenState extends State<UserListScreen> {
     }
 
     try {
-      await _repository.deleteUser(userId: user.id);
-      await _refresh();
+      final state = await _loadWritableCentralUsers();
+      final updatedUsers = state.users
+          .where((candidate) => candidate.id != user.id)
+          .toList(growable: false);
+      if (updatedUsers.length == state.users.length) {
+        throw const _UserSyncException(
+          'Utilisateur introuvable dans la base centrale. Actualise la page puis réessaie.',
+        );
+      }
+
+      await _replaceCentralUsers(
+        updatedUsers,
+        successMessage:
+            'Utilisateur supprimé et synchronisé immédiatement avec le serveur.',
+      );
     } catch (error) {
       if (!mounted) {
         return;
@@ -253,12 +399,14 @@ class _UserListScreenState extends State<UserListScreen> {
             id: 'refresh_users',
             label: 'Actualiser',
             icon: Icons.refresh_outlined,
+            enabled: !_working,
             onSelected: _refresh,
           ),
           OpenIrnAppBarAction(
             id: 'new_user',
             label: 'Nouvel utilisateur',
             icon: Icons.person_add_alt_1_outlined,
+            enabled: !_working,
             onSelected: _createUser,
           ),
         ],
@@ -276,29 +424,32 @@ class _UserListScreenState extends State<UserListScreen> {
           }
           final state = snapshot.data;
           final users = state?.users ?? const <AppUser>[];
-          final activeUser = state?.activeUser;
           return Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 950),
               child: ListView.separated(
                 padding: const EdgeInsets.all(16),
                 itemCount: users.length + 1,
-                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                separatorBuilder: (_, _) => const SizedBox(height: 12),
                 itemBuilder: (context, index) {
                   if (index == 0) {
                     return _IntroCard(state: state);
                   }
                   final user = users[index - 1];
+                  final serverAvailable = state?.serverAvailable ?? false;
                   return _UserCard(
                     user: user,
-                    activeUser: activeUser,
-                    centralPinsAvailable: state?.serverAvailable ?? false,
-                    onActivate: user.active ? () => _setActiveUser(user) : null,
-                    onEdit: () => _editUser(user),
-                    onChangePin: state == null
+                    centralPinsAvailable: serverAvailable,
+                    onEdit: serverAvailable && !_working
+                        ? () => _editUser(user)
+                        : null,
+                    onChangePin: state == null || !serverAvailable || _working
                         ? null
                         : () => _changeUserPin(user, state),
-                    onDelete: user.isDefaultAdministrator
+                    onDelete:
+                        user.isDefaultAdministrator ||
+                            !serverAvailable ||
+                            _working
                         ? null
                         : () => _deleteUser(user),
                   );
@@ -314,7 +465,6 @@ class _UserListScreenState extends State<UserListScreen> {
 
 class _UserListStateData {
   final List<AppUser> users;
-  final AppUser? activeUser;
   final bool serverAvailable;
   final String sourceLabel;
   final String sourceMessage;
@@ -324,7 +474,6 @@ class _UserListStateData {
 
   const _UserListStateData({
     required this.users,
-    required this.activeUser,
     required this.serverAvailable,
     required this.sourceLabel,
     required this.sourceMessage,
@@ -332,6 +481,15 @@ class _UserListStateData {
     this.tenantId = '',
     this.apiToken = '',
   });
+}
+
+class _UserSyncException implements Exception {
+  final String message;
+
+  const _UserSyncException(this.message);
+
+  @override
+  String toString() => message;
 }
 
 class _IntroCard extends StatelessWidget {
@@ -355,7 +513,7 @@ class _IntroCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             const Text(
-              'Les administrateurs et pilotes IRN peuvent modifier ici les codes personnels utilisés à l’ouverture d’une campagne.',
+              'Les administrateurs et pilotes IRN modifient ici la base utilisateurs centrale du serveur.',
             ),
             const SizedBox(height: 10),
             Wrap(
@@ -370,13 +528,6 @@ class _IntroCard extends StatelessWidget {
                     size: 18,
                   ),
                   label: Text(state?.sourceLabel ?? 'Chargement'),
-                ),
-                Chip(
-                  avatar: const Icon(Icons.verified_user_outlined, size: 18),
-                  label: Text(
-                    'Session active : ${state?.activeUser?.displayName ?? 'non définie'}',
-                    overflow: TextOverflow.ellipsis,
-                  ),
                 ),
               ],
             ),
@@ -394,18 +545,14 @@ class _IntroCard extends StatelessWidget {
 
 class _UserCard extends StatelessWidget {
   final AppUser user;
-  final AppUser? activeUser;
   final bool centralPinsAvailable;
-  final VoidCallback? onActivate;
-  final VoidCallback onEdit;
+  final VoidCallback? onEdit;
   final VoidCallback? onChangePin;
   final VoidCallback? onDelete;
 
   const _UserCard({
     required this.user,
-    required this.activeUser,
     required this.centralPinsAvailable,
-    required this.onActivate,
     required this.onEdit,
     required this.onChangePin,
     required this.onDelete,
@@ -413,7 +560,6 @@ class _UserCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isCurrentSession = activeUser?.id == user.id;
     final theme = Theme.of(context);
 
     return Card(
@@ -425,13 +571,7 @@ class _UserCard extends StatelessWidget {
             final header = Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                CircleAvatar(
-                  child: Icon(
-                    user.active
-                        ? Icons.person_outline
-                        : Icons.person_off_outlined,
-                  ),
-                ),
+                const CircleAvatar(child: Icon(Icons.person_outline)),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -468,16 +608,10 @@ class _UserCard extends StatelessWidget {
               runSpacing: 8,
               children: [
                 Chip(label: Text(user.role.label)),
-                Chip(label: Text(user.active ? 'Actif' : 'Inactif')),
                 if (centralPinsAvailable)
                   const Chip(
                     avatar: Icon(Icons.key_outlined, size: 18),
-                    label: Text('Code central'),
-                  ),
-                if (isCurrentSession)
-                  const Chip(
-                    avatar: Icon(Icons.verified_user_outlined, size: 18),
-                    label: Text('Session'),
+                    label: Text('Code serveur'),
                   ),
               ],
             );
@@ -487,12 +621,6 @@ class _UserCard extends StatelessWidget {
               spacing: 4,
               runSpacing: 4,
               children: [
-                if (!isCurrentSession)
-                  TextButton.icon(
-                    onPressed: onActivate,
-                    icon: const Icon(Icons.login_outlined),
-                    label: const Text('Activer'),
-                  ),
                 TextButton.icon(
                   onPressed: centralPinsAvailable ? onChangePin : null,
                   icon: const Icon(Icons.key_outlined),
@@ -552,14 +680,11 @@ class _UserFormResult {
   final String lastName;
   final String email;
   final AppUserRole role;
-  final bool active;
-
   const _UserFormResult({
     required this.firstName,
     required this.lastName,
     required this.email,
     required this.role,
-    required this.active,
   });
 }
 
@@ -578,7 +703,6 @@ class _UserDialogState extends State<_UserDialog> {
   late final TextEditingController _lastNameController;
   late final TextEditingController _emailController;
   late AppUserRole _role;
-  late bool _active;
 
   @override
   void initState() {
@@ -588,7 +712,6 @@ class _UserDialogState extends State<_UserDialog> {
     _lastNameController = TextEditingController(text: user?.lastName ?? '');
     _emailController = TextEditingController(text: user?.email ?? '');
     _role = user?.role ?? AppUserRole.evaluator;
-    _active = user?.active ?? true;
   }
 
   @override
@@ -609,7 +732,6 @@ class _UserDialogState extends State<_UserDialog> {
         lastName: _lastNameController.text.trim(),
         email: _emailController.text.trim(),
         role: _role,
-        active: _active,
       ),
     );
   }
@@ -617,12 +739,12 @@ class _UserDialogState extends State<_UserDialog> {
   @override
   Widget build(BuildContext context) {
     final isDefaultAdmin = widget.user?.isDefaultAdministrator ?? false;
-    final compact = MediaQuery.sizeOf(context).width < 560;
+    final compact = isResponsiveDialogCompact(context, maxWidth: 820);
 
     Widget buildFirstNameField() {
       return TextFormField(
         controller: _firstNameController,
-        autofocus: true,
+        autofocus: shouldAutofocusTextField(context),
         decoration: const InputDecoration(
           labelText: 'Prénom',
           border: OutlineInputBorder(),
@@ -646,12 +768,13 @@ class _UserDialogState extends State<_UserDialog> {
     }
 
     return AlertDialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      insetPadding: responsiveDialogInsetPadding(context),
       title: Text(
         widget.user == null ? 'Nouvel utilisateur' : 'Modifier l’utilisateur',
       ),
-      content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 620),
+      content: ResponsiveDialogContent(
+        maxWidth: 820,
+        minWidth: 360,
         child: Form(
           key: _formKey,
           child: SingleChildScrollView(
@@ -674,7 +797,14 @@ class _UserDialogState extends State<_UserDialog> {
                 const SizedBox(height: 10),
                 TextFormField(
                   controller: _emailController,
-                  keyboardType: TextInputType.emailAddress,
+                  keyboardType: safeKeyboardType(
+                    context,
+                    TextInputType.emailAddress,
+                  ),
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  smartDashesType: SmartDashesType.disabled,
+                  smartQuotesType: SmartQuotesType.disabled,
                   decoration: const InputDecoration(
                     labelText: 'Email',
                     border: OutlineInputBorder(),
@@ -711,15 +841,6 @@ class _UserDialogState extends State<_UserDialog> {
                   onChanged: isDefaultAdmin
                       ? null
                       : (role) => setState(() => _role = role ?? _role),
-                ),
-                const SizedBox(height: 8),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Utilisateur actif'),
-                  value: _active,
-                  onChanged: isDefaultAdmin
-                      ? null
-                      : (value) => setState(() => _active = value),
                 ),
               ],
             ),
@@ -772,74 +893,91 @@ class _UserPinDialogState extends State<_UserPinDialog> {
         ? widget.user.displayName
         : widget.user.email;
     return AlertDialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      insetPadding: responsiveDialogInsetPadding(context),
       title: const Text('Modifier le code utilisateur'),
-      content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 460),
+      content: ResponsiveDialogContent(
+        maxWidth: 560,
         child: Form(
           key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                displayName.isEmpty ? widget.user.id : displayName,
-                style: Theme.of(context).textTheme.titleMedium,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 4),
-              Text(widget.user.role.label),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _pinController,
-                autofocus: true,
-                obscureText: _obscurePin,
-                keyboardType: TextInputType.visiblePassword,
-                decoration: InputDecoration(
-                  labelText: 'Nouveau code',
-                  border: const OutlineInputBorder(),
-                  helperText: 'Entre 4 et 32 caractères.',
-                  suffixIcon: IconButton(
-                    tooltip: _obscurePin ? 'Afficher' : 'Masquer',
-                    onPressed: () => setState(() => _obscurePin = !_obscurePin),
-                    icon: Icon(
-                      _obscurePin
-                          ? Icons.visibility_outlined
-                          : Icons.visibility_off_outlined,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  displayName.isEmpty ? widget.user.id : displayName,
+                  style: Theme.of(context).textTheme.titleMedium,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                Text(widget.user.role.label),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _pinController,
+                  autofocus: shouldAutofocusTextField(context),
+                  obscureText: _obscurePin,
+                  keyboardType: safeKeyboardType(
+                    context,
+                    TextInputType.visiblePassword,
+                  ),
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  smartDashesType: SmartDashesType.disabled,
+                  smartQuotesType: SmartQuotesType.disabled,
+                  decoration: InputDecoration(
+                    labelText: 'Nouveau code',
+                    border: const OutlineInputBorder(),
+                    helperText: 'Entre 4 et 32 caractères.',
+                    suffixIcon: IconButton(
+                      tooltip: _obscurePin ? 'Afficher' : 'Masquer',
+                      onPressed: () =>
+                          setState(() => _obscurePin = !_obscurePin),
+                      icon: Icon(
+                        _obscurePin
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                      ),
                     ),
                   ),
+                  validator: (value) {
+                    final pin = value?.trim() ?? '';
+                    if (pin.length < 4) {
+                      return 'Code trop court.';
+                    }
+                    if (pin.length > 32) {
+                      return 'Code trop long.';
+                    }
+                    return null;
+                  },
+                  onFieldSubmitted: (_) => _submit(),
                 ),
-                validator: (value) {
-                  final pin = value?.trim() ?? '';
-                  if (pin.length < 4) {
-                    return 'Code trop court.';
-                  }
-                  if (pin.length > 32) {
-                    return 'Code trop long.';
-                  }
-                  return null;
-                },
-                onFieldSubmitted: (_) => _submit(),
-              ),
-              const SizedBox(height: 10),
-              TextFormField(
-                controller: _confirmController,
-                obscureText: _obscurePin,
-                keyboardType: TextInputType.visiblePassword,
-                decoration: const InputDecoration(
-                  labelText: 'Confirmer le code',
-                  border: OutlineInputBorder(),
+                const SizedBox(height: 10),
+                TextFormField(
+                  controller: _confirmController,
+                  obscureText: _obscurePin,
+                  keyboardType: safeKeyboardType(
+                    context,
+                    TextInputType.visiblePassword,
+                  ),
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  smartDashesType: SmartDashesType.disabled,
+                  smartQuotesType: SmartQuotesType.disabled,
+                  decoration: const InputDecoration(
+                    labelText: 'Confirmer le code',
+                    border: OutlineInputBorder(),
+                  ),
+                  validator: (value) {
+                    if ((value?.trim() ?? '') != _pinController.text.trim()) {
+                      return 'Les codes ne correspondent pas.';
+                    }
+                    return null;
+                  },
+                  onFieldSubmitted: (_) => _submit(),
                 ),
-                validator: (value) {
-                  if ((value?.trim() ?? '') != _pinController.text.trim()) {
-                    return 'Les codes ne correspondent pas.';
-                  }
-                  return null;
-                },
-                onFieldSubmitted: (_) => _submit(),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

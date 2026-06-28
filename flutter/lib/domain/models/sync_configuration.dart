@@ -34,6 +34,30 @@ class SyncConfiguration {
   bool get hasDeviceId => deviceId.trim().isNotEmpty;
   bool get hasApiToken => apiToken.trim().isNotEmpty;
 
+  bool get usesDeviceToken => apiToken.trim().startsWith('odt_');
+
+  bool get usesLegacyBearerToken => hasApiToken && !usesDeviceToken;
+
+  String get authorizationModeLabel {
+    if (!hasApiToken) {
+      return 'Non autorisé';
+    }
+    if (usesDeviceToken) {
+      return 'Jeton terminal';
+    }
+    return 'Bearer de transition';
+  }
+
+  String get authorizationModeDescription {
+    if (!hasApiToken) {
+      return 'Ce terminal doit être autorisé avec un code d’appairage.';
+    }
+    if (usesDeviceToken) {
+      return 'Ce terminal utilise un jeton individuel révocable côté serveur.';
+    }
+    return 'Ce terminal utilise encore le bearer global historique. Réautorise-le dès que possible avec un code d’appairage.';
+  }
+
   bool get isConfigured =>
       enabled && hasApiBaseUrl && hasTenantId && hasDeviceId && hasApiToken;
 
@@ -75,7 +99,8 @@ class SyncConfiguration {
       deviceId: json['deviceId']?.toString().trim() ?? '',
       enabled: json['enabled'] is bool ? json['enabled'] as bool : false,
       apiToken: json['apiToken']?.toString().trim() ?? '',
-      updatedAt: _parseDate(json['updatedAt']) ??
+      updatedAt:
+          _parseDate(json['updatedAt']) ??
           DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
     );
   }

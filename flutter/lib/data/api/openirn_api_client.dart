@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../../domain/models/app_user.dart';
+import '../../domain/models/authorized_device.dart';
+import '../../domain/models/official_referential.dart';
 import '../../domain/models/sync_configuration.dart';
 
 enum OpenIrnApiReachability { ready, reachable, unreachable }
@@ -193,13 +195,16 @@ class OpenIrnSyncEvent {
         snapshot['campaignCount'] ?? json['campaignCount'];
     return OpenIrnSyncEvent(
       type: json['type']?.toString() ?? 'openirn.syncEvent',
-      serverSyncId: snapshot['serverSyncId']?.toString() ??
+      serverSyncId:
+          snapshot['serverSyncId']?.toString() ??
           json['serverSyncId']?.toString() ??
           '',
-      tenantId: snapshot['tenantId']?.toString() ??
+      tenantId:
+          snapshot['tenantId']?.toString() ??
           json['tenantId']?.toString() ??
           '',
-      deviceId: snapshot['deviceId']?.toString() ??
+      deviceId:
+          snapshot['deviceId']?.toString() ??
           json['deviceId']?.toString() ??
           '',
       receivedAt: DateTime.tryParse(
@@ -207,7 +212,8 @@ class OpenIrnSyncEvent {
             json['receivedAt']?.toString() ??
             '',
       )?.toUtc(),
-      payloadSha256: snapshot['payloadSha256']?.toString() ??
+      payloadSha256:
+          snapshot['payloadSha256']?.toString() ??
           json['payloadSha256']?.toString() ??
           '',
       campaignCount: campaignCountValue is num
@@ -216,6 +222,70 @@ class OpenIrnSyncEvent {
       raw: json,
     );
   }
+}
+
+enum OpenIrnApiDevicesStatus { available, rejected, unreachable }
+
+class OpenIrnApiDevicesResult {
+  final OpenIrnApiDevicesStatus status;
+  final String url;
+  final int? statusCode;
+  final String title;
+  final String message;
+  final String tenantId;
+  final List<AuthorizedDevice> devices;
+  final Map<String, dynamic>? responseBody;
+
+  const OpenIrnApiDevicesResult({
+    required this.status,
+    required this.url,
+    required this.statusCode,
+    required this.title,
+    required this.message,
+    required this.tenantId,
+    required this.devices,
+    this.responseBody,
+  });
+
+  bool get isAvailable => status == OpenIrnApiDevicesStatus.available;
+}
+
+enum OpenIrnApiEnrollmentStatus { accepted, rejected, unreachable }
+
+class OpenIrnApiEnrollmentResult {
+  final OpenIrnApiEnrollmentStatus status;
+  final String url;
+  final int? statusCode;
+  final String title;
+  final String message;
+  final String tenantId;
+  final String enrollmentId;
+  final String code;
+  final DateTime? expiresAt;
+  final int expiresInMinutes;
+  final String qrPayloadText;
+  final AuthorizedDevice? device;
+  final String apiToken;
+  final Map<String, dynamic>? responseBody;
+
+  const OpenIrnApiEnrollmentResult({
+    required this.status,
+    required this.url,
+    required this.statusCode,
+    required this.title,
+    required this.message,
+    required this.tenantId,
+    required this.enrollmentId,
+    required this.code,
+    required this.expiresAt,
+    required this.expiresInMinutes,
+    required this.qrPayloadText,
+    required this.apiToken,
+    this.device,
+    this.responseBody,
+  });
+
+  bool get isAccepted => status == OpenIrnApiEnrollmentStatus.accepted;
 }
 
 enum OpenIrnApiUsersStatus { available, empty, rejected, unreachable }
@@ -690,13 +760,13 @@ class OpenIrnApiClient {
         final rawSnapshots = decodedBody?['snapshots'];
         final snapshots = rawSnapshots is List
             ? rawSnapshots
-                .whereType<Map>()
-                .map(
-                  (item) => OpenIrnApiPullSnapshot.fromJson(
-                    Map<String, dynamic>.from(item),
-                  ),
-                )
-                .toList(growable: false)
+                  .whereType<Map>()
+                  .map(
+                    (item) => OpenIrnApiPullSnapshot.fromJson(
+                      Map<String, dynamic>.from(item),
+                    ),
+                  )
+                  .toList(growable: false)
             : const <OpenIrnApiPullSnapshot>[];
         if (snapshots.isEmpty) {
           return OpenIrnApiPullResult(
@@ -816,12 +886,12 @@ class OpenIrnApiClient {
         final rawUsers = decodedBody?['users'];
         final users = rawUsers is List
             ? rawUsers
-                .whereType<Map>()
-                .map(
-                  (item) => AppUser.fromJson(Map<String, dynamic>.from(item)),
-                )
-                .where((user) => user.id.trim().isNotEmpty)
-                .toList(growable: false)
+                  .whereType<Map>()
+                  .map(
+                    (item) => AppUser.fromJson(Map<String, dynamic>.from(item)),
+                  )
+                  .where((user) => user.id.trim().isNotEmpty)
+                  .toList(growable: false)
             : const <AppUser>[];
         if (users.isEmpty) {
           return OpenIrnApiUsersResult(
@@ -927,6 +997,137 @@ class OpenIrnApiClient {
     }
   }
 
+  List<AppUser> _sortUsers(List<AppUser> users) {
+    final sorted = users.toList();
+    sorted.sort((a, b) {
+      if (a.isDefaultAdministrator) {
+        return -1;
+      }
+      if (b.isDefaultAdministrator) {
+        return 1;
+      }
+      return a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase());
+    });
+    return sorted;
+  }
+
+  Future<OpenIrnApiUsersResult> replaceUsers({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    required List<AppUser> users,
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final replaceUri = Uri.parse('$normalizedBaseUrl/users/replace');
+    final usersToSave = _sortUsers(users);
+
+    try {
+      final response = await _postJson(replaceUri, <String, dynamic>{
+        'tenantId': safeTenantId,
+        'users': usersToSave.map((user) => user.toJson()).toList(),
+      }, bearerToken: apiToken);
+      final decodedBody = _decodeJsonObject(response.body);
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return OpenIrnApiUsersResult(
+          status: usersToSave.isEmpty
+              ? OpenIrnApiUsersStatus.empty
+              : OpenIrnApiUsersStatus.available,
+          url: replaceUri.toString(),
+          statusCode: response.statusCode,
+          title: 'Utilisateurs centraux mis à jour',
+          message:
+              '${usersToSave.length} utilisateur(s) synchronisé(s) immédiatement avec le serveur.',
+          tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
+          users: usersToSave,
+          responseBody: decodedBody,
+        );
+      }
+
+      if (<int>{400, 401, 403}.contains(response.statusCode)) {
+        return OpenIrnApiUsersResult(
+          status: OpenIrnApiUsersStatus.rejected,
+          url: replaceUri.toString(),
+          statusCode: response.statusCode,
+          title: 'Modification refusée',
+          message:
+              decodedBody?['detail']?.toString() ??
+              'Le serveur a refusé la mise à jour de la base utilisateurs centrale.',
+          tenantId: safeTenantId,
+          users: const <AppUser>[],
+          responseBody: decodedBody,
+        );
+      }
+
+      return OpenIrnApiUsersResult(
+        status: OpenIrnApiUsersStatus.rejected,
+        url: replaceUri.toString(),
+        statusCode: response.statusCode,
+        title: 'Modification refusée',
+        message:
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        tenantId: safeTenantId,
+        users: const <AppUser>[],
+        responseBody: decodedBody,
+      );
+    } on TimeoutException {
+      return OpenIrnApiUsersResult(
+        status: OpenIrnApiUsersStatus.unreachable,
+        url: replaceUri.toString(),
+        statusCode: null,
+        title: 'Délai dépassé',
+        message: 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+        tenantId: safeTenantId,
+        users: const <AppUser>[],
+      );
+    } on SocketException catch (error) {
+      return OpenIrnApiUsersResult(
+        status: OpenIrnApiUsersStatus.unreachable,
+        url: replaceUri.toString(),
+        statusCode: null,
+        title: 'Serveur injoignable',
+        message: error.message,
+        tenantId: safeTenantId,
+        users: const <AppUser>[],
+      );
+    } on HandshakeException catch (error) {
+      return OpenIrnApiUsersResult(
+        status: OpenIrnApiUsersStatus.unreachable,
+        url: replaceUri.toString(),
+        statusCode: null,
+        title: 'Erreur TLS',
+        message: error.message,
+        tenantId: safeTenantId,
+        users: const <AppUser>[],
+      );
+    } on FormatException catch (error) {
+      return OpenIrnApiUsersResult(
+        status: OpenIrnApiUsersStatus.unreachable,
+        url: replaceUri.toString(),
+        statusCode: null,
+        title: 'URL API invalide',
+        message: error.message,
+        tenantId: safeTenantId,
+        users: const <AppUser>[],
+      );
+    } on HttpException catch (error) {
+      return OpenIrnApiUsersResult(
+        status: OpenIrnApiUsersStatus.unreachable,
+        url: replaceUri.toString(),
+        statusCode: null,
+        title: 'Erreur HTTP',
+        message: error.message,
+        tenantId: safeTenantId,
+        users: const <AppUser>[],
+      );
+    }
+  }
+
   Future<OpenIrnApiAuthResult> verifyUserPin({
     String? baseUrl,
     required String tenantId,
@@ -944,14 +1145,11 @@ class OpenIrnApiClient {
     final authUri = Uri.parse('$normalizedBaseUrl/auth/verify');
 
     try {
-      final response = await _postJson(
-          authUri,
-          <String, dynamic>{
-            'tenantId': safeTenantId,
-            'userId': safeUserId,
-            'pin': pin,
-          },
-          bearerToken: apiToken);
+      final response = await _postJson(authUri, <String, dynamic>{
+        'tenantId': safeTenantId,
+        'userId': safeUserId,
+        'pin': pin,
+      }, bearerToken: apiToken);
       final decodedBody = _decodeJsonObject(response.body);
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
@@ -982,7 +1180,8 @@ class OpenIrnApiClient {
           url: authUri.toString(),
           statusCode: response.statusCode,
           title: 'Authentification refusée',
-          message: decodedBody?['detail']?.toString() ??
+          message:
+              decodedBody?['detail']?.toString() ??
               'Le code utilisateur est incorrect ou l’utilisateur est inactif.',
           tenantId: safeTenantId,
           userId: safeUserId,
@@ -1078,14 +1277,11 @@ class OpenIrnApiClient {
     final pinUri = Uri.parse('$normalizedBaseUrl/users/pin');
 
     try {
-      final response = await _postJson(
-          pinUri,
-          <String, dynamic>{
-            'tenantId': safeTenantId,
-            'userId': safeUserId,
-            'pin': pin,
-          },
-          bearerToken: apiToken);
+      final response = await _postJson(pinUri, <String, dynamic>{
+        'tenantId': safeTenantId,
+        'userId': safeUserId,
+        'pin': pin,
+      }, bearerToken: apiToken);
       final decodedBody = _decodeJsonObject(response.body);
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
@@ -1107,7 +1303,8 @@ class OpenIrnApiClient {
           url: pinUri.toString(),
           statusCode: response.statusCode,
           title: 'Modification refusée',
-          message: decodedBody?['detail']?.toString() ??
+          message:
+              decodedBody?['detail']?.toString() ??
               'Le serveur a refusé la modification du code.',
           tenantId: safeTenantId,
           userId: safeUserId,
@@ -1179,6 +1376,542 @@ class OpenIrnApiClient {
     }
   }
 
+  Future<OpenIrnApiDevicesResult> loadDevices({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final devicesUri = Uri.parse(
+      '$normalizedBaseUrl/devices',
+    ).replace(queryParameters: <String, String>{'tenantId': safeTenantId});
+
+    try {
+      final response = await _get(devicesUri, bearerToken: apiToken);
+      final decodedBody = _decodeJsonObject(response.body);
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final rawDevices = decodedBody?['devices'];
+        final devices = rawDevices is List
+            ? rawDevices
+                  .whereType<Map>()
+                  .map(
+                    (item) => AuthorizedDevice.fromJson(
+                      Map<String, dynamic>.from(item),
+                    ),
+                  )
+                  .where((device) => device.deviceId.trim().isNotEmpty)
+                  .toList(growable: false)
+            : const <AuthorizedDevice>[];
+        return OpenIrnApiDevicesResult(
+          status: OpenIrnApiDevicesStatus.available,
+          url: devicesUri.toString(),
+          statusCode: response.statusCode,
+          title: 'Terminaux récupérés',
+          message: '${devices.length} terminal(aux) autorisé(s) côté serveur.',
+          tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
+          devices: devices,
+          responseBody: decodedBody,
+        );
+      }
+
+      if (<int>{401, 403}.contains(response.statusCode)) {
+        return OpenIrnApiDevicesResult(
+          status: OpenIrnApiDevicesStatus.rejected,
+          url: devicesUri.toString(),
+          statusCode: response.statusCode,
+          title: 'Authentification refusée',
+          message:
+              'Le serveur a refusé le token API lors du chargement des terminaux autorisés.',
+          tenantId: safeTenantId,
+          devices: const <AuthorizedDevice>[],
+          responseBody: decodedBody,
+        );
+      }
+
+      return OpenIrnApiDevicesResult(
+        status: OpenIrnApiDevicesStatus.rejected,
+        url: devicesUri.toString(),
+        statusCode: response.statusCode,
+        title: 'Terminaux refusés',
+        message:
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        tenantId: safeTenantId,
+        devices: const <AuthorizedDevice>[],
+        responseBody: decodedBody,
+      );
+    } on TimeoutException {
+      return OpenIrnApiDevicesResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: devicesUri.toString(),
+        statusCode: null,
+        title: 'Délai dépassé',
+        message: 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+        tenantId: safeTenantId,
+        devices: const <AuthorizedDevice>[],
+      );
+    } on SocketException catch (error) {
+      return OpenIrnApiDevicesResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: devicesUri.toString(),
+        statusCode: null,
+        title: 'Serveur injoignable',
+        message: error.message,
+        tenantId: safeTenantId,
+        devices: const <AuthorizedDevice>[],
+      );
+    } on HandshakeException catch (error) {
+      return OpenIrnApiDevicesResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: devicesUri.toString(),
+        statusCode: null,
+        title: 'Erreur TLS',
+        message: error.message,
+        tenantId: safeTenantId,
+        devices: const <AuthorizedDevice>[],
+      );
+    } on FormatException catch (error) {
+      return OpenIrnApiDevicesResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: devicesUri.toString(),
+        statusCode: null,
+        title: 'URL API invalide',
+        message: error.message,
+        tenantId: safeTenantId,
+        devices: const <AuthorizedDevice>[],
+      );
+    } on HttpException catch (error) {
+      return OpenIrnApiDevicesResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: devicesUri.toString(),
+        statusCode: null,
+        title: 'Erreur HTTP',
+        message: error.message,
+        tenantId: safeTenantId,
+        devices: const <AuthorizedDevice>[],
+      );
+    }
+  }
+
+  Future<OpenIrnApiEnrollmentResult> createDeviceEnrollment({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    required String createdByUserId,
+    String label = '',
+    int expiresInMinutes = 10,
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final enrollmentUri = Uri.parse('$normalizedBaseUrl/devices/enrollment');
+
+    try {
+      final response = await _postJson(enrollmentUri, <String, dynamic>{
+        'tenantId': safeTenantId,
+        'createdByUserId': createdByUserId.trim(),
+        'label': label.trim(),
+        'expiresInMinutes': expiresInMinutes.clamp(1, 60),
+      }, bearerToken: apiToken);
+      final decodedBody = _decodeJsonObject(response.body);
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return OpenIrnApiEnrollmentResult(
+          status: OpenIrnApiEnrollmentStatus.accepted,
+          url: enrollmentUri.toString(),
+          statusCode: response.statusCode,
+          title: 'Invitation créée',
+          message: 'Le code d’appairage est prêt. Il est à usage unique.',
+          tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
+          enrollmentId: decodedBody?['enrollmentId']?.toString() ?? '',
+          code: decodedBody?['code']?.toString() ?? '',
+          expiresAt: DateTime.tryParse(
+            decodedBody?['expiresAt']?.toString() ?? '',
+          )?.toUtc(),
+          expiresInMinutes: _intFromJson(decodedBody?['expiresInMinutes']),
+          qrPayloadText: decodedBody?['qrPayloadText']?.toString() ?? '',
+          apiToken: '',
+          responseBody: decodedBody,
+        );
+      }
+
+      return OpenIrnApiEnrollmentResult(
+        status: OpenIrnApiEnrollmentStatus.rejected,
+        url: enrollmentUri.toString(),
+        statusCode: response.statusCode,
+        title: 'Invitation refusée',
+        message:
+            decodedBody?['detail']?.toString() ??
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        tenantId: safeTenantId,
+        enrollmentId: '',
+        code: '',
+        expiresAt: null,
+        expiresInMinutes: 0,
+        qrPayloadText: '',
+        apiToken: '',
+        responseBody: decodedBody,
+      );
+    } on TimeoutException {
+      return OpenIrnApiEnrollmentResult(
+        status: OpenIrnApiEnrollmentStatus.unreachable,
+        url: enrollmentUri.toString(),
+        statusCode: null,
+        title: 'Délai dépassé',
+        message: 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+        tenantId: safeTenantId,
+        enrollmentId: '',
+        code: '',
+        expiresAt: null,
+        expiresInMinutes: 0,
+        qrPayloadText: '',
+        apiToken: '',
+      );
+    } on SocketException catch (error) {
+      return OpenIrnApiEnrollmentResult(
+        status: OpenIrnApiEnrollmentStatus.unreachable,
+        url: enrollmentUri.toString(),
+        statusCode: null,
+        title: 'Serveur injoignable',
+        message: error.message,
+        tenantId: safeTenantId,
+        enrollmentId: '',
+        code: '',
+        expiresAt: null,
+        expiresInMinutes: 0,
+        qrPayloadText: '',
+        apiToken: '',
+      );
+    } on HandshakeException catch (error) {
+      return OpenIrnApiEnrollmentResult(
+        status: OpenIrnApiEnrollmentStatus.unreachable,
+        url: enrollmentUri.toString(),
+        statusCode: null,
+        title: 'Erreur TLS',
+        message: error.message,
+        tenantId: safeTenantId,
+        enrollmentId: '',
+        code: '',
+        expiresAt: null,
+        expiresInMinutes: 0,
+        qrPayloadText: '',
+        apiToken: '',
+      );
+    } on FormatException catch (error) {
+      return OpenIrnApiEnrollmentResult(
+        status: OpenIrnApiEnrollmentStatus.unreachable,
+        url: enrollmentUri.toString(),
+        statusCode: null,
+        title: 'URL API invalide',
+        message: error.message,
+        tenantId: safeTenantId,
+        enrollmentId: '',
+        code: '',
+        expiresAt: null,
+        expiresInMinutes: 0,
+        qrPayloadText: '',
+        apiToken: '',
+      );
+    } on HttpException catch (error) {
+      return OpenIrnApiEnrollmentResult(
+        status: OpenIrnApiEnrollmentStatus.unreachable,
+        url: enrollmentUri.toString(),
+        statusCode: null,
+        title: 'Erreur HTTP',
+        message: error.message,
+        tenantId: safeTenantId,
+        enrollmentId: '',
+        code: '',
+        expiresAt: null,
+        expiresInMinutes: 0,
+        qrPayloadText: '',
+        apiToken: '',
+      );
+    }
+  }
+
+  Future<OpenIrnApiEnrollmentResult> consumeDeviceEnrollment({
+    String? baseUrl,
+    required String tenantId,
+    required String code,
+    required String deviceName,
+    required String platform,
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final consumeUri = Uri.parse(
+      '$normalizedBaseUrl/devices/enrollment/consume',
+    );
+
+    try {
+      final response = await _postJson(consumeUri, <String, dynamic>{
+        'tenantId': safeTenantId,
+        'code': code.trim(),
+        'deviceName': deviceName.trim(),
+        'platform': platform.trim(),
+      });
+      final decodedBody = _decodeJsonObject(response.body);
+      final rawDevice = decodedBody?['device'];
+      final device = rawDevice is Map
+          ? AuthorizedDevice.fromJson(Map<String, dynamic>.from(rawDevice))
+          : null;
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return OpenIrnApiEnrollmentResult(
+          status: OpenIrnApiEnrollmentStatus.accepted,
+          url: consumeUri.toString(),
+          statusCode: response.statusCode,
+          title: 'Terminal autorisé',
+          message:
+              'Ce terminal dispose maintenant de son propre jeton serveur.',
+          tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
+          enrollmentId: device?.enrollmentId ?? '',
+          code: '',
+          expiresAt: null,
+          expiresInMinutes: 0,
+          qrPayloadText: '',
+          apiToken: decodedBody?['apiToken']?.toString() ?? '',
+          device: device,
+          responseBody: decodedBody,
+        );
+      }
+
+      return OpenIrnApiEnrollmentResult(
+        status: OpenIrnApiEnrollmentStatus.rejected,
+        url: consumeUri.toString(),
+        statusCode: response.statusCode,
+        title: _enrollmentConsumeErrorTitle(response.statusCode),
+        message:
+            decodedBody?['detail']?.toString() ??
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        tenantId: safeTenantId,
+        enrollmentId: '',
+        code: '',
+        expiresAt: null,
+        expiresInMinutes: 0,
+        qrPayloadText: '',
+        apiToken: '',
+        device: device,
+        responseBody: decodedBody,
+      );
+    } on TimeoutException {
+      return OpenIrnApiEnrollmentResult(
+        status: OpenIrnApiEnrollmentStatus.unreachable,
+        url: consumeUri.toString(),
+        statusCode: null,
+        title: 'Délai dépassé',
+        message: 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+        tenantId: safeTenantId,
+        enrollmentId: '',
+        code: '',
+        expiresAt: null,
+        expiresInMinutes: 0,
+        qrPayloadText: '',
+        apiToken: '',
+      );
+    } on SocketException catch (error) {
+      return OpenIrnApiEnrollmentResult(
+        status: OpenIrnApiEnrollmentStatus.unreachable,
+        url: consumeUri.toString(),
+        statusCode: null,
+        title: 'Serveur injoignable',
+        message: error.message,
+        tenantId: safeTenantId,
+        enrollmentId: '',
+        code: '',
+        expiresAt: null,
+        expiresInMinutes: 0,
+        qrPayloadText: '',
+        apiToken: '',
+      );
+    } on HandshakeException catch (error) {
+      return OpenIrnApiEnrollmentResult(
+        status: OpenIrnApiEnrollmentStatus.unreachable,
+        url: consumeUri.toString(),
+        statusCode: null,
+        title: 'Erreur TLS',
+        message: error.message,
+        tenantId: safeTenantId,
+        enrollmentId: '',
+        code: '',
+        expiresAt: null,
+        expiresInMinutes: 0,
+        qrPayloadText: '',
+        apiToken: '',
+      );
+    } on FormatException catch (error) {
+      return OpenIrnApiEnrollmentResult(
+        status: OpenIrnApiEnrollmentStatus.unreachable,
+        url: consumeUri.toString(),
+        statusCode: null,
+        title: 'URL API invalide',
+        message: error.message,
+        tenantId: safeTenantId,
+        enrollmentId: '',
+        code: '',
+        expiresAt: null,
+        expiresInMinutes: 0,
+        qrPayloadText: '',
+        apiToken: '',
+      );
+    } on HttpException catch (error) {
+      return OpenIrnApiEnrollmentResult(
+        status: OpenIrnApiEnrollmentStatus.unreachable,
+        url: consumeUri.toString(),
+        statusCode: null,
+        title: 'Erreur HTTP',
+        message: error.message,
+        tenantId: safeTenantId,
+        enrollmentId: '',
+        code: '',
+        expiresAt: null,
+        expiresInMinutes: 0,
+        qrPayloadText: '',
+        apiToken: '',
+      );
+    }
+  }
+
+  Future<OpenIrnApiDevicesResult> renameDevice({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    required String deviceId,
+    required String name,
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final renameUri = Uri.parse('$normalizedBaseUrl/devices/$deviceId/rename');
+
+    try {
+      final response = await _postJson(renameUri, <String, dynamic>{
+        'tenantId': safeTenantId,
+        'name': name.trim(),
+      }, bearerToken: apiToken);
+      return _devicesMutationResult(
+        response,
+        renameUri,
+        safeTenantId,
+        successTitle: 'Terminal renommé',
+        successMessage: 'Le terminal a été renommé côté serveur.',
+      );
+    } on TimeoutException {
+      return _devicesNetworkError(
+        renameUri,
+        safeTenantId,
+        'Délai dépassé',
+        'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+      );
+    } on SocketException catch (error) {
+      return _devicesNetworkError(
+        renameUri,
+        safeTenantId,
+        'Serveur injoignable',
+        error.message,
+      );
+    } on HandshakeException catch (error) {
+      return _devicesNetworkError(
+        renameUri,
+        safeTenantId,
+        'Erreur TLS',
+        error.message,
+      );
+    } on FormatException catch (error) {
+      return _devicesNetworkError(
+        renameUri,
+        safeTenantId,
+        'URL API invalide',
+        error.message,
+      );
+    } on HttpException catch (error) {
+      return _devicesNetworkError(
+        renameUri,
+        safeTenantId,
+        'Erreur HTTP',
+        error.message,
+      );
+    }
+  }
+
+  Future<OpenIrnApiDevicesResult> revokeDevice({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    required String deviceId,
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final revokeUri = Uri.parse(
+      '$normalizedBaseUrl/devices/$deviceId',
+    ).replace(queryParameters: <String, String>{'tenantId': safeTenantId});
+
+    try {
+      final response = await _delete(revokeUri, bearerToken: apiToken);
+      return _devicesMutationResult(
+        response,
+        revokeUri,
+        safeTenantId,
+        successTitle: 'Terminal révoqué',
+        successMessage: 'Le terminal ne peut plus utiliser son jeton.',
+      );
+    } on TimeoutException {
+      return _devicesNetworkError(
+        revokeUri,
+        safeTenantId,
+        'Délai dépassé',
+        'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+      );
+    } on SocketException catch (error) {
+      return _devicesNetworkError(
+        revokeUri,
+        safeTenantId,
+        'Serveur injoignable',
+        error.message,
+      );
+    } on HandshakeException catch (error) {
+      return _devicesNetworkError(
+        revokeUri,
+        safeTenantId,
+        'Erreur TLS',
+        error.message,
+      );
+    } on FormatException catch (error) {
+      return _devicesNetworkError(
+        revokeUri,
+        safeTenantId,
+        'URL API invalide',
+        error.message,
+      );
+    } on HttpException catch (error) {
+      return _devicesNetworkError(
+        revokeUri,
+        safeTenantId,
+        'Erreur HTTP',
+        error.message,
+      );
+    }
+  }
+
   Stream<OpenIrnSyncEvent> watchSyncEvents({
     String? baseUrl,
     required String tenantId,
@@ -1223,9 +1956,10 @@ class OpenIrnApiClient {
         }
 
         final dataLines = <String>[];
-        await for (final line in response
-            .transform(utf8.decoder)
-            .transform(const LineSplitter())) {
+        await for (final line
+            in response
+                .transform(utf8.decoder)
+                .transform(const LineSplitter())) {
           if (line.trim().isEmpty) {
             final rawData = dataLines.join('\n').trim();
             dataLines.clear();
@@ -1260,6 +1994,146 @@ class OpenIrnApiClient {
         client.close(force: true);
       }
       await Future<void>.delayed(reconnectDelay);
+    }
+  }
+
+  Future<OfficialReferentialApiResult> loadOfficialReferentialStatus({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final uri = Uri.parse(
+      '$normalizedBaseUrl/referential/official/status',
+    ).replace(queryParameters: <String, String>{'tenantId': safeTenantId});
+
+    try {
+      final response = await _get(uri, bearerToken: apiToken);
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return _officialReferentialResult(
+          response,
+          uri,
+          safeTenantId,
+          successTitle: 'Référentiel officiel vérifié',
+          fallbackSuccessMessage:
+              'Le serveur a interrogé le dépôt officiel aDRI IRN.',
+        );
+      }
+
+      return _officialReferentialRejectedResult(response, uri, safeTenantId);
+    } on TimeoutException {
+      return _officialReferentialNetworkError(
+        uri,
+        safeTenantId,
+        'Délai dépassé',
+        'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+      );
+    } on SocketException catch (error) {
+      return _officialReferentialNetworkError(
+        uri,
+        safeTenantId,
+        'Serveur injoignable',
+        error.message,
+      );
+    } on HandshakeException catch (error) {
+      return _officialReferentialNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur TLS',
+        error.message,
+      );
+    } on FormatException catch (error) {
+      return _officialReferentialNetworkError(
+        uri,
+        safeTenantId,
+        'URL API invalide',
+        error.message,
+      );
+    } on HttpException catch (error) {
+      return _officialReferentialNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur HTTP',
+        error.message,
+      );
+    }
+  }
+
+  Future<OfficialReferentialApiResult> updateOfficialReferential({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    String triggeredByUserId = '',
+    bool force = false,
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final uri = Uri.parse('$normalizedBaseUrl/referential/official/update');
+
+    try {
+      final response = await _postJson(uri, <String, dynamic>{
+        'tenantId': safeTenantId,
+        'triggeredByUserId': triggeredByUserId,
+        'force': force,
+      }, bearerToken: apiToken);
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return _officialReferentialResult(
+          response,
+          uri,
+          safeTenantId,
+          successTitle: 'Référentiel officiel mis à jour',
+          fallbackSuccessMessage:
+              'Le référentiel aDRI IRN a été téléchargé et installé côté serveur.',
+        );
+      }
+
+      return _officialReferentialRejectedResult(response, uri, safeTenantId);
+    } on TimeoutException {
+      return _officialReferentialNetworkError(
+        uri,
+        safeTenantId,
+        'Délai dépassé',
+        'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+      );
+    } on SocketException catch (error) {
+      return _officialReferentialNetworkError(
+        uri,
+        safeTenantId,
+        'Serveur injoignable',
+        error.message,
+      );
+    } on HandshakeException catch (error) {
+      return _officialReferentialNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur TLS',
+        error.message,
+      );
+    } on FormatException catch (error) {
+      return _officialReferentialNetworkError(
+        uri,
+        safeTenantId,
+        'URL API invalide',
+        error.message,
+      );
+    } on HttpException catch (error) {
+      return _officialReferentialNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur HTTP',
+        error.message,
+      );
     }
   }
 
@@ -1303,8 +2177,34 @@ class OpenIrnApiClient {
         );
       }
       final response = await request.close().timeout(timeout);
-      final body =
-          await response.transform(utf8.decoder).join().timeout(timeout);
+      final body = await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(timeout);
+      return _HttpResponse(statusCode: response.statusCode, body: body);
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<_HttpResponse> _delete(Uri uri, {String bearerToken = ''}) async {
+    final client = HttpClient();
+    try {
+      final request = await client.deleteUrl(uri).timeout(timeout);
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      request.headers.set(HttpHeaders.userAgentHeader, 'OpenIRN');
+      final trimmedToken = bearerToken.trim();
+      if (trimmedToken.isNotEmpty) {
+        request.headers.set(
+          HttpHeaders.authorizationHeader,
+          'Bearer $trimmedToken',
+        );
+      }
+      final response = await request.close().timeout(timeout);
+      final body = await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(timeout);
       return _HttpResponse(statusCode: response.statusCode, body: body);
     } finally {
       client.close(force: true);
@@ -1334,12 +2234,192 @@ class OpenIrnApiClient {
       }
       request.add(utf8.encode(jsonEncode(payload)));
       final response = await request.close().timeout(timeout);
-      final body =
-          await response.transform(utf8.decoder).join().timeout(timeout);
+      final body = await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(timeout);
       return _HttpResponse(statusCode: response.statusCode, body: body);
     } finally {
       client.close(force: true);
     }
+  }
+
+  OpenIrnApiDevicesResult _devicesMutationResult(
+    _HttpResponse response,
+    Uri uri,
+    String tenantId, {
+    required String successTitle,
+    required String successMessage,
+  }) {
+    final decodedBody = _decodeJsonObject(response.body);
+    final rawDevices = decodedBody?['devices'];
+    final devices = rawDevices is List
+        ? rawDevices
+              .whereType<Map>()
+              .map(
+                (item) =>
+                    AuthorizedDevice.fromJson(Map<String, dynamic>.from(item)),
+              )
+              .where((device) => device.deviceId.trim().isNotEmpty)
+              .toList(growable: false)
+        : const <AuthorizedDevice>[];
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return OpenIrnApiDevicesResult(
+        status: OpenIrnApiDevicesStatus.available,
+        url: uri.toString(),
+        statusCode: response.statusCode,
+        title: successTitle,
+        message: successMessage,
+        tenantId: decodedBody?['tenantId']?.toString() ?? tenantId,
+        devices: devices,
+        responseBody: decodedBody,
+      );
+    }
+
+    return OpenIrnApiDevicesResult(
+      status: OpenIrnApiDevicesStatus.rejected,
+      url: uri.toString(),
+      statusCode: response.statusCode,
+      title: 'Opération refusée',
+      message:
+          decodedBody?['detail']?.toString() ??
+          'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+      tenantId: tenantId,
+      devices: devices,
+      responseBody: decodedBody,
+    );
+  }
+
+  OpenIrnApiDevicesResult _devicesNetworkError(
+    Uri uri,
+    String tenantId,
+    String title,
+    String message,
+  ) {
+    return OpenIrnApiDevicesResult(
+      status: OpenIrnApiDevicesStatus.unreachable,
+      url: uri.toString(),
+      statusCode: null,
+      title: title,
+      message: message,
+      tenantId: tenantId,
+      devices: const <AuthorizedDevice>[],
+    );
+  }
+
+  OfficialReferentialApiResult _officialReferentialResult(
+    _HttpResponse response,
+    Uri uri,
+    String tenantId, {
+    required String successTitle,
+    required String fallbackSuccessMessage,
+  }) {
+    final decodedBody = _decodeJsonObject(response.body);
+    final current = _officialReferentialSummary(decodedBody?['current']);
+    final remote = _officialReferentialSummary(decodedBody?['remote']);
+    final rawUpdateAvailable = decodedBody?['updateAvailable'];
+    final updateAvailable = rawUpdateAvailable is bool
+        ? rawUpdateAvailable
+        : rawUpdateAvailable?.toString().toLowerCase() == 'true';
+    final statusText = decodedBody?['status']?.toString() ?? '';
+    final message = decodedBody?['message']?.toString();
+    final title = statusText == 'up_to_date'
+        ? 'Référentiel officiel déjà à jour'
+        : successTitle;
+
+    return OfficialReferentialApiResult(
+      status: OfficialReferentialApiStatus.available,
+      url: uri.toString(),
+      statusCode: response.statusCode,
+      title: title,
+      message: message == null || message.trim().isEmpty
+          ? fallbackSuccessMessage
+          : message,
+      tenantId: decodedBody?['tenantId']?.toString() ?? tenantId,
+      updateAvailable: updateAvailable,
+      current: current,
+      remote: remote,
+      responseBody: decodedBody,
+    );
+  }
+
+  OfficialReferentialApiResult _officialReferentialRejectedResult(
+    _HttpResponse response,
+    Uri uri,
+    String tenantId,
+  ) {
+    final decodedBody = _decodeJsonObject(response.body);
+    final detail = decodedBody?['detail'];
+    String message;
+    if (detail is Map) {
+      message =
+          detail['message']?.toString() ??
+          'Le serveur a refusé l’opération sur le référentiel officiel.';
+    } else {
+      message =
+          detail?.toString() ??
+          'Le serveur a répondu avec le statut HTTP ${response.statusCode}.';
+    }
+
+    return OfficialReferentialApiResult(
+      status: OfficialReferentialApiStatus.rejected,
+      url: uri.toString(),
+      statusCode: response.statusCode,
+      title: 'Opération refusée',
+      message: message,
+      tenantId: tenantId,
+      updateAvailable: false,
+      current: _officialReferentialSummary(decodedBody?['current']),
+      remote: _officialReferentialSummary(decodedBody?['remote']),
+      responseBody: decodedBody,
+    );
+  }
+
+  OfficialReferentialApiResult _officialReferentialNetworkError(
+    Uri uri,
+    String tenantId,
+    String title,
+    String message,
+  ) {
+    return OfficialReferentialApiResult(
+      status: OfficialReferentialApiStatus.unreachable,
+      url: uri.toString(),
+      statusCode: null,
+      title: title,
+      message: message,
+      tenantId: tenantId,
+      updateAvailable: false,
+    );
+  }
+
+  OfficialReferentialSummary? _officialReferentialSummary(Object? value) {
+    if (value is Map<String, dynamic>) {
+      return OfficialReferentialSummary.fromJson(value);
+    }
+    if (value is Map) {
+      return OfficialReferentialSummary.fromJson(
+        Map<String, dynamic>.from(value),
+      );
+    }
+    return null;
+  }
+
+  String _enrollmentConsumeErrorTitle(int statusCode) {
+    switch (statusCode) {
+      case 400:
+        return 'Code invalide';
+      case 404:
+        return 'Code inconnu';
+      case 409:
+        return 'Code déjà utilisé';
+      case 410:
+        return 'Code expiré';
+      case 401:
+      case 403:
+        return 'Appairage refusé';
+    }
+    return 'Appairage refusé';
   }
 
   int _intFromJson(Object? value) {

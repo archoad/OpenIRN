@@ -1,4 +1,4 @@
-# openirn
+# OpenIRN
 
 A new Flutter project.
 

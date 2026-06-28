@@ -145,7 +145,7 @@ class SyncPullImportService {
       );
     }
 
-    if (importedCampaigns.isEmpty) {
+    if (importedCampaigns.isEmpty && mode != SyncPullImportMode.replaceLocal) {
       throw const SyncPullImportException(
         'Aucune campagne exploitable trouvée dans le snapshot distant.',
       );
@@ -208,11 +208,12 @@ class SyncPullImportService {
     );
     final safeCampaignId = _safeIdPart(sourceCampaign.id);
     final safeTimestamp = importedAt.toIso8601String().replaceAll(
-          RegExp(r'[^0-9]'),
-          '',
-        );
-    final shortSyncId =
-        serverSyncId.length > 12 ? serverSyncId.substring(0, 12) : serverSyncId;
+      RegExp(r'[^0-9]'),
+      '',
+    );
+    final shortSyncId = serverSyncId.length > 12
+        ? serverSyncId.substring(0, 12)
+        : serverSyncId;
     final importDescription =
         'Importée depuis le snapshot serveur ${serverSyncId.isEmpty ? 'inconnu' : serverSyncId}'
         '${sourceDeviceId.isEmpty ? '' : ' émis par $sourceDeviceId'}.';
@@ -392,9 +393,9 @@ class SyncPullImportService {
       final sourceEvent = LocalActivityEvent.fromJson(_asMap(rawEvent));
       final createdAt = sourceEvent.createdAt;
       final safeTimestamp = createdAt.toIso8601String().replaceAll(
-            RegExp(r'[^0-9]'),
-            '',
-          );
+        RegExp(r'[^0-9]'),
+        '',
+      );
       events.add(
         LocalActivityEvent(
           id: 'activity-remote-$safeTimestamp-${index.toString().padLeft(3, '0')}',
@@ -415,10 +416,11 @@ class SyncPullImportService {
   }
 
   IrnAnswer _answerFromValue(Object? value) {
-    final raw = value?.toString().trim().toLowerCase().replaceAll(
-              RegExp(r'[^a-z0-9]+'),
-              '_',
-            ) ??
+    final raw =
+        value?.toString().trim().toLowerCase().replaceAll(
+          RegExp(r'[^a-z0-9]+'),
+          '_',
+        ) ??
         '';
     switch (raw) {
       case 'r':
@@ -468,9 +470,9 @@ class SyncPullImportService {
 
   String _safeIdPart(String value) {
     final normalized = value.toLowerCase().replaceAll(
-          RegExp(r'[^a-z0-9]+'),
-          '-',
-        );
+      RegExp(r'[^a-z0-9]+'),
+      '-',
+    );
     final trimmed = normalized.replaceAll(RegExp(r'^-+|-+$'), '');
     return trimmed.isEmpty ? 'unknown' : trimmed;
   }
@@ -493,17 +495,17 @@ class SyncPullImportResult {
 
   int get campaignCount => campaigns.length;
   int get answerCount => campaigns.fold<int>(
-        0,
-        (total, campaign) => total + campaign.criterionAnswers.length,
-      );
+    0,
+    (total, campaign) => total + campaign.criterionAnswers.length,
+  );
   int get assignmentCount => campaigns.fold<int>(
-        0,
-        (total, campaign) => total + campaign.assignments.length,
-      );
+    0,
+    (total, campaign) => total + campaign.assignments.length,
+  );
   int get activityEventCount => campaigns.fold<int>(
-        0,
-        (total, campaign) => total + campaign.activityEvents.length,
-      );
+    0,
+    (total, campaign) => total + campaign.activityEvents.length,
+  );
 }
 
 class ImportedRemoteCampaign {

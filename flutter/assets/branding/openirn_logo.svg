@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="OpenIRN logo">
+  <rect width="1024" height="1024" fill="#ffffff"/>
+
+  <!-- Outer nodes -->
+  <circle cx="512" cy="178" r="24" fill="#06286F"/>
+  <circle cx="320" cy="266" r="24" fill="#1562D8"/>
+  <circle cx="248" cy="432" r="24" fill="#3E74B0"/>
+  <circle cx="320" cy="596" r="24" fill="#0BAED0"/>
+  <circle cx="512" cy="686" r="24" fill="#06286F"/>
+  <circle cx="704" cy="596" r="24" fill="#64B58D"/>
+  <circle cx="776" cy="432" r="24" fill="#0BAED0"/>
+  <circle cx="704" cy="266" r="24" fill="#64B58D"/>
+
+  <!-- Hexagon ring segments -->
+  <path d="M365 292 L498 215 L498 255 L382 323 Z" fill="#1562D8"/>
+  <path d="M525 215 L658 292 L641 323 L525 255 Z" fill="#06286F"/>
+  <path d="M690 309 L745 404 L718 420 L664 325 Z" fill="#0BAED0"/>
+  <path d="M718 444 L664 539 L637 523 L692 428 Z" fill="#0BAED0"/>
+  <path d="M640 612 L525 678 L525 638 L624 580 Z" fill="#1172D6"/>
+  <path d="M499 678 L384 612 L400 580 L499 638 Z" fill="#1172D6"/>
+  <path d="M360 540 L304 444 L331 428 L386 523 Z" fill="#3E74B0"/>
+  <path d="M331 404 L386 309 L413 325 L358 420 Z" fill="#1562D8"/>
+
+  <!-- Center hub -->
+  <circle cx="512" cy="430" r="28" fill="#0BAED0"/>
+  <g stroke="#06286F" stroke-width="7" stroke-linecap="square" fill="none">
+    <line x1="512" y1="294" x2="512" y2="374"/>
+    <line x1="512" y1="458" x2="512" y2="548"/>
+    <line x1="436" y1="356" x2="482" y2="394"/>
+    <line x1="542" y1="394" x2="588" y2="356"/>
+    <line x1="436" y1="504" x2="482" y2="466"/>
+    <line x1="542" y1="466" x2="588" y2="504"/>
+  </g>
+  <g stroke="#06286F" stroke-width="7" stroke-linecap="square">
+    <line x1="512" y1="380" x2="512" y2="390"/>
+    <line x1="512" y1="468" x2="512" y2="478"/>
+    <line x1="490" y1="410" x2="480" y2="404"/>
+    <line x1="534" y1="410" x2="544" y2="404"/>
+    <line x1="490" y1="450" x2="480" y2="456"/>
+    <line x1="534" y1="450" x2="544" y2="456"/>
+  </g>
+
+  <!-- Wordmark -->
+  <g font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="118">
+    <text x="230" y="888" fill="#06286F">Open</text>
+    <text x="520" y="888" fill="#0BAED0">IRN</text>
+  </g>
+</svg>

@@ -1,11 +1,21 @@
 import 'package:flutter/material.dart';
 
+import '../../data/api/openirn_api_client.dart';
+import '../../data/repositories/local_sync_configuration_repository.dart';
+import '../../data/repositories/local_user_repository.dart';
+import '../../domain/models/app_user.dart';
 import '../../domain/models/irn_referential.dart';
+import '../../domain/models/sync_configuration.dart';
 import '../../domain/repositories/irn_referential_repository.dart';
+import '../../domain/services/app_sync_coordinator.dart';
 import '../../domain/services/referential_catalog_service.dart';
 import '../about/about_screen.dart';
+import '../admin/administration_screen.dart';
 import '../campaigns/campaign_list_screen.dart';
 import '../common/openirn_app_bar.dart';
+import '../common/responsive_autofocus.dart';
+import '../common/responsive_dialog.dart';
+import '../sync/device_enrollment_screen.dart';
 import 'criterion_detail_screen.dart';
 
 class ReferentialOverviewScreen extends StatefulWidget {
@@ -25,6 +35,9 @@ class _ReferentialOverviewScreenState extends State<ReferentialOverviewScreen> {
   void initState() {
     super.initState();
     _referentialFuture = widget.repository.getActiveReferential();
+    _referentialFuture.then((referential) {
+      AppSyncCoordinator.instance.start(referential: referential);
+    });
   }
 
   Future<void> _openAbout() async {
@@ -74,10 +87,236 @@ class _ReferentialOverviewScreenState extends State<ReferentialOverviewScreen> {
   }
 }
 
-class _HomeContent extends StatelessWidget {
+class _HomeContent extends StatefulWidget {
   final IrnReferential referential;
 
   const _HomeContent({required this.referential});
+
+  @override
+  State<_HomeContent> createState() => _HomeContentState();
+}
+
+class _HomeContentState extends State<_HomeContent> {
+  final _userRepository = const LocalUserRepository();
+  final _syncConfigurationRepository = const LocalSyncConfigurationRepository();
+  final _apiClient = const OpenIrnApiClient();
+  late Future<SyncConfiguration> _syncConfigurationFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncConfigurationFuture = _syncConfigurationRepository.loadConfiguration();
+  }
+
+  Future<void> _openDeviceEnrollment() async {
+    final enrolled = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => DeviceEnrollmentScreen(referential: widget.referential),
+      ),
+    );
+    if (!mounted) {
+      return;
+    }
+    if (enrolled == true) {
+      setState(() {
+        _syncConfigurationFuture = _syncConfigurationRepository
+            .loadConfiguration();
+      });
+      AppSyncCoordinator.instance.start(referential: widget.referential);
+    }
+  }
+
+  void _showForbidden(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _openCampaigns() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CampaignListScreen(referential: widget.referential),
+      ),
+    );
+  }
+
+  Future<void> _openReferentialCatalog() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            ReferentialCatalogScreen(referential: widget.referential),
+      ),
+    );
+  }
+
+  Future<void> _openAdministration() async {
+    final selectedUser = await _authenticateAdministratorOrCampaignManager(
+      title: 'Administration',
+      intro:
+          'Sélectionne un administrateur ou un pilote IRN pour ouvrir la console d’administration.',
+      trailingIcon: Icons.admin_panel_settings_outlined,
+    );
+    if (selectedUser == null || !mounted) {
+      return;
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => AdministrationScreen(
+          referential: widget.referential,
+          activeUser: selectedUser,
+        ),
+      ),
+    );
+  }
+
+  Future<AppUser?> _authenticateAdministratorOrCampaignManager({
+    required String title,
+    required String intro,
+    required IconData trailingIcon,
+  }) async {
+    final authenticationData = await _loadAuthenticatableUsers();
+    if (!mounted) {
+      return null;
+    }
+
+    final managerUsers = authenticationData.users
+        .where(
+          (user) =>
+              user.active &&
+              (user.role == AppUserRole.administrator ||
+                  user.role == AppUserRole.campaignManager),
+        )
+        .toList(growable: false);
+
+    if (managerUsers.isEmpty) {
+      _showForbidden(
+        'Aucun administrateur ou pilote IRN actif n’est disponible.',
+      );
+      return null;
+    }
+
+    final selectedUser = await showDialog<AppUser>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _AdministrationAuthenticationDialog(
+        title: title,
+        intro: intro,
+        users: managerUsers,
+        source: authenticationData.source,
+        message: authenticationData.message,
+        trailingIcon: trailingIcon,
+      ),
+    );
+
+    if (selectedUser == null || !mounted) {
+      return null;
+    }
+
+    final verified = await _verifySelectedUser(
+      authenticationData: authenticationData,
+      user: selectedUser,
+    );
+    if (!verified || !mounted) {
+      return null;
+    }
+
+    return selectedUser;
+  }
+
+  Future<bool> _verifySelectedUser({
+    required _AdministrationAuthenticationData authenticationData,
+    required AppUser user,
+  }) async {
+    if (authenticationData.source !=
+        _AdministrationAuthenticationSource.server) {
+      return true;
+    }
+
+    final pin = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _AdministrationPinAuthenticationDialog(user: user),
+    );
+    if (pin == null) {
+      return false;
+    }
+
+    final result = await _apiClient.verifyUserPin(
+      baseUrl: authenticationData.apiBaseUrl,
+      tenantId: authenticationData.tenantId,
+      apiToken: authenticationData.apiToken,
+      userId: user.id,
+      pin: pin,
+    );
+
+    if (!mounted) {
+      return result.isAccepted;
+    }
+
+    if (!result.isAccepted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${result.title} — ${result.message}')),
+      );
+      return false;
+    }
+
+    if (result.mustChangePin) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Code initial accepté. Pense à définir un code personnel côté administration API.',
+          ),
+        ),
+      );
+    }
+
+    return true;
+  }
+
+  Future<_AdministrationAuthenticationData> _loadAuthenticatableUsers() async {
+    final localUsers = await _userRepository.ensureDefaultUsers();
+    final configuration = await _syncConfigurationRepository
+        .loadConfiguration();
+
+    if (configuration.isConfigured) {
+      final centralUsers = await _apiClient.loadUsers(
+        baseUrl: configuration.apiBaseUrl,
+        tenantId: configuration.tenantId,
+        apiToken: configuration.apiToken,
+      );
+
+      if (centralUsers.hasUsers) {
+        await _userRepository.saveUsers(centralUsers.users);
+        return _AdministrationAuthenticationData(
+          source: _AdministrationAuthenticationSource.server,
+          message:
+              '${centralUsers.message} Sélectionne ton identité puis saisis ton code personnel.',
+          users: centralUsers.users,
+          apiBaseUrl: configuration.apiBaseUrl,
+          tenantId: configuration.tenantId,
+          apiToken: configuration.apiToken,
+        );
+      }
+
+      return _AdministrationAuthenticationData(
+        source: _AdministrationAuthenticationSource.localFallback,
+        message:
+            '${centralUsers.title} — bascule temporaire sur la base utilisateurs de secours.',
+        users: localUsers,
+      );
+    }
+
+    return const _AdministrationAuthenticationData(
+      source: _AdministrationAuthenticationSource.localOnly,
+      message:
+          'Synchronisation non configurée : sélection dans la base utilisateurs de secours.',
+      users: <AppUser>[],
+    ).copyWith(users: localUsers);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -92,11 +331,7 @@ class _HomeContent extends StatelessWidget {
               title: 'Evaluation Indice de Résilience Numérique',
               subtitle: 'Créer ou ouvrir une campagne d\'évaluation',
               buttonLabel: 'Ouvrir',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => CampaignListScreen(referential: referential),
-                ),
-              ),
+              onPressed: _openCampaigns,
             ),
             const SizedBox(height: 12),
             _HomeActionCard(
@@ -105,12 +340,38 @@ class _HomeContent extends StatelessWidget {
               subtitle:
                   'Présentation et moteur de recherche du référentiel IRN',
               buttonLabel: 'Accéder',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) =>
-                      ReferentialCatalogScreen(referential: referential),
-                ),
-              ),
+              onPressed: _openReferentialCatalog,
+            ),
+            const SizedBox(height: 12),
+            _HomeActionCard(
+              icon: Icons.admin_panel_settings_outlined,
+              title: 'Administration',
+              subtitle:
+                  'Gérer les campagnes, les utilisateurs et la maintenance serveur',
+              buttonLabel: 'Administrer',
+              onPressed: _openAdministration,
+            ),
+            FutureBuilder<SyncConfiguration>(
+              future: _syncConfigurationFuture,
+              builder: (context, snapshot) {
+                final configuration = snapshot.data;
+                if (configuration == null || configuration.isConfigured) {
+                  return const SizedBox.shrink();
+                }
+                return Column(
+                  children: [
+                    const SizedBox(height: 12),
+                    _HomeActionCard(
+                      icon: Icons.phonelink_lock_outlined,
+                      title: 'Autoriser ce terminal',
+                      subtitle:
+                          'Appairer ce poste avec le serveur OpenIRN sans saisir manuellement le bearer.',
+                      buttonLabel: 'Appairer',
+                      onPressed: _openDeviceEnrollment,
+                    ),
+                  ],
+                );
+              },
             ),
           ],
         ),
@@ -183,6 +444,450 @@ class _HomeActionCard extends StatelessWidget {
                 ],
               ),
       ),
+    );
+  }
+}
+
+enum _AdministrationAuthenticationSource { server, localFallback, localOnly }
+
+class _AdministrationAuthenticationData {
+  final _AdministrationAuthenticationSource source;
+  final String message;
+  final List<AppUser> users;
+  final String apiBaseUrl;
+  final String tenantId;
+  final String apiToken;
+
+  const _AdministrationAuthenticationData({
+    required this.source,
+    required this.message,
+    required this.users,
+    this.apiBaseUrl = '',
+    this.tenantId = '',
+    this.apiToken = '',
+  });
+
+  _AdministrationAuthenticationData copyWith({
+    _AdministrationAuthenticationSource? source,
+    String? message,
+    List<AppUser>? users,
+    String? apiBaseUrl,
+    String? tenantId,
+    String? apiToken,
+  }) {
+    return _AdministrationAuthenticationData(
+      source: source ?? this.source,
+      message: message ?? this.message,
+      users: users ?? this.users,
+      apiBaseUrl: apiBaseUrl ?? this.apiBaseUrl,
+      tenantId: tenantId ?? this.tenantId,
+      apiToken: apiToken ?? this.apiToken,
+    );
+  }
+
+  String get sourceLabel {
+    switch (source) {
+      case _AdministrationAuthenticationSource.server:
+        return 'Base centrale serveur';
+      case _AdministrationAuthenticationSource.localFallback:
+        return 'Secours hors ligne';
+      case _AdministrationAuthenticationSource.localOnly:
+        return 'Mode hors ligne';
+    }
+  }
+
+  IconData get sourceIcon {
+    switch (source) {
+      case _AdministrationAuthenticationSource.server:
+        return Icons.cloud_done_outlined;
+      case _AdministrationAuthenticationSource.localFallback:
+        return Icons.cloud_off_outlined;
+      case _AdministrationAuthenticationSource.localOnly:
+        return Icons.storage_outlined;
+    }
+  }
+}
+
+class _AdministrationAuthenticationDialog extends StatelessWidget {
+  final String title;
+  final String intro;
+  final List<AppUser> users;
+  final _AdministrationAuthenticationSource source;
+  final String message;
+  final IconData trailingIcon;
+
+  const _AdministrationAuthenticationDialog({
+    required this.title,
+    required this.intro,
+    required this.users,
+    required this.source,
+    required this.message,
+    required this.trailingIcon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final sourceData = _AdministrationAuthenticationData(
+      source: source,
+      message: message,
+      users: users,
+    );
+    final dialogMaxHeight = MediaQuery.sizeOf(context).height * 0.62;
+
+    return AlertDialog(
+      insetPadding: responsiveDialogInsetPadding(context),
+      title: Text(title),
+      content: ResponsiveDialogContent(
+        maxWidth: 760,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: dialogMaxHeight),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(intro, style: theme.textTheme.bodyMedium),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  Chip(
+                    avatar: Icon(sourceData.sourceIcon, size: 18),
+                    label: Text(sourceData.sourceLabel),
+                  ),
+                  Chip(label: Text('${users.length} profil(s) autorisé(s)')),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(message, style: theme.textTheme.bodySmall),
+              const SizedBox(height: 14),
+              Flexible(
+                fit: FlexFit.loose,
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  primary: false,
+                  itemCount: users.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final user = users[index];
+                    return Card.outlined(
+                      child: ListTile(
+                        leading: CircleAvatar(child: Text(_initials(user))),
+                        title: Text(
+                          user.fullName.isNotEmpty ? user.fullName : user.email,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(user.role.label),
+                        trailing: Icon(trailingIcon),
+                        onTap: () => Navigator.of(context).pop(user),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Annuler'),
+        ),
+      ],
+    );
+  }
+
+  String _initials(AppUser user) {
+    final parts = <String>[
+      user.firstName.trim(),
+      user.lastName.trim(),
+    ].where((part) => part.isNotEmpty).toList(growable: false);
+    if (parts.isEmpty) {
+      final fallback = user.email.trim().isNotEmpty
+          ? user.email.trim()
+          : user.id.trim();
+      return fallback.isEmpty ? '?' : fallback.substring(0, 1).toUpperCase();
+    }
+    final initials = parts
+        .take(2)
+        .map((part) => part.substring(0, 1).toUpperCase())
+        .join();
+    return initials.isEmpty ? '?' : initials;
+  }
+}
+
+class _AdministrationPinAuthenticationDialog extends StatefulWidget {
+  final AppUser user;
+
+  const _AdministrationPinAuthenticationDialog({required this.user});
+
+  @override
+  State<_AdministrationPinAuthenticationDialog> createState() =>
+      _AdministrationPinAuthenticationDialogState();
+}
+
+class _AdministrationPinAuthenticationDialogState
+    extends State<_AdministrationPinAuthenticationDialog> {
+  final _pinController = TextEditingController();
+  String? _errorText;
+
+  @override
+  void dispose() {
+    _pinController.dispose();
+    super.dispose();
+  }
+
+  void _appendPinDigit(String digit) {
+    final currentPin = _pinController.text;
+    if (currentPin.length >= 32) {
+      return;
+    }
+
+    setState(() {
+      _pinController.text = '$currentPin$digit';
+      _errorText = null;
+    });
+  }
+
+  void _removePinDigit() {
+    final currentPin = _pinController.text;
+    if (currentPin.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _pinController.text = currentPin.substring(0, currentPin.length - 1);
+      _errorText = null;
+    });
+  }
+
+  void _clearPin() {
+    if (_pinController.text.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _pinController.clear();
+      _errorText = null;
+    });
+  }
+
+  void _submit() {
+    final pin = _pinController.text.trim();
+    if (pin.isEmpty) {
+      setState(() {
+        _errorText = 'Saisis ton code personnel.';
+      });
+      return;
+    }
+    Navigator.of(context).pop(pin);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final displayName = widget.user.fullName.isNotEmpty
+        ? widget.user.fullName
+        : widget.user.email;
+    final useSecureMobilePinPad = shouldUseMobileKeyboardWorkaround(context);
+
+    return AlertDialog(
+      insetPadding: responsiveDialogInsetPadding(context),
+      title: const Text('Authentification utilisateur'),
+      content: ResponsiveDialogContent(
+        maxWidth: 520,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                displayName.isEmpty ? widget.user.id : displayName,
+                style: Theme.of(context).textTheme.titleMedium,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 6),
+              Text(widget.user.role.label),
+              const SizedBox(height: 16),
+              if (useSecureMobilePinPad)
+                _AdministrationMobilePinPad(
+                  pinLength: _pinController.text.length,
+                  errorText: _errorText,
+                  onDigit: _appendPinDigit,
+                  onBackspace: _removePinDigit,
+                  onClear: _clearPin,
+                  onSubmit: _submit,
+                )
+              else
+                TextField(
+                  controller: _pinController,
+                  autofocus: shouldAutofocusTextField(context),
+                  obscureText: true,
+                  keyboardType: safeKeyboardType(context, TextInputType.number),
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  smartDashesType: SmartDashesType.disabled,
+                  smartQuotesType: SmartQuotesType.disabled,
+                  textInputAction: TextInputAction.done,
+                  decoration: InputDecoration(
+                    labelText: 'Code personnel',
+                    helperText:
+                        'Code initial serveur : 0000 si aucun code n’a encore été défini.',
+                    errorText: _errorText,
+                    prefixIcon: const Icon(Icons.lock_outline),
+                  ),
+                  onChanged: (_) {
+                    if (_errorText != null) {
+                      setState(() {
+                        _errorText = null;
+                      });
+                    }
+                  },
+                  onSubmitted: (_) => _submit(),
+                ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Annuler'),
+        ),
+        if (!useSecureMobilePinPad)
+          FilledButton.icon(
+            onPressed: _submit,
+            icon: const Icon(Icons.login_outlined),
+            label: const Text('Ouvrir'),
+          ),
+      ],
+    );
+  }
+}
+
+class _AdministrationMobilePinPad extends StatelessWidget {
+  final int pinLength;
+  final String? errorText;
+  final ValueChanged<String> onDigit;
+  final VoidCallback onBackspace;
+  final VoidCallback onClear;
+  final VoidCallback onSubmit;
+
+  const _AdministrationMobilePinPad({
+    required this.pinLength,
+    required this.errorText,
+    required this.onDigit,
+    required this.onBackspace,
+    required this.onClear,
+    required this.onSubmit,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final displayedDots = pinLength.clamp(0, 8);
+    final semanticDigits = pinLength > 1 ? 'chiffres saisis' : 'chiffre saisi';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Code personnel', style: theme.textTheme.labelLarge),
+        const SizedBox(height: 8),
+        Semantics(
+          label: 'Code personnel, $pinLength $semanticDigits',
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              border: Border.all(color: colorScheme.outlineVariant),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                for (
+                  var index = 0;
+                  index < 4 || index < displayedDots;
+                  index++
+                ) ...[
+                  Icon(
+                    index < pinLength ? Icons.circle : Icons.circle_outlined,
+                    size: 14,
+                    color: index < pinLength
+                        ? colorScheme.primary
+                        : colorScheme.outline,
+                  ),
+                  if (index < 3 || index + 1 < displayedDots)
+                    const SizedBox(width: 12),
+                ],
+                if (pinLength > displayedDots) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    '+${pinLength - displayedDots}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Code initial serveur : 0000 si aucun code n’a encore été défini.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: colorScheme.onSurfaceVariant,
+          ),
+        ),
+        if (errorText != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            errorText!,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: colorScheme.error,
+            ),
+          ),
+        ],
+        const SizedBox(height: 16),
+        GridView.count(
+          crossAxisCount: 3,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+          childAspectRatio: 2.25,
+          children: [
+            for (final digit in ['1', '2', '3', '4', '5', '6', '7', '8', '9'])
+              OutlinedButton(
+                onPressed: () => onDigit(digit),
+                child: Text(digit),
+              ),
+            TextButton(
+              onPressed: pinLength == 0 ? null : onClear,
+              child: const Text('Effacer'),
+            ),
+            OutlinedButton(
+              onPressed: () => onDigit('0'),
+              child: const Text('0'),
+            ),
+            IconButton.outlined(
+              onPressed: pinLength == 0 ? null : onBackspace,
+              tooltip: 'Supprimer le dernier chiffre',
+              icon: const Icon(Icons.backspace_outlined),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        FilledButton.icon(
+          onPressed: onSubmit,
+          icon: const Icon(Icons.login_outlined),
+          label: const Text('Ouvrir'),
+        ),
+      ],
     );
   }
 }

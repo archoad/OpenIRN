@@ -4,6 +4,7 @@ import 'data/repositories/asset_irn_referential_repository.dart';
 import 'presentation/referential/referential_overview_screen.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const OpenIrnApp());
 }
 
@@ -34,9 +35,32 @@ class OpenIrnApp extends StatelessWidget {
           ),
         ),
       ),
+      builder: (context, child) {
+        return _KeyboardDismissScope(child: child ?? const SizedBox.shrink());
+      },
       home: const ReferentialOverviewScreen(
         repository: AssetIrnReferentialRepository(),
       ),
+    );
+  }
+}
+
+class _KeyboardDismissScope extends StatelessWidget {
+  final Widget child;
+
+  const _KeyboardDismissScope({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) {
+        final focusScope = FocusScope.of(context);
+        if (!focusScope.hasPrimaryFocus && focusScope.focusedChild != null) {
+          focusScope.unfocus();
+        }
+      },
+      child: child,
     );
   }
 }

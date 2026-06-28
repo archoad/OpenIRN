@@ -131,18 +131,19 @@ void main() {
 
   test('buildReport accepte une campagne complète', () {
     final referential = _sampleReferential();
-    final campaign = LocalCampaign.defaultForReferential(
-      referentialId: 'adri-irn-v1.1',
-      referentialVersion: 'v1.1',
-    ).copyWith(
-      information: const CampaignInformation(
-        systemName: 'SI Comptable',
-        systemDescription: 'Système comptable critique.',
-        projectDirectorFirstName: 'Eva',
-        projectDirectorLastName: 'Roux',
-        projectDirectorEmail: 'eva.roux@example.test',
-      ),
-    );
+    final campaign =
+        LocalCampaign.defaultForReferential(
+          referentialId: 'adri-irn-v1.1',
+          referentialVersion: 'v1.1',
+        ).copyWith(
+          information: const CampaignInformation(
+            systemName: 'SI Comptable',
+            systemDescription: 'Système comptable critique.',
+            projectDirectorFirstName: 'Eva',
+            projectDirectorLastName: 'Roux',
+            projectDirectorEmail: 'eva.roux@example.test',
+          ),
+        );
 
     final report = const AssessmentQualityService().buildReport(
       referential: referential,

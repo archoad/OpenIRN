@@ -10,10 +10,13 @@ import '../../domain/models/app_user.dart';
 import '../../domain/models/irn_assessment.dart';
 import '../../domain/models/irn_referential.dart';
 import '../../domain/models/local_campaign.dart';
+import '../../domain/services/app_sync_coordinator.dart';
 import '../../domain/services/assessment_quality_service.dart';
 import '../../domain/services/official_rnr_scoring_service.dart';
 import '../assessment/assessment_screen.dart';
 import '../common/openirn_app_bar.dart';
+import '../common/responsive_autofocus.dart';
+import '../common/responsive_dialog.dart';
 
 class CampaignListScreen extends StatefulWidget {
   final IrnReferential referential;
@@ -33,19 +36,37 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
   final _apiClient = const OpenIrnApiClient();
   final _scoringService = const OfficialRnrScoringService();
   final _qualityService = const AssessmentQualityService();
+  final _appSyncCoordinator = AppSyncCoordinator.instance;
 
   late Future<_CampaignListState> _campaignsFuture;
+  int _lastAppliedSyncSerial = 0;
 
   @override
   void initState() {
     super.initState();
     _campaignsFuture = _loadCampaigns();
+    _lastAppliedSyncSerial = _appSyncCoordinator.changeSerial;
+    _appSyncCoordinator.addListener(_handleBackgroundSyncUpdate);
+  }
+
+  @override
+  void dispose() {
+    _appSyncCoordinator.removeListener(_handleBackgroundSyncUpdate);
+    super.dispose();
+  }
+
+  void _handleBackgroundSyncUpdate() {
+    final serial = _appSyncCoordinator.changeSerial;
+    if (!mounted || serial == _lastAppliedSyncSerial) {
+      return;
+    }
+    _lastAppliedSyncSerial = serial;
+    _refresh();
   }
 
   Future<_CampaignListState> _loadCampaigns() async {
-    final campaigns = await _campaignRepository.ensureDefaultCampaign(
+    final campaigns = await _campaignRepository.loadCampaigns(
       referentialId: widget.referential.id,
-      referentialVersion: widget.referential.version,
     );
 
     final enriched = <_CampaignWithSummary>[];
@@ -210,8 +231,8 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
 
   Future<_CampaignAuthenticationData> _loadAuthenticatableUsers() async {
     final localUsers = await _userRepository.ensureDefaultUsers();
-    final configuration =
-        await _syncConfigurationRepository.loadConfiguration();
+    final configuration = await _syncConfigurationRepository
+        .loadConfiguration();
 
     if (configuration.isConfigured) {
       final centralUsers = await _apiClient.loadUsers(
@@ -276,11 +297,14 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
                 children: [
                   _HeaderCard(referential: widget.referential),
                   const SizedBox(height: 12),
-                  for (final campaign in campaigns)
-                    _CampaignCard(
-                      entry: campaign,
-                      onOpen: () => _openCampaign(campaign.campaign),
-                    ),
+                  if (campaigns.isEmpty)
+                    const _NoCampaignState()
+                  else
+                    for (final campaign in campaigns)
+                      _CampaignCard(
+                        entry: campaign,
+                        onOpen: () => _openCampaign(campaign.campaign),
+                      ),
                 ],
               ),
             ),
@@ -375,9 +399,10 @@ class _CampaignAuthenticationDialog extends StatelessWidget {
     final dialogMaxHeight = MediaQuery.sizeOf(context).height * 0.62;
 
     return AlertDialog(
+      insetPadding: responsiveDialogInsetPadding(context),
       title: const Text('Sélection de l’utilisateur'),
-      content: SizedBox(
-        width: 560,
+      content: ResponsiveDialogContent(
+        maxWidth: 760,
         child: ConstrainedBox(
           constraints: BoxConstraints(maxHeight: dialogMaxHeight),
           child: Column(
@@ -411,7 +436,7 @@ class _CampaignAuthenticationDialog extends StatelessWidget {
                   shrinkWrap: true,
                   primary: false,
                   itemCount: users.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  separatorBuilder: (_, _) => const SizedBox(height: 8),
                   itemBuilder: (context, index) {
                     final user = users[index];
                     return Card.outlined(
@@ -466,12 +491,15 @@ class _CampaignAuthenticationDialog extends StatelessWidget {
       user.lastName.trim(),
     ].where((part) => part.isNotEmpty).toList(growable: false);
     if (parts.isEmpty) {
-      final fallback =
-          user.email.trim().isNotEmpty ? user.email.trim() : user.id.trim();
+      final fallback = user.email.trim().isNotEmpty
+          ? user.email.trim()
+          : user.id.trim();
       return fallback.isEmpty ? '?' : fallback.substring(0, 1).toUpperCase();
     }
-    final initials =
-        parts.take(2).map((part) => part.substring(0, 1).toUpperCase()).join();
+    final initials = parts
+        .take(2)
+        .map((part) => part.substring(0, 1).toUpperCase())
+        .join();
     return initials.isEmpty ? '?' : initials;
   }
 }
@@ -496,6 +524,41 @@ class _PinAuthenticationDialogState extends State<_PinAuthenticationDialog> {
     super.dispose();
   }
 
+  void _appendPinDigit(String digit) {
+    final currentPin = _pinController.text;
+    if (currentPin.length >= 32) {
+      return;
+    }
+
+    setState(() {
+      _pinController.text = '$currentPin$digit';
+      _errorText = null;
+    });
+  }
+
+  void _removePinDigit() {
+    final currentPin = _pinController.text;
+    if (currentPin.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _pinController.text = currentPin.substring(0, currentPin.length - 1);
+      _errorText = null;
+    });
+  }
+
+  void _clearPin() {
+    if (_pinController.text.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _pinController.clear();
+      _errorText = null;
+    });
+  }
+
   void _submit() {
     final pin = _pinController.text.trim();
     if (pin.isEmpty) {
@@ -512,39 +575,65 @@ class _PinAuthenticationDialogState extends State<_PinAuthenticationDialog> {
     final displayName = widget.user.fullName.isNotEmpty
         ? widget.user.fullName
         : widget.user.email;
+    final useSecureMobilePinPad = shouldUseMobileKeyboardWorkaround(context);
+
     return AlertDialog(
+      insetPadding: responsiveDialogInsetPadding(context),
       title: const Text('Authentification utilisateur'),
-      content: SizedBox(
-        width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              displayName.isEmpty ? widget.user.id : displayName,
-              style: Theme.of(context).textTheme.titleMedium,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(height: 6),
-            Text(widget.user.role.label),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _pinController,
-              autofocus: true,
-              obscureText: true,
-              keyboardType: TextInputType.number,
-              textInputAction: TextInputAction.done,
-              decoration: InputDecoration(
-                labelText: 'Code personnel',
-                helperText:
-                    'Code initial serveur : 0000 si aucun code n’a encore été défini.',
-                errorText: _errorText,
-                prefixIcon: const Icon(Icons.lock_outline),
+      content: ResponsiveDialogContent(
+        maxWidth: 520,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                displayName.isEmpty ? widget.user.id : displayName,
+                style: Theme.of(context).textTheme.titleMedium,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
-              onSubmitted: (_) => _submit(),
-            ),
-          ],
+              const SizedBox(height: 6),
+              Text(widget.user.role.label),
+              const SizedBox(height: 16),
+              if (useSecureMobilePinPad)
+                _MobilePinPad(
+                  pinLength: _pinController.text.length,
+                  errorText: _errorText,
+                  onDigit: _appendPinDigit,
+                  onBackspace: _removePinDigit,
+                  onClear: _clearPin,
+                  onSubmit: _submit,
+                )
+              else
+                TextField(
+                  controller: _pinController,
+                  autofocus: shouldAutofocusTextField(context),
+                  obscureText: true,
+                  keyboardType: safeKeyboardType(context, TextInputType.number),
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  smartDashesType: SmartDashesType.disabled,
+                  smartQuotesType: SmartQuotesType.disabled,
+                  textInputAction: TextInputAction.done,
+                  decoration: InputDecoration(
+                    labelText: 'Code personnel',
+                    helperText:
+                        'Code initial serveur : 0000 si aucun code n’a encore été défini.',
+                    errorText: _errorText,
+                    prefixIcon: const Icon(Icons.lock_outline),
+                  ),
+                  onChanged: (_) {
+                    if (_errorText != null) {
+                      setState(() {
+                        _errorText = null;
+                      });
+                    }
+                  },
+                  onSubmitted: (_) => _submit(),
+                ),
+            ],
+          ),
         ),
       ),
       actions: [
@@ -552,8 +641,133 @@ class _PinAuthenticationDialogState extends State<_PinAuthenticationDialog> {
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Annuler'),
         ),
+        if (!useSecureMobilePinPad)
+          FilledButton.icon(
+            onPressed: _submit,
+            icon: const Icon(Icons.login_outlined),
+            label: const Text('Ouvrir'),
+          ),
+      ],
+    );
+  }
+}
+
+class _MobilePinPad extends StatelessWidget {
+  final int pinLength;
+  final String? errorText;
+  final ValueChanged<String> onDigit;
+  final VoidCallback onBackspace;
+  final VoidCallback onClear;
+  final VoidCallback onSubmit;
+
+  const _MobilePinPad({
+    required this.pinLength,
+    required this.errorText,
+    required this.onDigit,
+    required this.onBackspace,
+    required this.onClear,
+    required this.onSubmit,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final displayedDots = pinLength.clamp(0, 8);
+    final semanticDigits = pinLength > 1 ? 'chiffres saisis' : 'chiffre saisi';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Code personnel', style: theme.textTheme.labelLarge),
+        const SizedBox(height: 8),
+        Semantics(
+          label: 'Code personnel, $pinLength $semanticDigits',
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              border: Border.all(color: colorScheme.outlineVariant),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                for (
+                  var index = 0;
+                  index < 4 || index < displayedDots;
+                  index++
+                ) ...[
+                  Icon(
+                    index < pinLength ? Icons.circle : Icons.circle_outlined,
+                    size: 14,
+                    color: index < pinLength
+                        ? colorScheme.primary
+                        : colorScheme.outline,
+                  ),
+                  if (index < 3 || index + 1 < displayedDots)
+                    const SizedBox(width: 12),
+                ],
+                if (pinLength > displayedDots) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    '+${pinLength - displayedDots}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Code initial serveur : 0000 si aucun code n’a encore été défini.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: colorScheme.onSurfaceVariant,
+          ),
+        ),
+        if (errorText != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            errorText!,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: colorScheme.error,
+            ),
+          ),
+        ],
+        const SizedBox(height: 16),
+        GridView.count(
+          crossAxisCount: 3,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+          childAspectRatio: 2.25,
+          children: [
+            for (final digit in ['1', '2', '3', '4', '5', '6', '7', '8', '9'])
+              OutlinedButton(
+                onPressed: () => onDigit(digit),
+                child: Text(digit),
+              ),
+            TextButton(
+              onPressed: pinLength == 0 ? null : onClear,
+              child: const Text('Effacer'),
+            ),
+            OutlinedButton(
+              onPressed: () => onDigit('0'),
+              child: const Text('0'),
+            ),
+            IconButton.outlined(
+              onPressed: pinLength == 0 ? null : onBackspace,
+              tooltip: 'Supprimer le dernier chiffre',
+              icon: const Icon(Icons.backspace_outlined),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
         FilledButton.icon(
-          onPressed: _submit,
+          onPressed: onSubmit,
           icon: const Icon(Icons.login_outlined),
           label: const Text('Ouvrir'),
         ),
@@ -613,7 +827,22 @@ class _HeaderCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    'Une campagne regroupe une saisie R / NR, sa synthèse et son contrôle qualité',
+                    'Une campagne regroupe une saisie R / NR, sa synthèse, son contrôle qualité, '
+                    'son export JSON et maintenant un statut de workflow.',
+                  ),
+                  const SizedBox(height: 10),
+                  const Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      Chip(
+                        avatar: Icon(Icons.login_outlined, size: 18),
+                        label: Text(
+                          'Authentification à l’ouverture de la campagne',
+                        ),
+                      ),
+                      Chip(label: Text('Aucune session active sur cette page')),
+                    ],
                   ),
                 ],
               ),
@@ -669,7 +898,9 @@ class _CampaignCard extends StatelessWidget {
                         ),
                       ],
                       if (campaign
-                              .information.projectDirectorFullName.isNotEmpty ||
+                              .information
+                              .projectDirectorFullName
+                              .isNotEmpty ||
                           campaign.information.projectDirectorEmail
                               .trim()
                               .isNotEmpty) ...[
@@ -779,6 +1010,30 @@ class _CampaignCard extends StatelessWidget {
     final hour = local.hour.toString().padLeft(2, '0');
     final minute = local.minute.toString().padLeft(2, '0');
     return '$day/$month/$year $hour:$minute';
+  }
+}
+
+class _NoCampaignState extends StatelessWidget {
+  const _NoCampaignState();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Card(
+      child: Padding(
+        padding: EdgeInsets.all(24),
+        child: Column(
+          children: [
+            Icon(Icons.folder_off_outlined, size: 44),
+            SizedBox(height: 12),
+            Text('Aucune campagne disponible.'),
+            SizedBox(height: 6),
+            Text(
+              'Utilise le menu ⋮ puis “Gérer les campagnes” pour créer une campagne.',
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

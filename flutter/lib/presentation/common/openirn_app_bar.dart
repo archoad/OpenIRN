@@ -115,16 +115,16 @@ class OpenIrnAppBarAction {
     this.enabled = true,
     this.hidden = false,
     this.destructive = false,
-  })  : onPressed = onPressed ?? onSelected,
-        isDivider = false;
+  }) : onPressed = onPressed ?? onSelected,
+       isDivider = false;
 
   const OpenIrnAppBarAction.divider({String? id})
-      : id = id ?? '__divider__',
-        icon = null,
-        label = '',
-        onPressed = null,
-        enabled = false,
-        hidden = false,
-        destructive = false,
-        isDivider = true;
+    : id = id ?? '__divider__',
+      icon = null,
+      label = '',
+      onPressed = null,
+      enabled = false,
+      hidden = false,
+      destructive = false,
+      isDivider = true;
 }

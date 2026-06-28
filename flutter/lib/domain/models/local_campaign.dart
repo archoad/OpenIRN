@@ -185,9 +185,9 @@ class LocalCampaign {
     final timestamp = (now ?? DateTime.now()).toUtc();
     final safeReferentialId = _safeIdPart(referentialId);
     final safeTimestamp = timestamp.toIso8601String().replaceAll(
-          RegExp(r'[^0-9]'),
-          '',
-        );
+      RegExp(r'[^0-9]'),
+      '',
+    );
 
     return LocalCampaign(
       id: 'local-$safeReferentialId-$safeTimestamp',
@@ -224,7 +224,8 @@ class LocalCampaign {
   }
 
   factory LocalCampaign.fromJson(Map<String, dynamic> json) {
-    final createdAt = _parseDate(json['createdAt']) ??
+    final createdAt =
+        _parseDate(json['createdAt']) ??
         DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
     final updatedAt = _parseDate(json['updatedAt']) ?? createdAt;
 
@@ -311,20 +312,20 @@ class LocalCampaign {
           : json['systemName']?.toString().trim() ?? '',
       systemDescription:
           system['description']?.toString().trim().isNotEmpty == true
-              ? system['description'].toString().trim()
-              : json['systemDescription']?.toString().trim() ?? '',
+          ? system['description'].toString().trim()
+          : json['systemDescription']?.toString().trim() ?? '',
       projectDirectorFirstName:
           projectDirector['firstName']?.toString().trim().isNotEmpty == true
-              ? projectDirector['firstName'].toString().trim()
-              : json['projectDirectorFirstName']?.toString().trim() ?? '',
+          ? projectDirector['firstName'].toString().trim()
+          : json['projectDirectorFirstName']?.toString().trim() ?? '',
       projectDirectorLastName:
           projectDirector['lastName']?.toString().trim().isNotEmpty == true
-              ? projectDirector['lastName'].toString().trim()
-              : json['projectDirectorLastName']?.toString().trim() ?? '',
+          ? projectDirector['lastName'].toString().trim()
+          : json['projectDirectorLastName']?.toString().trim() ?? '',
       projectDirectorEmail:
           projectDirector['email']?.toString().trim().isNotEmpty == true
-              ? projectDirector['email'].toString().trim()
-              : json['projectDirectorEmail']?.toString().trim() ?? '',
+          ? projectDirector['email'].toString().trim()
+          : json['projectDirectorEmail']?.toString().trim() ?? '',
     );
   }
 
@@ -338,9 +339,9 @@ class LocalCampaign {
 
   static String _safeIdPart(String value) {
     final normalized = value.toLowerCase().replaceAll(
-          RegExp(r'[^a-z0-9]+'),
-          '-',
-        );
+      RegExp(r'[^a-z0-9]+'),
+      '-',
+    );
     return normalized.replaceAll(RegExp(r'^-+|-+$'), '');
   }
 }

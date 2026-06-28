@@ -121,8 +121,9 @@ class LocalCampaignRepository {
           name: name == null
               ? campaign.name
               : (name.trim().isEmpty ? campaign.name : name.trim()),
-          description:
-              description == null ? campaign.description : description.trim(),
+          description: description == null
+              ? campaign.description
+              : description.trim(),
           information: information,
           updatedAt: now,
         );

@@ -30,15 +30,15 @@ void main() {
   );
 
   AppUser user(String id, AppUserRole role) => AppUser(
-        id: id,
-        firstName: id,
-        lastName: 'Test',
-        email: '$id@example.test',
-        role: role,
-        active: true,
-        createdAt: DateTime.utc(2026, 6, 24),
-        updatedAt: DateTime.utc(2026, 6, 24),
-      );
+    id: id,
+    firstName: id,
+    lastName: 'Test',
+    email: '$id@example.test',
+    role: role,
+    active: true,
+    createdAt: DateTime.utc(2026, 6, 24),
+    updatedAt: DateTime.utc(2026, 6, 24),
+  );
 
   CriterionAssignment assignmentFor(String userId) =>
       CriterionAssignment.create(

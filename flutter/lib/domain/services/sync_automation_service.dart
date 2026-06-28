@@ -149,7 +149,8 @@ class SyncAutomationService {
           (event.type == SyncLogEventType.pushSucceeded ||
               event.type == SyncLogEventType.importSucceeded),
     );
-    final comesFromThisDevice = latest.deviceId.trim().isNotEmpty &&
+    final comesFromThisDevice =
+        latest.deviceId.trim().isNotEmpty &&
         latest.deviceId.trim() == configuration.deviceId.trim();
 
     if (knownLocally || comesFromThisDevice) {
@@ -181,10 +182,12 @@ class SyncAutomationService {
         0,
         (total, snapshot) => total + snapshot.campaignCount,
       ),
-      serverSyncId:
-          pull.snapshots.isEmpty ? null : pull.snapshots.first.serverSyncId,
-      sourceDeviceId:
-          pull.snapshots.isEmpty ? null : pull.snapshots.first.deviceId,
+      serverSyncId: pull.snapshots.isEmpty
+          ? null
+          : pull.snapshots.first.serverSyncId,
+      sourceDeviceId: pull.snapshots.isEmpty
+          ? null
+          : pull.snapshots.first.deviceId,
     );
 
     if (!pull.hasSnapshots) {
@@ -235,9 +238,8 @@ class SyncAutomationService {
 
     final users = await userRepository.ensureDefaultUsers();
     final actor = activeUser ?? await sessionRepository.getActiveUser();
-    final campaigns = await campaignRepository.ensureDefaultCampaign(
+    final campaigns = await campaignRepository.loadCampaigns(
       referentialId: referential.id,
-      referentialVersion: referential.version,
     );
     final snapshots = await _loadCampaignSnapshots(
       referential: referential,

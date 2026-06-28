@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/repositories/local_sync_log_repository.dart';
 import '../../domain/models/sync_log_event.dart';
 import '../common/openirn_app_bar.dart';
+import '../common/responsive_dialog.dart';
 
 class SyncLogScreen extends StatefulWidget {
   const SyncLogScreen({super.key});
@@ -33,10 +34,14 @@ class _SyncLogScreenState extends State<SyncLogScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
+        insetPadding: responsiveDialogInsetPadding(context),
         title: const Text('Vider le journal de synchronisation ?'),
-        content: const Text(
-          'Cette action supprime uniquement le journal de ce terminal de synchronisation. '
-          'Elle ne supprime ni les campagnes, ni les exports, ni les snapshots serveur.',
+        content: const ResponsiveDialogContent(
+          maxWidth: 620,
+          child: Text(
+            'Cette action supprime uniquement le journal de ce terminal de synchronisation. '
+            'Elle ne supprime ni les campagnes, ni les exports, ni les snapshots serveur.',
+          ),
         ),
         actions: [
           TextButton(
@@ -118,7 +123,7 @@ class _SyncLogScreenState extends State<SyncLogScreen> {
               child: ListView.separated(
                 padding: const EdgeInsets.all(16),
                 itemCount: events.length + 1,
-                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                separatorBuilder: (_, _) => const SizedBox(height: 10),
                 itemBuilder: (context, index) {
                   if (index == 0) {
                     return _SyncLogSummaryCard(events: events);

@@ -17,10 +17,12 @@ import '../../domain/models/irn_referential.dart';
 import '../../domain/models/local_campaign.dart';
 import '../../domain/models/sync_configuration.dart';
 import '../../domain/models/sync_log_event.dart';
+import '../../domain/services/app_sync_coordinator.dart';
 import '../../domain/services/sync_push_payload_service.dart';
 import '../../domain/services/sync_pull_import_service.dart';
 import '../../domain/services/access_policy_service.dart';
 import '../common/openirn_app_bar.dart';
+import '../common/responsive_dialog.dart';
 
 class SyncScreen extends StatefulWidget {
   final IrnReferential referential;
@@ -60,6 +62,7 @@ class _SyncScreenState extends State<SyncScreen> {
   bool _pullingSnapshots = false;
   bool _pullingAndImportingLatest = false;
   bool _runningSmartSync = false;
+  bool _clearingAuthorization = false;
   bool _loadingServerStatus = false;
   String? _importingSnapshotId;
   String? _payloadPreview;
@@ -93,8 +96,8 @@ class _SyncScreenState extends State<SyncScreen> {
   }
 
   Future<_SyncScreenStateData> _load() async {
-    final configuration =
-        await _syncConfigurationRepository.loadConfiguration();
+    final configuration = await _syncConfigurationRepository
+        .loadConfiguration();
     final activeUser = await _sessionRepository.getActiveUser();
     final users = await _userRepository.ensureDefaultUsers();
     final campaigns = await _campaignRepository.ensureDefaultCampaign(
@@ -163,6 +166,27 @@ class _SyncScreenState extends State<SyncScreen> {
   }
 
   Future<void> _saveConfiguration() async {
+    if (_enabled && _apiTokenController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Autorise ce terminal avec un code d’appairage avant d’activer la synchronisation.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (_apiTokenController.text.trim().isNotEmpty &&
+        _apiTokenController.text.trim().length < 16) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Le jeton serveur doit contenir au moins 16 caractères.',
+          ),
+        ),
+      );
+      return;
+    }
     if (_formKey.currentState?.validate() != true) {
       return;
     }
@@ -193,6 +217,7 @@ class _SyncScreenState extends State<SyncScreen> {
       _apiTokenController.text = saved.apiToken;
       _future = _load();
     });
+    AppSyncCoordinator.instance.start(referential: widget.referential);
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Configuration de synchronisation sauvegardée.'),
@@ -204,9 +229,13 @@ class _SyncScreenState extends State<SyncScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
+        insetPadding: responsiveDialogInsetPadding(context),
         title: const Text('Régénérer l’identifiant appareil ?'),
-        content: const Text(
-          'Un nouvel identifiant sera généré. Cette action est utile uniquement si tu veux simuler un nouvel appareil client.',
+        content: const ResponsiveDialogContent(
+          maxWidth: 620,
+          child: Text(
+            'Un nouvel identifiant sera généré. Cette action est utile uniquement si tu veux simuler un nouvel appareil client.',
+          ),
         ),
         actions: [
           TextButton(
@@ -237,6 +266,89 @@ class _SyncScreenState extends State<SyncScreen> {
       _serverFreshnessInfo = null;
       _future = _load();
     });
+  }
+
+  Future<void> _forgetLocalAuthorization() async {
+    final configuration = await _syncConfigurationRepository
+        .loadConfiguration();
+    if (!mounted) {
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        insetPadding: responsiveDialogInsetPadding(context),
+        title: const Text('Oublier l’autorisation locale ?'),
+        content: ResponsiveDialogContent(
+          maxWidth: 680,
+          child: Text(
+            'OpenIRN va supprimer le jeton stocké sur ce terminal.\n\n'
+            'Terminal : ${configuration.deviceId}\n'
+            'Tenant : ${configuration.tenantId}\n\n'
+            'Cette action ne révoque pas le terminal côté serveur. Elle sert à nettoyer ce poste après révocation serveur ou avant un nouvel appairage.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(context).pop(true),
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Oublier'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _clearingAuthorization = true;
+    });
+
+    try {
+      final cleared = await _syncConfigurationRepository.saveConfiguration(
+        SyncConfiguration.empty(deviceId: configuration.deviceId).copyWith(
+          tenantId: configuration.tenantId,
+          enabled: false,
+          apiToken: '',
+        ),
+      );
+      AppSyncCoordinator.instance.stop();
+
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _enabled = cleared.enabled;
+        _tenantIdController.text = cleared.tenantId;
+        _deviceIdController.text = cleared.deviceId;
+        _apiTokenController.text = cleared.apiToken;
+        _payloadPreview = null;
+        _pushResult = null;
+        _pullResult = null;
+        _serverStatusResult = null;
+        _serverFreshnessInfo = null;
+        _future = _load();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Autorisation locale supprimée. Réappaire ce terminal pour resynchroniser.',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _clearingAuthorization = false;
+        });
+      }
+    }
   }
 
   Future<SyncConfiguration> _currentConfiguration() async {
@@ -281,8 +393,8 @@ class _SyncScreenState extends State<SyncScreen> {
   Future<Map<String, dynamic>> _buildPayloadMap(
     _SyncScreenStateData data,
   ) async {
-    final configuration =
-        await _syncConfigurationRepository.loadConfiguration();
+    final configuration = await _syncConfigurationRepository
+        .loadConfiguration();
     return _payloadService.buildPushPayload(
       referential: widget.referential,
       configuration: configuration,
@@ -317,8 +429,8 @@ class _SyncScreenState extends State<SyncScreen> {
       _pushResult = null;
     });
 
-    final configuration =
-        await _syncConfigurationRepository.loadConfiguration();
+    final configuration = await _syncConfigurationRepository
+        .loadConfiguration();
     final payload = await _buildPayloadMap(data);
     const encoder = JsonEncoder.withIndent('  ');
     final result = await _apiClient.pushPayload(
@@ -362,8 +474,8 @@ class _SyncScreenState extends State<SyncScreen> {
     });
 
     try {
-      final configuration =
-          await _syncConfigurationRepository.loadConfiguration();
+      final configuration = await _syncConfigurationRepository
+          .loadConfiguration();
       final result = await _apiClient.loadSyncStatus(
         baseUrl: configuration.apiBaseUrl,
         tenantId: configuration.tenantId,
@@ -435,8 +547,8 @@ class _SyncScreenState extends State<SyncScreen> {
       _serverStatusResult = null;
     });
 
-    final configuration =
-        await _syncConfigurationRepository.loadConfiguration();
+    final configuration = await _syncConfigurationRepository
+        .loadConfiguration();
     final result = await _apiClient.loadSyncStatus(
       baseUrl: configuration.apiBaseUrl,
       tenantId: configuration.tenantId,
@@ -486,15 +598,16 @@ class _SyncScreenState extends State<SyncScreen> {
       _pullResult = null;
     });
 
-    final configuration =
-        await _syncConfigurationRepository.loadConfiguration();
+    final configuration = await _syncConfigurationRepository
+        .loadConfiguration();
     final result = await _apiClient.pullSnapshots(
       baseUrl: configuration.apiBaseUrl,
       tenantId: configuration.tenantId,
       apiToken: configuration.apiToken,
     );
     await _appendSyncLogEvent(
-      type: result.status == OpenIrnApiPullStatus.rejected ||
+      type:
+          result.status == OpenIrnApiPullStatus.rejected ||
               result.status == OpenIrnApiPullStatus.unreachable
           ? SyncLogEventType.pullFailed
           : SyncLogEventType.pullSucceeded,
@@ -526,8 +639,8 @@ class _SyncScreenState extends State<SyncScreen> {
       _lastImportResult = null;
     });
 
-    final configuration =
-        await _syncConfigurationRepository.loadConfiguration();
+    final configuration = await _syncConfigurationRepository
+        .loadConfiguration();
     final result = await _apiClient.pullSnapshots(
       baseUrl: configuration.apiBaseUrl,
       tenantId: configuration.tenantId,
@@ -535,7 +648,8 @@ class _SyncScreenState extends State<SyncScreen> {
       limit: 1,
     );
     await _appendSyncLogEvent(
-      type: result.status == OpenIrnApiPullStatus.rejected ||
+      type:
+          result.status == OpenIrnApiPullStatus.rejected ||
               result.status == OpenIrnApiPullStatus.unreachable
           ? SyncLogEventType.pullFailed
           : SyncLogEventType.pullSucceeded,
@@ -547,10 +661,12 @@ class _SyncScreenState extends State<SyncScreen> {
         0,
         (total, snapshot) => total + snapshot.campaignCount,
       ),
-      serverSyncId:
-          result.snapshots.isEmpty ? null : result.snapshots.first.serverSyncId,
-      sourceDeviceId:
-          result.snapshots.isEmpty ? null : result.snapshots.first.deviceId,
+      serverSyncId: result.snapshots.isEmpty
+          ? null
+          : result.snapshots.first.serverSyncId,
+      sourceDeviceId: result.snapshots.isEmpty
+          ? null
+          : result.snapshots.first.deviceId,
     );
 
     if (!mounted) {
@@ -601,13 +717,17 @@ class _SyncScreenState extends State<SyncScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
+        insetPadding: responsiveDialogInsetPadding(context),
         title: const Text('Importer ce snapshot distant ?'),
-        content: Text(
-          'OpenIRN va remplacer les campagnes par la version contenue dans ce snapshot.\n\n'
-          'Snapshot : ${snapshot.serverSyncId}\n'
-          'Appareil source : ${snapshot.deviceId}\n'
-          'Campagnes : ${snapshot.campaignCount}\n\n'
-          'Les données de ce terminal existantes seront remplacées par la dernière version serveur.',
+        content: ResponsiveDialogContent(
+          maxWidth: 680,
+          child: Text(
+            'OpenIRN va remplacer les campagnes par la version contenue dans ce snapshot.\n\n'
+            'Snapshot : ${snapshot.serverSyncId}\n'
+            'Appareil source : ${snapshot.deviceId}\n'
+            'Campagnes : ${snapshot.campaignCount}\n\n'
+            'Les données de ce terminal existantes seront remplacées par la dernière version serveur.',
+          ),
         ),
         actions: [
           TextButton(
@@ -753,8 +873,8 @@ class _SyncScreenState extends State<SyncScreen> {
       _testingConnection = true;
       _connectionResult = null;
     });
-    final configuration =
-        await _syncConfigurationRepository.loadConfiguration();
+    final configuration = await _syncConfigurationRepository
+        .loadConfiguration();
     final result = await _apiClient.testConnection(
       baseUrl: configuration.apiBaseUrl,
     );
@@ -827,6 +947,8 @@ class _SyncScreenState extends State<SyncScreen> {
                 children: [
                   _IntroCard(configuration: data.configuration),
                   const SizedBox(height: 12),
+                  _CurrentDeviceCard(configuration: data.configuration),
+                  const SizedBox(height: 12),
                   _ServerStatusCard(
                     loadingServerStatus: _loadingServerStatus,
                     statusResult: _serverStatusResult,
@@ -855,6 +977,8 @@ class _SyncScreenState extends State<SyncScreen> {
                       saving: _saving,
                       testingConnection: _testingConnection,
                       connectionResult: _connectionResult,
+                      clearingAuthorization: _clearingAuthorization,
+                      onForgetLocalAuthorization: _forgetLocalAuthorization,
                       onObscureApiTokenChanged: (value) => setState(() {
                         _obscureApiToken = value;
                       }),
@@ -1055,17 +1179,17 @@ class _SyncScreenStateData {
 
   int get campaignCount => snapshots.length;
   int get answerCount => snapshots.fold<int>(
-        0,
-        (total, snapshot) => total + snapshot.criterionAnswers.length,
-      );
+    0,
+    (total, snapshot) => total + snapshot.criterionAnswers.length,
+  );
   int get assignmentCount => snapshots.fold<int>(
-        0,
-        (total, snapshot) => total + snapshot.assignments.length,
-      );
+    0,
+    (total, snapshot) => total + snapshot.assignments.length,
+  );
   int get activityEventCount => snapshots.fold<int>(
-        0,
-        (total, snapshot) => total + snapshot.activityEvents.length,
-      );
+    0,
+    (total, snapshot) => total + snapshot.activityEvents.length,
+  );
 }
 
 class _IntroCard extends StatelessWidget {
@@ -1136,6 +1260,148 @@ class _IntroCard extends StatelessWidget {
   }
 }
 
+class _CurrentDeviceCard extends StatelessWidget {
+  final SyncConfiguration configuration;
+
+  const _CurrentDeviceCard({required this.configuration});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDeviceToken = configuration.usesDeviceToken;
+    final hasToken = configuration.hasApiToken;
+    final icon = hasToken
+        ? isDeviceToken
+              ? Icons.verified_user_outlined
+              : Icons.admin_panel_settings_outlined
+        : Icons.phonelink_lock_outlined;
+    final containerColor = hasToken
+        ? isDeviceToken
+              ? colorScheme.primaryContainer
+              : colorScheme.tertiaryContainer
+        : colorScheme.errorContainer;
+    final textColor = hasToken
+        ? isDeviceToken
+              ? colorScheme.onPrimaryContainer
+              : colorScheme.onTertiaryContainer
+        : colorScheme.onErrorContainer;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 34),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Terminal courant',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: containerColor,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          child: Text(
+                            configuration.authorizationModeLabel,
+                            style: TextStyle(color: textColor),
+                          ),
+                        ),
+                      ),
+                      Chip(label: Text('Tenant : ${configuration.tenantId}')),
+                      Chip(
+                        label: Text(
+                          configuration.enabled
+                              ? 'Synchronisation activée'
+                              : 'Synchronisation désactivée',
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  SelectableText('Identifiant : ${configuration.deviceId}'),
+                  const SizedBox(height: 4),
+                  Text(configuration.authorizationModeDescription),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AuthorizationStatusBox extends StatelessWidget {
+  final SyncConfiguration configuration;
+
+  const _AuthorizationStatusBox({required this.configuration});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final color = configuration.usesDeviceToken
+        ? colorScheme.primary
+        : configuration.usesLegacyBearerToken
+        ? colorScheme.tertiary
+        : colorScheme.error;
+    final icon = configuration.usesDeviceToken
+        ? Icons.verified_user_outlined
+        : configuration.usesLegacyBearerToken
+        ? Icons.warning_amber_outlined
+        : Icons.lock_open_outlined;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        border: Border.all(color: color.withValues(alpha: 0.45)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: color),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  configuration.authorizationModeLabel,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(color: color),
+                ),
+                const SizedBox(height: 4),
+                Text(configuration.authorizationModeDescription),
+                const SizedBox(height: 4),
+                Text('Jeton : ${configuration.maskedApiToken}'),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ConfigurationCard extends StatelessWidget {
   final GlobalKey<FormState> formKey;
   final TextEditingController tenantIdController;
@@ -1147,6 +1413,8 @@ class _ConfigurationCard extends StatelessWidget {
   final bool saving;
   final bool testingConnection;
   final OpenIrnApiConnectionResult? connectionResult;
+  final bool clearingAuthorization;
+  final VoidCallback onForgetLocalAuthorization;
   final ValueChanged<bool> onEnabledChanged;
   final ValueChanged<bool> onObscureApiTokenChanged;
   final VoidCallback onSave;
@@ -1164,6 +1432,8 @@ class _ConfigurationCard extends StatelessWidget {
     required this.saving,
     required this.testingConnection,
     required this.connectionResult,
+    required this.clearingAuthorization,
+    required this.onForgetLocalAuthorization,
     required this.onEnabledChanged,
     required this.onObscureApiTokenChanged,
     required this.onSave,
@@ -1227,38 +1497,75 @@ class _ConfigurationCard extends StatelessWidget {
                 },
               ),
               const SizedBox(height: 10),
-              TextFormField(
-                controller: apiTokenController,
-                obscureText: obscureApiToken,
-                decoration: InputDecoration(
-                  labelText: 'Token API OpenIRN',
-                  helperText:
-                      'Utilisé pour POST /sync/push et GET /sync/pull. Le endpoint /health reste public.',
-                  border: const OutlineInputBorder(),
-                  suffixIcon: IconButton(
-                    tooltip: obscureApiToken
-                        ? 'Afficher le token'
-                        : 'Masquer le token',
-                    onPressed: () => onObscureApiTokenChanged(!obscureApiToken),
-                    icon: Icon(
-                      obscureApiToken
-                          ? Icons.visibility_outlined
-                          : Icons.visibility_off_outlined,
+              _AuthorizationStatusBox(configuration: configuration),
+              const SizedBox(height: 10),
+              ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                title: const Text('Procédure d’urgence bearer'),
+                subtitle: const Text(
+                  'À utiliser uniquement pour migration ou dépannage serveur.',
+                ),
+                childrenPadding: const EdgeInsets.only(bottom: 8),
+                children: [
+                  const Text(
+                    'L’usage normal est l’autorisation par code d’appairage depuis Administration → Terminaux autorisés. '
+                    'La saisie manuelle du bearer reste disponible pour récupérer un environnement ou migrer un ancien terminal.',
+                  ),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    controller: apiTokenController,
+                    obscureText: obscureApiToken,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    smartDashesType: SmartDashesType.disabled,
+                    smartQuotesType: SmartQuotesType.disabled,
+                    decoration: InputDecoration(
+                      labelText: 'Bearer / jeton serveur',
+                      helperText:
+                          'Masqué dans l’usage normal. Ne pas transmettre aux utilisateurs.',
+                      border: const OutlineInputBorder(),
+                      suffixIcon: IconButton(
+                        tooltip: obscureApiToken
+                            ? 'Afficher le jeton'
+                            : 'Masquer le jeton',
+                        onPressed: () =>
+                            onObscureApiTokenChanged(!obscureApiToken),
+                        icon: Icon(
+                          obscureApiToken
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                        ),
+                      ),
+                    ),
+                    validator: (value) {
+                      final token = value?.trim() ?? '';
+                      if (token.isNotEmpty && token.length < 16) {
+                        return 'Le jeton serveur doit contenir au moins 16 caractères.';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      onPressed: clearingAuthorization
+                          ? null
+                          : onForgetLocalAuthorization,
+                      icon: clearingAuthorization
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.logout_outlined),
+                      label: Text(
+                        clearingAuthorization
+                            ? 'Nettoyage...'
+                            : 'Oublier l’autorisation locale',
+                      ),
                     ),
                   ),
-                ),
-                validator: (value) {
-                  if (!enabled) {
-                    return null;
-                  }
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Le token API est obligatoire lorsque la synchronisation est activée.';
-                  }
-                  if (value.trim().length < 16) {
-                    return 'Le token API doit contenir au moins 16 caractères.';
-                  }
-                  return null;
-                },
+                ],
               ),
               const SizedBox(height: 10),
               TextFormField(
@@ -1316,17 +1623,17 @@ class _FixedApiEndpointTile extends StatelessWidget {
     final resultColor = result == null
         ? null
         : result.isReady
-            ? colorScheme.primary
-            : result.isReachable
-                ? colorScheme.tertiary
-                : colorScheme.error;
+        ? colorScheme.primary
+        : result.isReachable
+        ? colorScheme.tertiary
+        : colorScheme.error;
     final resultIcon = result == null
         ? Icons.cloud_outlined
         : result.isReady
-            ? Icons.cloud_done_outlined
-            : result.isReachable
-                ? Icons.cloud_sync_outlined
-                : Icons.cloud_off_outlined;
+        ? Icons.cloud_done_outlined
+        : result.isReachable
+        ? Icons.cloud_sync_outlined
+        : Icons.cloud_off_outlined;
 
     return Container(
       width: double.infinity,
@@ -1718,7 +2025,8 @@ class _SmartSyncCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final busy = runningSmartSync ||
+    final busy =
+        runningSmartSync ||
         pushingPayload ||
         pullingAndImportingLatest ||
         importingSnapshotId != null;
@@ -1773,8 +2081,8 @@ class _SmartSyncCard extends StatelessWidget {
                     info == null
                         ? Icons.info_outline
                         : info.shouldPull
-                            ? Icons.download_for_offline_outlined
-                            : Icons.cloud_upload_outlined,
+                        ? Icons.download_for_offline_outlined
+                        : Icons.cloud_upload_outlined,
                   ),
                   const SizedBox(width: 8),
                   Expanded(
@@ -1782,8 +2090,8 @@ class _SmartSyncCard extends StatelessWidget {
                       info == null
                           ? 'Aucun statut serveur récent : le bouton lancera d’abord un contrôle serveur.'
                           : info.shouldPull
-                              ? 'Action recommandée : importer le dernier snapshot distant avant de pousser de nouvelles données.'
-                              : 'Action recommandée : pousser le snapshot de ce terminal vers le serveur.',
+                          ? 'Action recommandée : importer le dernier snapshot distant avant de pousser de nouvelles données.'
+                          : 'Action recommandée : pousser le snapshot de ce terminal vers le serveur.',
                     ),
                   ),
                 ],
@@ -2091,7 +2399,8 @@ class _RemoteSnapshotsCard extends StatelessWidget {
                   label: Text(pullingSnapshots ? 'Récupération…' : 'Récupérer'),
                 ),
                 FilledButton.icon(
-                  onPressed: pullingSnapshots ||
+                  onPressed:
+                      pullingSnapshots ||
                           pullingAndImportingLatest ||
                           importingSnapshotId != null
                       ? null

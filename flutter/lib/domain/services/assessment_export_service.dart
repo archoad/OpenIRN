@@ -136,7 +136,8 @@ class AssessmentExportService {
           if (criterion.active)
             _answerToJson(
               criterion: criterion,
-              criterionAnswer: criterionAnswers[criterion.id] ??
+              criterionAnswer:
+                  criterionAnswers[criterion.id] ??
                   CriterionAnswer(
                     criterionId: criterion.id,
                     answer: IrnAnswer.notAnswered,
@@ -163,8 +164,9 @@ class AssessmentExportService {
       'nonResilientCriteria': summary.nonResilientCriteria,
       'notAnsweredCriteria': summary.notAnsweredCriteria,
       'completionRate': _round(summary.completionRate),
-      'officialScore':
-          summary.officialScore == null ? null : _round(summary.officialScore!),
+      'officialScore': summary.officialScore == null
+          ? null
+          : _round(summary.officialScore!),
     };
   }
 
