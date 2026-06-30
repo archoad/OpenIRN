@@ -35,7 +35,8 @@ class _ServerMaintenanceScreenState extends State<ServerMaintenanceScreen> {
   SyncConfiguration? _configuration;
   _MaintenanceStatus? _status;
 
-  bool get _canManage => _accessPolicy.canManageCampaigns(widget.activeUser);
+  bool get _canManage =>
+      _accessPolicy.canManageServerMaintenance(widget.activeUser);
   bool get _isWorking => _isBackingUp || _isRestoring || _isDeleting;
 
   @override
@@ -48,8 +49,7 @@ class _ServerMaintenanceScreenState extends State<ServerMaintenanceScreen> {
     if (!_canManage) {
       setState(() {
         _isLoading = false;
-        _errorMessage =
-            'Cette page est réservée aux administrateurs et pilotes IRN.';
+        _errorMessage = 'Cette page est réservée aux administrateurs.';
       });
       return;
     }
@@ -78,7 +78,7 @@ class _ServerMaintenanceScreenState extends State<ServerMaintenanceScreen> {
       final body = await _getJson(
         configuration,
         '/maintenance/status',
-        const <String, String>{'limit': '20'},
+        <String, String>{'limit': '20', 'tenantId': configuration.tenantId},
       );
       if (!mounted) {
         return;
@@ -345,7 +345,7 @@ class _ServerMaintenanceScreenState extends State<ServerMaintenanceScreen> {
       final encodedBackupName = Uri.encodeComponent(backup.name);
       final body = await _deleteJson(
         configuration,
-        '/maintenance/backups/$encodedBackupName',
+        '/maintenance/backups/$encodedBackupName?tenantId=${Uri.encodeQueryComponent(configuration.tenantId)}',
       );
       if (!mounted) {
         return;
@@ -526,6 +526,8 @@ class _ServerMaintenanceScreenState extends State<ServerMaintenanceScreen> {
                   onRestore: _restoreBackup,
                   onDelete: _deleteBackup,
                 ),
+                const SizedBox(height: 12),
+                _BackupAuditCard(events: status.backup.auditEvents),
               ],
             ],
           ),
@@ -661,6 +663,28 @@ class _BackupCard extends StatelessWidget {
             _InfoRow(label: 'Répertoire', value: backup.directory),
             _InfoRow(label: 'Nombre', value: backup.count.toString()),
             _InfoRow(label: 'Rétention', value: '${backup.keep} sauvegardes'),
+            _InfoRow(
+              label: 'Automatique',
+              value: backup.security.autoEnabled ? 'Activée' : 'Désactivée',
+            ),
+            _InfoRow(
+              label: 'Protection',
+              value: backup.security.protectiveEnabled
+                  ? 'Avant opérations sensibles'
+                  : 'Désactivée',
+            ),
+            _InfoRow(
+              label: 'Signature',
+              value: backup.security.signatureSecretConfigured
+                  ? 'HMAC active'
+                  : 'Secret non configuré',
+            ),
+            if (backup.security.unsignedVisibleBackups > 0)
+              _InfoRow(
+                label: 'À vérifier',
+                value:
+                    '${backup.security.unsignedVisibleBackups} sauvegarde(s) non signée(s) ou non vérifiées',
+              ),
             if (latest != null) ...[
               const Divider(height: 24),
               _InfoRow(label: 'Dernière sauvegarde', value: latest.name),
@@ -670,6 +694,15 @@ class _BackupCard extends StatelessWidget {
                 label: 'SHA-256',
                 value: latest.sha256.isEmpty ? 'Non disponible' : latest.sha256,
               ),
+              _InfoRow(
+                label: 'Signature',
+                value: _signatureLabel(latest.signatureStatus),
+              ),
+              if (latest.reason.isNotEmpty)
+                _InfoRow(
+                  label: 'Motif',
+                  value: _backupReasonLabel(latest.reason),
+                ),
             ],
             const SizedBox(height: 12),
             Align(
@@ -730,7 +763,7 @@ class _BackupListCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                   subtitle: Text(
-                    '${_formatDate(backup.createdAt)} • ${_formatBytes(backup.sizeBytes)}',
+                    '${_formatDate(backup.createdAt)} • ${_formatBytes(backup.sizeBytes)} • ${_signatureLabel(backup.signatureStatus)}',
                   ),
                   trailing: PopupMenuButton<String>(
                     enabled: !isWorking,
@@ -772,6 +805,56 @@ class _BackupListCard extends StatelessWidget {
                         ),
                       ),
                     ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BackupAuditCard extends StatelessWidget {
+  final List<_BackupAuditEvent> events;
+
+  const _BackupAuditCard({required this.events});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Journal des sauvegardes',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            if (events.isEmpty)
+              const Text('Aucun événement de sauvegarde enregistré.')
+            else
+              ...events.map(
+                (event) => ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    event.eventType == 'backup.created'
+                        ? Icons.backup_outlined
+                        : event.eventType == 'backup.restored'
+                        ? Icons.restore_outlined
+                        : Icons.history_outlined,
+                  ),
+                  title: Text(
+                    event.backupName.isEmpty
+                        ? event.eventType
+                        : event.backupName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    '${_formatDate(event.createdAt)} • ${_backupReasonLabel(event.reason)}',
                   ),
                 ),
               ),
@@ -898,6 +981,8 @@ class _MaintenanceBackup {
   final int count;
   final _BackupEntry? latest;
   final List<_BackupEntry> backups;
+  final _BackupSecurity security;
+  final List<_BackupAuditEvent> auditEvents;
 
   const _MaintenanceBackup({
     required this.directory,
@@ -905,6 +990,8 @@ class _MaintenanceBackup {
     required this.count,
     required this.latest,
     required this.backups,
+    required this.security,
+    required this.auditEvents,
   });
 
   factory _MaintenanceBackup.fromJson(Map<String, dynamic> json) {
@@ -917,6 +1004,40 @@ class _MaintenanceBackup {
       backups: _jsonList(
         json['backups'],
       ).map(_BackupEntry.fromJson).toList(growable: false),
+      security: _BackupSecurity.fromJson(
+        _jsonObject(json['security']) ?? const <String, dynamic>{},
+      ),
+      auditEvents: _jsonList(
+        json['auditEvents'],
+      ).map(_BackupAuditEvent.fromJson).toList(growable: false),
+    );
+  }
+}
+
+class _BackupSecurity {
+  final bool autoEnabled;
+  final bool protectiveEnabled;
+  final int protectiveMinIntervalMinutes;
+  final bool signatureSecretConfigured;
+  final int unsignedVisibleBackups;
+
+  const _BackupSecurity({
+    required this.autoEnabled,
+    required this.protectiveEnabled,
+    required this.protectiveMinIntervalMinutes,
+    required this.signatureSecretConfigured,
+    required this.unsignedVisibleBackups,
+  });
+
+  factory _BackupSecurity.fromJson(Map<String, dynamic> json) {
+    return _BackupSecurity(
+      autoEnabled: json['autoEnabled'] != false,
+      protectiveEnabled: json['protectiveEnabled'] != false,
+      protectiveMinIntervalMinutes: _intFromJson(
+        json['protectiveMinIntervalMinutes'],
+      ),
+      signatureSecretConfigured: json['signatureSecretConfigured'] == true,
+      unsignedVisibleBackups: _intFromJson(json['unsignedVisibleBackups']),
     );
   }
 }
@@ -926,12 +1047,18 @@ class _BackupEntry {
   final DateTime? createdAt;
   final int sizeBytes;
   final String sha256;
+  final String signatureStatus;
+  final String reason;
+  final bool automatic;
 
   const _BackupEntry({
     required this.name,
     required this.createdAt,
     required this.sizeBytes,
     required this.sha256,
+    required this.signatureStatus,
+    required this.reason,
+    required this.automatic,
   });
 
   factory _BackupEntry.fromJson(Map<String, dynamic> json) {
@@ -942,6 +1069,37 @@ class _BackupEntry {
       )?.toLocal(),
       sizeBytes: _intFromJson(json['sizeBytes']),
       sha256: json['sha256']?.toString() ?? '',
+      signatureStatus: json['signatureStatus']?.toString() ?? 'unsigned',
+      reason: json['reason']?.toString() ?? '',
+      automatic: json['automatic'] == true,
+    );
+  }
+}
+
+class _BackupAuditEvent {
+  final String backupName;
+  final String eventType;
+  final String reason;
+  final String triggeredByUserId;
+  final DateTime? createdAt;
+
+  const _BackupAuditEvent({
+    required this.backupName,
+    required this.eventType,
+    required this.reason,
+    required this.triggeredByUserId,
+    required this.createdAt,
+  });
+
+  factory _BackupAuditEvent.fromJson(Map<String, dynamic> json) {
+    return _BackupAuditEvent(
+      backupName: json['backupName']?.toString() ?? '',
+      eventType: json['eventType']?.toString() ?? '',
+      reason: json['reason']?.toString() ?? '',
+      triggeredByUserId: json['triggeredByUserId']?.toString() ?? '',
+      createdAt: DateTime.tryParse(
+        json['createdAt']?.toString() ?? '',
+      )?.toLocal(),
     );
   }
 }
@@ -974,6 +1132,46 @@ int _intFromJson(Object? value) {
     return value.toInt();
   }
   return int.tryParse(value?.toString() ?? '') ?? 0;
+}
+
+String _signatureLabel(String status) {
+  switch (status) {
+    case 'valid':
+      return 'Signature valide';
+    case 'invalid':
+      return 'Signature invalide';
+    case 'unverified_no_secret':
+      return 'Secret absent';
+    case 'unsigned':
+      return 'Non signée';
+    default:
+      return status.isEmpty ? 'Non disponible' : status;
+  }
+}
+
+String _backupReasonLabel(String reason) {
+  switch (reason) {
+    case 'manual':
+      return 'Manuelle';
+    case 'scheduled_timer':
+      return 'Automatique planifiée';
+    case 'pre_restore_safety':
+      return 'Sécurité avant restauration';
+    case 'pre_official_referential_update':
+      return 'Avant mise à jour référentiel';
+    case 'pre_users_replace':
+      return 'Avant remplacement utilisateurs';
+    case 'pre_user_pin_change':
+      return 'Avant changement PIN';
+    case 'pre_campaign_restore':
+      return 'Avant restauration campagne';
+    case 'manual_restore':
+      return 'Restauration manuelle';
+    case 'manual_delete':
+      return 'Suppression manuelle';
+    default:
+      return reason.isEmpty ? 'Non renseigné' : reason;
+  }
 }
 
 String _formatBytes(int bytes) {

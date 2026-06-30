@@ -5,6 +5,7 @@ import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/official_referential.dart';
 import '../../domain/models/sync_configuration.dart';
+import '../../domain/services/access_policy_service.dart';
 import '../common/openirn_app_bar.dart';
 
 class OfficialReferentialScreen extends StatefulWidget {
@@ -20,6 +21,7 @@ class OfficialReferentialScreen extends StatefulWidget {
 class _OfficialReferentialScreenState extends State<OfficialReferentialScreen> {
   final _configurationRepository = const LocalSyncConfigurationRepository();
   final _apiClient = const OpenIrnApiClient(timeout: Duration(seconds: 45));
+  final _accessPolicy = const AccessPolicyService();
 
   late Future<_OfficialReferentialStateData> _future;
   bool _working = false;
@@ -31,20 +33,39 @@ class _OfficialReferentialScreenState extends State<OfficialReferentialScreen> {
   }
 
   Future<_OfficialReferentialStateData> _loadStatus() async {
+    if (!_accessPolicy.canManageOfficialReferential(widget.activeUser)) {
+      final deniedResult = OfficialReferentialApiResult(
+        status: OfficialReferentialApiStatus.unreachable,
+        url: '',
+        statusCode: 403,
+        title: 'Accès refusé',
+        message:
+            'La mise à jour du référentiel officiel est réservée aux administrateurs.',
+        tenantId: '',
+        updateAvailable: false,
+      );
+      return _OfficialReferentialStateData(
+        configuration: SyncConfiguration.empty(),
+        result: deniedResult,
+        historyResult: _emptyHistoryFromResult(deniedResult),
+      );
+    }
     final configuration = await _configurationRepository.loadConfiguration();
     if (!configuration.isConfigured) {
+      final notConfiguredResult = OfficialReferentialApiResult(
+        status: OfficialReferentialApiStatus.unreachable,
+        url: configuration.apiBaseUrl,
+        statusCode: null,
+        title: 'API non configurée',
+        message:
+            'La synchronisation serveur n’est pas configurée sur ce terminal.',
+        tenantId: configuration.tenantId,
+        updateAvailable: false,
+      );
       return _OfficialReferentialStateData(
         configuration: configuration,
-        result: OfficialReferentialApiResult(
-          status: OfficialReferentialApiStatus.unreachable,
-          url: configuration.apiBaseUrl,
-          statusCode: null,
-          title: 'API non configurée',
-          message:
-              'La synchronisation serveur n’est pas configurée sur ce terminal.',
-          tenantId: configuration.tenantId,
-          updateAvailable: false,
-        ),
+        result: notConfiguredResult,
+        historyResult: _emptyHistoryFromResult(notConfiguredResult),
       );
     }
 
@@ -53,9 +74,31 @@ class _OfficialReferentialScreenState extends State<OfficialReferentialScreen> {
       tenantId: configuration.tenantId,
       apiToken: configuration.apiToken,
     );
+    final historyResult = await _apiClient.loadOfficialReferentialHistory(
+      baseUrl: configuration.apiBaseUrl,
+      tenantId: configuration.tenantId,
+      apiToken: configuration.apiToken,
+      limit: 50,
+    );
     return _OfficialReferentialStateData(
       configuration: configuration,
       result: result,
+      historyResult: historyResult,
+    );
+  }
+
+  OfficialReferentialHistoryResult _emptyHistoryFromResult(
+    OfficialReferentialApiResult result,
+  ) {
+    return OfficialReferentialHistoryResult(
+      status: result.status,
+      url: result.url,
+      statusCode: result.statusCode,
+      title: result.title,
+      message: result.message,
+      tenantId: result.tenantId,
+      history: const <OfficialReferentialSummary>[],
+      responseBody: result.responseBody,
     );
   }
 
@@ -71,15 +114,22 @@ class _OfficialReferentialScreenState extends State<OfficialReferentialScreen> {
       return;
     }
 
+    final force = !state.result.updateAvailable && state.result.current != null;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
         final remote = state.result.remote;
         return AlertDialog(
-          title: const Text('Mettre à jour le référentiel officiel ?'),
+          title: Text(
+            force
+                ? 'Réinstaller le référentiel officiel ?'
+                : 'Mettre à jour le référentiel officiel ?',
+          ),
           content: Text(
             remote == null
                 ? 'OpenIRN va interroger le dépôt officiel aDRI, télécharger le dernier fichier détecté, le valider puis l’installer côté serveur.'
+                : force
+                ? 'OpenIRN va réinstaller ${remote.version} depuis le dépôt officiel aDRI. Une nouvelle entrée sera ajoutée à l’historique serveur.'
                 : 'OpenIRN va télécharger ${remote.version} depuis le dépôt officiel aDRI, le valider puis l’installer côté serveur.',
           ),
           actions: [
@@ -90,7 +140,7 @@ class _OfficialReferentialScreenState extends State<OfficialReferentialScreen> {
             FilledButton.icon(
               onPressed: () => Navigator.of(context).pop(true),
               icon: const Icon(Icons.download_outlined),
-              label: const Text('Mettre à jour'),
+              label: Text(force ? 'Réinstaller' : 'Mettre à jour'),
             ),
           ],
         );
@@ -110,6 +160,7 @@ class _OfficialReferentialScreenState extends State<OfficialReferentialScreen> {
         tenantId: state.configuration.tenantId,
         apiToken: state.configuration.apiToken,
         triggeredByUserId: widget.activeUser.id,
+        force: force,
       );
 
       if (!mounted) {
@@ -180,6 +231,8 @@ class _OfficialReferentialScreenState extends State<OfficialReferentialScreen> {
                       summary: data.result.remote,
                     ),
                     const SizedBox(height: 12),
+                    _HistoryCard(result: data.historyResult),
+                    const SizedBox(height: 12),
                     _ActionsCard(
                       working: _working,
                       enabled:
@@ -187,6 +240,7 @@ class _OfficialReferentialScreenState extends State<OfficialReferentialScreen> {
                           data.result.status !=
                               OfficialReferentialApiStatus.unreachable,
                       updateAvailable: data.result.updateAvailable,
+                      hasCurrentReferential: data.result.current != null,
                       onRefresh: _refresh,
                       onUpdate: () => _update(data),
                     ),
@@ -204,10 +258,12 @@ class _OfficialReferentialScreenState extends State<OfficialReferentialScreen> {
 class _OfficialReferentialStateData {
   final SyncConfiguration configuration;
   final OfficialReferentialApiResult result;
+  final OfficialReferentialHistoryResult historyResult;
 
   const _OfficialReferentialStateData({
     required this.configuration,
     required this.result,
+    required this.historyResult,
   });
 }
 
@@ -332,10 +388,126 @@ class _SummaryCard extends StatelessWidget {
   }
 }
 
+class _HistoryCard extends StatelessWidget {
+  final OfficialReferentialHistoryResult result;
+
+  const _HistoryCard({required this.result});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.history_outlined),
+                const SizedBox(width: 8),
+                Text(
+                  'Historique référentiel officiel',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              result.isAvailable
+                  ? result.message
+                  : '${result.title} — ${result.message}',
+              style: TextStyle(color: colorScheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 12),
+            if (!result.isAvailable)
+              const Text(
+                'L’historique exige une session administrateur côté serveur.',
+              )
+            else if (result.history.isEmpty)
+              const Text(
+                'Aucun import n’est encore historisé. Le référentiel actif existant sera repris automatiquement lors du démarrage API.',
+              )
+            else
+              for (final item in result.history) ...[
+                _HistoryEntry(summary: item),
+                if (item != result.history.last) const Divider(height: 24),
+              ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HistoryEntry extends StatelessWidget {
+  final OfficialReferentialSummary summary;
+
+  const _HistoryEntry({required this.summary});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final importedAt = summary.importedAt;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(
+              summary.version.isEmpty ? 'Version inconnue' : summary.version,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            if (summary.active)
+              const Chip(
+                visualDensity: VisualDensity.compact,
+                label: Text('Actif'),
+              ),
+            if (summary.validationStatus.isNotEmpty)
+              Chip(
+                visualDensity: VisualDensity.compact,
+                label: Text('Validation ${summary.validationStatus}'),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (importedAt != null)
+          Text(
+            'Installé le ${_formatDateTime(importedAt)}',
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
+          ),
+        if (summary.triggeredByUserId.isNotEmpty)
+          Text(
+            'Déclenché par ${summary.triggeredByUserId}',
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
+          ),
+        if (summary.filePath.isNotEmpty)
+          SelectableText('Fichier : ${summary.filePath}'),
+        Wrap(
+          spacing: 10,
+          runSpacing: 4,
+          children: [
+            if (summary.shortBlobId.isNotEmpty)
+              SelectableText('Blob ${summary.shortBlobId}'),
+            if (summary.shortSourceSha256.isNotEmpty)
+              SelectableText('Source ${summary.shortSourceSha256}'),
+            if (summary.shortCanonicalSha256.isNotEmpty)
+              SelectableText('JSON ${summary.shortCanonicalSha256}'),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 class _ActionsCard extends StatelessWidget {
   final bool working;
   final bool enabled;
   final bool updateAvailable;
+  final bool hasCurrentReferential;
   final Future<void> Function() onRefresh;
   final VoidCallback onUpdate;
 
@@ -343,6 +515,7 @@ class _ActionsCard extends StatelessWidget {
     required this.working,
     required this.enabled,
     required this.updateAvailable,
+    required this.hasCurrentReferential,
     required this.onRefresh,
     required this.onUpdate,
   });
@@ -359,7 +532,11 @@ class _ActionsCard extends StatelessWidget {
       FilledButton.icon(
         onPressed: working || !enabled ? null : onUpdate,
         icon: const Icon(Icons.download_outlined),
-        label: Text(updateAvailable ? 'Mettre à jour' : 'Réinstaller'),
+        label: Text(
+          updateAvailable || !hasCurrentReferential
+              ? 'Mettre à jour'
+              : 'Réinstaller',
+        ),
       ),
     ];
 
@@ -372,7 +549,7 @@ class _ActionsCard extends StatelessWidget {
             Text('Actions', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 8),
             const Text(
-              'La mise à jour télécharge le fichier officiel depuis GitLab, le convertit en JSON canonique, le valide et l’installe dans la base serveur OpenIRN.',
+              'La mise à jour télécharge le fichier officiel depuis GitLab, le convertit en JSON canonique, le valide, l’installe dans la base serveur OpenIRN et conserve une trace dans l’historique.',
             ),
             const SizedBox(height: 14),
             if (isNarrow)

@@ -1,4 +1,5 @@
 class OfficialReferentialSummary {
+  final String historyId;
   final String referentialId;
   final String version;
   final bool active;
@@ -15,8 +16,10 @@ class OfficialReferentialSummary {
   final int criterionCount;
   final String validationStatus;
   final String webUrl;
+  final String triggeredByUserId;
 
   const OfficialReferentialSummary({
+    required this.historyId,
     required this.referentialId,
     required this.version,
     required this.active,
@@ -33,6 +36,7 @@ class OfficialReferentialSummary {
     required this.criterionCount,
     required this.validationStatus,
     required this.webUrl,
+    required this.triggeredByUserId,
   });
 
   factory OfficialReferentialSummary.fromJson(Map<String, dynamic> json) {
@@ -42,6 +46,7 @@ class OfficialReferentialSummary {
         json['commitSha']?.toString() ??
         '';
     return OfficialReferentialSummary(
+      historyId: json['historyId']?.toString() ?? '',
       referentialId:
           json['referentialId']?.toString() ?? json['id']?.toString() ?? '',
       version: json['version']?.toString() ?? '',
@@ -63,6 +68,7 @@ class OfficialReferentialSummary {
       criterionCount: _intFromJson(json['criterionCount']),
       validationStatus: json['validationStatus']?.toString() ?? '',
       webUrl: json['webUrl']?.toString() ?? '',
+      triggeredByUserId: json['triggeredByUserId']?.toString() ?? '',
     );
   }
 
@@ -74,6 +80,22 @@ class OfficialReferentialSummary {
       return raw;
     }
     return raw.substring(0, 12);
+  }
+
+  String get shortSourceSha256 {
+    final raw = sourceSha256.trim();
+    if (raw.length <= 16) {
+      return raw;
+    }
+    return raw.substring(0, 16);
+  }
+
+  String get shortCanonicalSha256 {
+    final raw = canonicalSha256.trim();
+    if (raw.length <= 16) {
+      return raw;
+    }
+    return raw.substring(0, 16);
   }
 
   static int _intFromJson(Object? value) {
@@ -111,6 +133,30 @@ class OfficialReferentialApiResult {
     required this.updateAvailable,
     this.current,
     this.remote,
+    this.responseBody,
+  });
+
+  bool get isAvailable => status == OfficialReferentialApiStatus.available;
+}
+
+class OfficialReferentialHistoryResult {
+  final OfficialReferentialApiStatus status;
+  final String url;
+  final int? statusCode;
+  final String title;
+  final String message;
+  final String tenantId;
+  final List<OfficialReferentialSummary> history;
+  final Map<String, dynamic>? responseBody;
+
+  const OfficialReferentialHistoryResult({
+    required this.status,
+    required this.url,
+    required this.statusCode,
+    required this.title,
+    required this.message,
+    required this.tenantId,
+    required this.history,
     this.responseBody,
   });
 

@@ -6,6 +6,7 @@ import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/authorized_device.dart';
 import '../../domain/models/sync_configuration.dart';
+import '../../domain/services/access_policy_service.dart';
 import '../../domain/services/app_sync_coordinator.dart';
 import '../common/openirn_app_bar.dart';
 import '../common/responsive_autofocus.dart';
@@ -24,6 +25,7 @@ class AuthorizedDevicesScreen extends StatefulWidget {
 class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
   final _configurationRepository = const LocalSyncConfigurationRepository();
   final _apiClient = const OpenIrnApiClient();
+  final _accessPolicy = const AccessPolicyService();
 
   late Future<_AuthorizedDevicesStateData> _future;
   bool _working = false;
@@ -35,6 +37,16 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
   }
 
   Future<_AuthorizedDevicesStateData> _loadDevices() async {
+    if (!_accessPolicy.canManageAuthorizedDevices(widget.activeUser)) {
+      return _AuthorizedDevicesStateData(
+        configuration: SyncConfiguration.empty(),
+        devices: const <AuthorizedDevice>[],
+        serverAvailable: false,
+        title: 'Accès refusé',
+        message:
+            'La gestion des terminaux autorisés est réservée aux administrateurs.',
+      );
+    }
     final configuration = await _configurationRepository.loadConfiguration();
     if (!configuration.isConfigured) {
       return _AuthorizedDevicesStateData(

@@ -42,7 +42,10 @@ class _CampaignHistoryScreenState extends State<CampaignHistoryScreen> {
   List<_CampaignRevision> _conflicts = const <_CampaignRevision>[];
   String? _selectedCampaignId;
 
-  bool get _canView => _accessPolicy.canManageCampaigns(widget.activeUser);
+  bool get _canView => _accessPolicy.canViewCampaignHistory(widget.activeUser);
+
+  bool get _canRestore =>
+      _accessPolicy.canRestoreCampaignRevision(widget.activeUser);
 
   @override
   void initState() {
@@ -306,6 +309,16 @@ class _CampaignHistoryScreenState extends State<CampaignHistoryScreen> {
 
   Future<void> _restoreRevision(_CampaignRevision revision) async {
     final configuration = _configuration;
+    if (!_canRestore) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'La restauration d’une révision est réservée aux administrateurs et pilotes IRN.',
+          ),
+        ),
+      );
+      return;
+    }
     if (configuration == null || _isRestoringRevision) {
       return;
     }

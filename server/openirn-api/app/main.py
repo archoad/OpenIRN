@@ -27,6 +27,10 @@ DATA_DIR = Path(os.environ.get("OPENIRN_API_DATA_DIR", "/var/lib/openirn-api"))
 DB_PATH = Path(os.environ.get("OPENIRN_API_DB", str(DATA_DIR / "openirn.sqlite3")))
 BACKUP_DIR = Path(os.environ.get("OPENIRN_API_BACKUP_DIR", str(DATA_DIR / "backups")))
 BACKUP_KEEP = int(os.environ.get("OPENIRN_API_BACKUP_KEEP", "30"))
+BACKUP_AUTO_ENABLED = os.environ.get("OPENIRN_API_BACKUP_AUTO_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
+BACKUP_PROTECTIVE_ENABLED = os.environ.get("OPENIRN_API_BACKUP_PROTECTIVE_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
+BACKUP_PROTECTIVE_MIN_INTERVAL_MINUTES = int(os.environ.get("OPENIRN_API_BACKUP_PROTECTIVE_MIN_INTERVAL_MINUTES", "30"))
+BACKUP_SIGNATURE_SECRET = os.environ.get("OPENIRN_API_BACKUP_SIGNATURE_SECRET", "").strip()
 SCHEMA_PATH = Path(os.environ.get("OPENIRN_API_SCHEMA", str(Path(__file__).resolve().parents[1] / "sql" / "schema.sql")))
 TENANT_RE = re.compile(r"[^a-zA-Z0-9_.-]+")
 PIN_DEFAULT = os.environ.get("OPENIRN_DEFAULT_USER_PIN", "0000")
@@ -43,6 +47,21 @@ AUTH_MAX_FAILED_BY_DEVICE = int(os.environ.get("OPENIRN_AUTH_MAX_FAILED_BY_DEVIC
 AUTH_MAX_FAILED_BY_USER = int(os.environ.get("OPENIRN_AUTH_MAX_FAILED_BY_USER", "5"))
 AUTH_MAX_FAILED_BY_IP = int(os.environ.get("OPENIRN_AUTH_MAX_FAILED_BY_IP", "20"))
 AUTH_ATTEMPT_RETENTION_DAYS = int(os.environ.get("OPENIRN_AUTH_ATTEMPT_RETENTION_DAYS", "30"))
+SESSION_TTL_MINUTES = int(os.environ.get("OPENIRN_SESSION_TTL_MINUTES", "480"))
+SESSION_IDLE_TIMEOUT_MINUTES = int(os.environ.get("OPENIRN_SESSION_IDLE_TIMEOUT_MINUTES", "30"))
+
+# Unified API authorization policy.
+#
+# The device id is deliberately public: it identifies an enrolled terminal but
+# does not prove an authenticated user session.  Read-only connectivity and
+# synchronization checks may use an active terminal id, while every write or
+# administration operation must use a short-lived server session or the
+# transition bearer configured on the server.
+API_ROLE_ADMIN = {"administrator"}
+API_ROLE_CAMPAIGN_MANAGER = {"administrator", "campaign_manager"}
+API_ROLE_WRITE = {"administrator", "campaign_manager", "evaluator", "reviewer"}
+API_ROLE_READ = {"administrator", "campaign_manager", "evaluator", "reviewer", "reader"}
+
 
 
 app = FastAPI(
@@ -83,6 +102,53 @@ def _pretty_json(value: Any) -> str:
 
 def _json_sha256(value: Any) -> str:
     return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def _backup_signing_secret() -> str:
+    # Prefer an explicit backup secret. Fall back to the API bearer during the
+    # transition so existing installations get signed backups without another
+    # mandatory setting.
+    return BACKUP_SIGNATURE_SECRET or _configured_api_token()
+
+
+def _backup_signature_payload(metadata: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in metadata.items()
+        if key not in {"signature", "signatureAlgorithm", "signatureStatus"}
+    }
+
+
+def _backup_metadata_signature(metadata: dict[str, Any], secret: str | None = None) -> str:
+    effective_secret = (secret or _backup_signing_secret()).strip()
+    if not effective_secret:
+        return ""
+    message = _canonical_json(_backup_signature_payload(metadata)).encode("utf-8")
+    return hmac.new(effective_secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
+def _backup_signature_status(metadata: dict[str, Any]) -> str:
+    signature = str(metadata.get("signature") or "").strip()
+    if not signature:
+        return "unsigned"
+    secret = _backup_signing_secret()
+    if not secret:
+        return "unverified_no_secret"
+    expected = _backup_metadata_signature(metadata, secret)
+    return "valid" if expected and hmac.compare_digest(signature, expected) else "invalid"
+
+
+def _chmod_private(path: Path, mode: int) -> None:
+    try:
+        path.chmod(mode)
+    except OSError:
+        # Best effort: permissions may be constrained by the filesystem.
+        pass
+
+
+def _ensure_private_backup_dir() -> None:
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    _chmod_private(BACKUP_DIR, 0o700)
 
 
 def _parse_json(raw: str | None, fallback: Any) -> Any:
@@ -181,23 +247,47 @@ def _new_session_token() -> str:
     return "ost_" + secrets.token_urlsafe(36)
 
 
-def _is_active_session_token(provided_token: str) -> bool:
+def _session_auth_context(provided_token: str) -> dict[str, Any] | None:
     token_hash = _secret_hash(provided_token)
     now = _utc_now()
     try:
         with _db() as con:
             row = con.execute(
                 """
-                SELECT tenant_id, session_id, device_id, expires_at, revoked_at
-                FROM api_sessions
-                WHERE token_hash = ? AND revoked_at IS NULL
+                SELECT s.tenant_id, s.session_id, s.device_id, s.user_id,
+                       s.expires_at, s.last_seen_at, s.revoked_at,
+                       u.role AS user_role, u.active AS user_active
+                FROM api_sessions s
+                LEFT JOIN users u
+                  ON u.tenant_id = s.tenant_id AND u.user_id = s.user_id
+                WHERE s.token_hash = ? AND s.revoked_at IS NULL
                 """,
                 (token_hash,),
             ).fetchone()
             if row is None:
-                return False
+                return None
             if _parse_datetime(row["expires_at"]) < now:
-                return False
+                return None
+            last_seen_at = _parse_datetime(row["last_seen_at"])
+            idle_timeout = max(1, SESSION_IDLE_TIMEOUT_MINUTES)
+            if now - last_seen_at >= timedelta(minutes=idle_timeout):
+                con.execute(
+                    """
+                    UPDATE api_sessions
+                    SET revoked_at = ?
+                    WHERE tenant_id = ? AND session_id = ?
+                    """,
+                    (now.isoformat(), row["tenant_id"], row["session_id"]),
+                )
+                _record_device_audit(
+                    con,
+                    row["tenant_id"],
+                    "session.idle_timeout",
+                    device_id=row["device_id"],
+                    payload={"sessionId": row["session_id"], "idleTimeoutMinutes": idle_timeout},
+                )
+                con.commit()
+                return None
             device = con.execute(
                 """
                 SELECT 1
@@ -208,7 +298,10 @@ def _is_active_session_token(provided_token: str) -> bool:
                 (row["tenant_id"], row["device_id"]),
             ).fetchone()
             if device is None:
-                return False
+                return None
+            if row["user_active"] is not None and int(row["user_active"] or 0) != 1:
+                return None
+
             con.execute(
                 """
                 UPDATE api_sessions
@@ -226,27 +319,158 @@ def _is_active_session_token(provided_token: str) -> bool:
                 (now.isoformat(), row["tenant_id"], row["device_id"]),
             )
             con.commit()
-            return True
+            return {
+                "authMode": "session",
+                "tenantId": row["tenant_id"],
+                "sessionId": row["session_id"],
+                "deviceId": row["device_id"],
+                "userId": row["user_id"],
+                "userRole": _role_normalize(row["user_role"]),
+            }
     except sqlite3.Error:
-        return False
+        return None
 
 
-def _request_has_api_authorization(request: Request) -> bool:
+def _is_active_session_token(provided_token: str) -> bool:
+    return _session_auth_context(provided_token) is not None
+
+
+def _device_token_auth_context(provided_token: str) -> dict[str, Any] | None:
+    token_hash = _secret_hash(provided_token)
+    now = _utc_now().isoformat()
+    try:
+        with _db() as con:
+            row = con.execute(
+                """
+                SELECT tenant_id, device_id
+                FROM authorized_devices
+                WHERE token_hash = ? AND status = 'active' AND revoked_at IS NULL
+                """,
+                (token_hash,),
+            ).fetchone()
+            if row is None:
+                return None
+            con.execute(
+                """
+                UPDATE authorized_devices
+                SET last_seen_at = ?
+                WHERE tenant_id = ? AND device_id = ?
+                """,
+                (now, row["tenant_id"], row["device_id"]),
+            )
+            con.commit()
+            return {
+                "authMode": "legacy_device_token",
+                "tenantId": row["tenant_id"],
+                "deviceId": row["device_id"],
+                "userId": "",
+                "userRole": "",
+            }
+    except sqlite3.Error:
+        return None
+
+
+def _request_auth_context(request: Request) -> dict[str, Any] | None:
     provided_token = _extract_bearer_token(request)
     if not provided_token:
-        return False
+        return None
 
     expected_token = _configured_api_token()
     if expected_token and hmac.compare_digest(provided_token, expected_token):
-        return True
+        return {
+            "authMode": "server_bearer",
+            "tenantId": "",
+            "deviceId": "",
+            "userId": "server",
+            "userRole": "administrator",
+        }
 
-    if _is_active_session_token(provided_token):
-        return True
+    session_context = _session_auth_context(provided_token)
+    if session_context is not None:
+        return session_context
 
-    if _is_active_device_token(provided_token):
-        return True
+    return _device_token_auth_context(provided_token)
 
-    return False
+
+def _request_has_api_authorization(request: Request) -> bool:
+    return _request_auth_context(request) is not None
+
+
+def _authorization_unavailable_exception() -> HTTPException:
+    if not _configured_api_token():
+        return HTTPException(status_code=503, detail="OpenIRN API token is not configured on the server")
+    return HTTPException(status_code=403, detail="Invalid API token or expired session")
+
+
+def _require_role_authorization(
+    request: Request,
+    tenant_id: str,
+    allowed_roles: set[str],
+    *,
+    detail: str,
+) -> dict[str, Any]:
+    context = _request_auth_context(request)
+    if context is None:
+        raise _authorization_unavailable_exception()
+
+    auth_mode = str(context.get("authMode") or "")
+    if auth_mode == "server_bearer":
+        return context
+
+    if auth_mode == "legacy_device_token":
+        raise HTTPException(
+            status_code=403,
+            detail="Legacy device tokens are not authorized for mutating or administration endpoints",
+        )
+
+    if tenant_id and str(context.get("tenantId") or "") != tenant_id:
+        raise HTTPException(status_code=403, detail="Session tenant mismatch")
+
+    role = _role_normalize(context.get("userRole"))
+    if role not in allowed_roles:
+        raise HTTPException(status_code=403, detail=detail)
+
+    return context
+
+
+def _require_admin_authorization(request: Request, tenant_id: str) -> dict[str, Any]:
+    return _require_role_authorization(
+        request,
+        tenant_id,
+        API_ROLE_ADMIN,
+        detail="Cette action API est réservée aux administrateurs OpenIRN",
+    )
+
+
+def _require_campaign_manager_authorization(request: Request, tenant_id: str) -> dict[str, Any]:
+    return _require_role_authorization(
+        request,
+        tenant_id,
+        API_ROLE_CAMPAIGN_MANAGER,
+        detail="Cette action API est réservée aux administrateurs et pilotes IRN",
+    )
+
+
+def _require_write_authorization(request: Request, tenant_id: str) -> dict[str, Any]:
+    return _require_role_authorization(
+        request,
+        tenant_id,
+        API_ROLE_WRITE,
+        detail="Cette action API exige une session utilisateur active avec droits d’écriture",
+    )
+
+
+def _require_device_or_authorized_read(request: Request, tenant_id: str) -> dict[str, Any] | None:
+    context = _request_auth_context(request)
+    if context is not None:
+        auth_mode = str(context.get("authMode") or "")
+        if auth_mode == "server_bearer":
+            return context
+        if not tenant_id or str(context.get("tenantId") or "") == tenant_id:
+            return context
+        raise HTTPException(status_code=403, detail="Authorization tenant mismatch")
+    _require_active_device(request, tenant_id)
+    return None
 
 
 def _request_device_id(request: Request, payload: dict[str, Any] | None = None) -> str:
@@ -419,12 +643,13 @@ def _create_api_session(
     tenant_id: str,
     device_id: str,
     user_id: str,
-    ttl_hours: int = 8,
+    ttl_minutes: int | None = None,
 ) -> tuple[str, str, datetime]:
     token = _new_session_token()
     session_id = "session-" + secrets.token_urlsafe(18)
     now = _utc_now()
-    expires_at = now + timedelta(hours=ttl_hours)
+    effective_ttl_minutes = max(5, ttl_minutes or SESSION_TTL_MINUTES)
+    expires_at = now + timedelta(minutes=effective_ttl_minutes)
     con.execute(
         """
         INSERT INTO api_sessions(
@@ -447,57 +672,29 @@ def _create_api_session(
 
 
 def _is_active_device_token(provided_token: str) -> bool:
-    token_hash = _secret_hash(provided_token)
-    now = _utc_now().isoformat()
-    try:
-        with _db() as con:
-            row = con.execute(
-                """
-                SELECT tenant_id, device_id
-                FROM authorized_devices
-                WHERE token_hash = ? AND status = 'active' AND revoked_at IS NULL
-                """,
-                (token_hash,),
-            ).fetchone()
-            if row is None:
-                return False
-            con.execute(
-                """
-                UPDATE authorized_devices
-                SET last_seen_at = ?
-                WHERE tenant_id = ? AND device_id = ?
-                """,
-                (now, row["tenant_id"], row["device_id"]),
-            )
-            con.commit()
-            return True
-    except sqlite3.Error:
-        return False
+    return _device_token_auth_context(provided_token) is not None
 
 
 def _require_api_token(request: Request) -> None:
+    # Kept for compatibility with transition endpoints.  New endpoint code
+    # should prefer the explicit helpers below:
+    #   _require_admin_authorization
+    #   _require_campaign_manager_authorization
+    #   _require_write_authorization
+    #   _require_sync_read_access
     if _request_has_api_authorization(request):
         return
-
-    if not _configured_api_token():
-        raise HTTPException(status_code=503, detail="OpenIRN API token is not configured on the server")
-
-    raise HTTPException(status_code=403, detail="Invalid API token or expired session")
+    raise _authorization_unavailable_exception()
 
 
 def _require_sync_read_access(request: Request, tenant_id: str) -> None:
     """Authorize read-only synchronization endpoints.
 
-    OpenIRN v0.3.x is migrating away from persistent client-side secrets.
-    Background connectivity checks and SSE listeners therefore must be allowed
-    for an enrolled, active terminal identified by X-OpenIRN-Device-Id, even
-    when no short-lived user session is currently stored in memory.
-    Mutating endpoints continue to require a bearer/session token.
+    Read-only endpoints accept either a transition bearer/session token or an
+    enrolled, active terminal id in X-OpenIRN-Device-Id.  A terminal id is not a
+    secret and never grants write or administration rights.
     """
-    if _request_has_api_authorization(request):
-        return
-
-    _require_active_device(request, tenant_id)
+    _require_device_or_authorized_read(request, tenant_id)
 
 
 def _pin_hash(pin: str, salt: str, iterations: int = PIN_ITERATIONS) -> str:
@@ -527,6 +724,8 @@ def _apply_schema() -> None:
         raise RuntimeError(f"OpenIRN SQLite schema not found: {SCHEMA_PATH}")
     with _db() as con:
         con.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        _backfill_official_referential_history(con)
+        con.commit()
 
 
 @app.on_event("startup")
@@ -1060,18 +1259,35 @@ def _download_official_adri_xlsx(remote: dict[str, Any]) -> bytes:
     return raw
 
 
+def _row_value(row: sqlite3.Row, key: str, fallback: Any = "") -> Any:
+    return row[key] if key in row.keys() else fallback
+
+
+def _official_referential_web_url(source_url: Any, default_branch: Any, file_path: Any) -> str:
+    base = str(source_url or "").strip().rstrip("/")
+    branch = str(default_branch or "").strip()
+    path = str(file_path or "").strip()
+    if not base or not branch or not path:
+        return ""
+    return f"{base}/-/blob/{urllib.parse.quote(branch, safe='')}/{urllib.parse.quote(path)}"
+
+
 def _official_referential_summary_from_row(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
     report = _parse_json(row["validation_report_json"], {})
+    source_url = row["source_url"]
+    default_branch = row["default_branch"]
+    file_path = row["file_path"]
     return {
+        "historyId": _row_value(row, "history_id", ""),
         "referentialId": row["referential_id"],
         "version": row["version"],
         "active": bool(row["active"]),
-        "sourceUrl": row["source_url"],
+        "sourceUrl": source_url,
         "projectPath": row["project_path"],
-        "defaultBranch": row["default_branch"],
-        "filePath": row["file_path"],
+        "defaultBranch": default_branch,
+        "filePath": file_path,
         "sourceBlobId": row["source_blob_id"],
         "sourceSha256": row["source_sha256"],
         "canonicalSha256": row["canonical_sha256"],
@@ -1079,7 +1295,9 @@ def _official_referential_summary_from_row(row: sqlite3.Row | None) -> dict[str,
         "importedAt": row["imported_at"],
         "pillarCount": row["pillar_count"],
         "criterionCount": row["criterion_count"],
+        "triggeredByUserId": _row_value(row, "triggered_by_user_id", ""),
         "validationStatus": report.get("status") if isinstance(report, dict) else "unknown",
+        "webUrl": _official_referential_web_url(source_url, default_branch, file_path),
     }
 
 
@@ -1099,6 +1317,112 @@ def _load_current_official_referential(con: sqlite3.Connection, tenant_id: str) 
     ).fetchone()
 
 
+def _official_referential_history_id(referential_id: str, canonical_sha256: str, imported_at: str) -> str:
+    normalized_imported_at = re.sub(r"[^0-9A-Za-z]+", "", imported_at)[:24]
+    digest = str(canonical_sha256 or "")[:12] or uuid.uuid4().hex[:12]
+    safe_referential_id = _adri_safe_filename(referential_id or "adri-irn")
+    return f"{safe_referential_id}-{normalized_imported_at}-{digest}"[:180]
+
+
+def _backfill_official_referential_history(con: sqlite3.Connection) -> None:
+    rows = con.execute(
+        """
+        SELECT tenant_id, referential_id, version, active, source_url, project_path,
+               default_branch, file_path, source_blob_id, source_sha256,
+               canonical_sha256, downloaded_at, imported_at, pillar_count,
+               criterion_count, import_warnings_json, validation_report_json, payload_json
+        FROM official_referentials
+        """
+    ).fetchall()
+    for row in rows:
+        existing_history = con.execute(
+            """
+            SELECT 1
+            FROM official_referential_history
+            WHERE tenant_id = ?
+              AND referential_id = ?
+              AND canonical_sha256 = ?
+              AND source_sha256 = ?
+            LIMIT 1
+            """,
+            (
+                row["tenant_id"],
+                row["referential_id"],
+                row["canonical_sha256"],
+                row["source_sha256"],
+            ),
+        ).fetchone()
+        if existing_history is not None:
+            continue
+
+        history_id = _official_referential_history_id(
+            str(row["referential_id"] or "adri-irn"),
+            str(row["canonical_sha256"] or row["source_sha256"] or ""),
+            str(row["imported_at"] or row["downloaded_at"] or _utc_now().isoformat()),
+        )
+        con.execute(
+            """
+            INSERT OR IGNORE INTO official_referential_history(
+                tenant_id, history_id, referential_id, version, active,
+                source_url, project_path, default_branch, file_path,
+                source_blob_id, source_sha256, canonical_sha256,
+                downloaded_at, imported_at, pillar_count, criterion_count,
+                triggered_by_user_id, import_warnings_json,
+                validation_report_json, payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)
+            """,
+            (
+                row["tenant_id"],
+                history_id,
+                row["referential_id"],
+                row["version"],
+                row["active"],
+                row["source_url"],
+                row["project_path"],
+                row["default_branch"],
+                row["file_path"],
+                row["source_blob_id"],
+                row["source_sha256"],
+                row["canonical_sha256"],
+                row["downloaded_at"],
+                row["imported_at"],
+                row["pillar_count"],
+                row["criterion_count"],
+                row["import_warnings_json"],
+                row["validation_report_json"],
+                row["payload_json"],
+            ),
+        )
+
+
+def _list_official_referential_history(
+    con: sqlite3.Connection,
+    tenant_id: str,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    _backfill_official_referential_history(con)
+    rows = con.execute(
+        """
+        SELECT tenant_id, history_id, referential_id, version, active,
+               source_url, project_path, default_branch, file_path,
+               source_blob_id, source_sha256, canonical_sha256,
+               downloaded_at, imported_at, pillar_count, criterion_count,
+               triggered_by_user_id, import_warnings_json,
+               validation_report_json, payload_json
+        FROM official_referential_history
+        WHERE tenant_id = ?
+        ORDER BY imported_at DESC, history_id DESC
+        LIMIT ?
+        """,
+        (tenant_id, max(1, min(int(limit), 200))),
+    ).fetchall()
+    return [
+        summary
+        for summary in (_official_referential_summary_from_row(row) for row in rows)
+        if summary is not None
+    ]
+
+
 def _store_official_referential(
     con: sqlite3.Connection,
     tenant_id: str,
@@ -1106,6 +1430,7 @@ def _store_official_referential(
     remote: dict[str, Any],
     report: dict[str, Any],
     raw_xlsx: bytes,
+    triggered_by_user_id: str = "",
 ) -> dict[str, Any]:
     referential_id = str(referential.get("id") or "adri-irn")
     source = referential.get("source") if isinstance(referential.get("source"), dict) else {}
@@ -1125,7 +1450,20 @@ def _store_official_referential(
     json_path.write_text(_pretty_json(referential) + "\n", encoding="utf-8")
     report_path.write_text(_pretty_json(report) + "\n", encoding="utf-8")
 
+    source_url = str(source.get("url") or OFFICIAL_ADRI_SOURCE_URL)
+    project_path = str(source.get("projectPath") or OFFICIAL_ADRI_PROJECT_PATH)
+    default_branch = str(source.get("defaultBranch") or remote.get("defaultBranch") or OFFICIAL_ADRI_DEFAULT_BRANCH)
+    file_path = str(source.get("filePath") or remote.get("filePath") or "")
+    source_blob_id = str(source.get("blobId") or remote.get("blobId") or "")
+    import_warnings_json = _canonical_json(
+        referential.get("importWarnings") if isinstance(referential.get("importWarnings"), list) else []
+    )
+    validation_report_json = _canonical_json(report)
+    payload_json = _canonical_json(referential)
+    history_id = _official_referential_history_id(referential_id, canonical_sha256, downloaded_at)
+
     con.execute("UPDATE official_referentials SET active = 0 WHERE tenant_id = ?", (tenant_id,))
+    con.execute("UPDATE official_referential_history SET active = 0 WHERE tenant_id = ?", (tenant_id,))
     con.execute(
         """
         INSERT INTO official_referentials(
@@ -1156,23 +1494,63 @@ def _store_official_referential(
             tenant_id,
             referential_id,
             str(referential.get("version") or "unknown"),
-            str(source.get("url") or OFFICIAL_ADRI_SOURCE_URL),
-            str(source.get("projectPath") or OFFICIAL_ADRI_PROJECT_PATH),
-            str(source.get("defaultBranch") or remote.get("defaultBranch") or OFFICIAL_ADRI_DEFAULT_BRANCH),
-            str(source.get("filePath") or remote.get("filePath") or ""),
-            str(source.get("blobId") or remote.get("blobId") or ""),
+            source_url,
+            project_path,
+            default_branch,
+            file_path,
+            source_blob_id,
             source_sha256,
             canonical_sha256,
             downloaded_at,
             imported_at,
             len(pillars),
             len(criteria),
-            _canonical_json(referential.get("importWarnings") if isinstance(referential.get("importWarnings"), list) else []),
-            _canonical_json(report),
-            _canonical_json(referential),
+            import_warnings_json,
+            validation_report_json,
+            payload_json,
+        ),
+    )
+    con.execute(
+        """
+        INSERT INTO official_referential_history(
+            tenant_id, history_id, referential_id, version, active,
+            source_url, project_path, default_branch, file_path,
+            source_blob_id, source_sha256, canonical_sha256,
+            downloaded_at, imported_at, pillar_count, criterion_count,
+            triggered_by_user_id, import_warnings_json,
+            validation_report_json, payload_json
+        ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(tenant_id, history_id) DO UPDATE SET
+            active = 1,
+            triggered_by_user_id = excluded.triggered_by_user_id,
+            import_warnings_json = excluded.import_warnings_json,
+            validation_report_json = excluded.validation_report_json,
+            payload_json = excluded.payload_json
+        """,
+        (
+            tenant_id,
+            history_id,
+            referential_id,
+            str(referential.get("version") or "unknown"),
+            source_url,
+            project_path,
+            default_branch,
+            file_path,
+            source_blob_id,
+            source_sha256,
+            canonical_sha256,
+            downloaded_at,
+            imported_at,
+            len(pillars),
+            len(criteria),
+            str(triggered_by_user_id or "")[:120],
+            import_warnings_json,
+            validation_report_json,
+            payload_json,
         ),
     )
     return {
+        "historyId": history_id,
         "referentialId": referential_id,
         "version": referential.get("version") or "unknown",
         "sourceSha256": source_sha256,
@@ -1767,7 +2145,10 @@ def _table_counts(con: sqlite3.Connection) -> dict[str, int | None]:
         "authorized_devices",
         "device_enrollment_codes",
         "device_audit_log",
+        "official_referentials",
+        "official_referential_history",
         "sync_events",
+        "backup_audit_log",
     ]:
         try:
             counts[table] = int(con.execute(f"select count(*) from {table}").fetchone()[0])
@@ -1787,6 +2168,11 @@ def _sqlite_integrity_check(path: Path) -> str:
         return f"error: {exc}"
 
 
+def _write_private_text(path: Path, content: str) -> None:
+    path.write_text(content, encoding="utf-8")
+    _chmod_private(path, 0o600)
+
+
 def _backup_metadata_from_file(path: Path) -> dict[str, Any]:
     meta_path = path.with_suffix(path.suffix + ".json")
     metadata = _parse_json(meta_path.read_text(encoding="utf-8") if meta_path.exists() else None, {})
@@ -1804,12 +2190,19 @@ def _backup_metadata_from_file(path: Path) -> dict[str, Any]:
             sha_parts = sha_path.read_text(encoding="utf-8").split()
             sha256 = sha_parts[0] if sha_parts else ""
 
+    signature_status = _backup_signature_status(metadata) if metadata else "unsigned"
     return {
         "name": path.name,
         "path": str(path),
         "createdAt": created_at,
         "sizeBytes": path.stat().st_size,
         "sha256": sha256,
+        "integrityCheck": str(metadata.get("integrityCheck") or "unknown"),
+        "reason": str(metadata.get("reason") or ""),
+        "automatic": bool(metadata.get("automatic") is True),
+        "triggeredByUserId": str(metadata.get("triggeredByUserId") or ""),
+        "signatureStatus": signature_status,
+        "signed": signature_status == "valid",
         "counts": metadata.get("counts") if isinstance(metadata.get("counts"), dict) else {},
     }
 
@@ -1823,6 +2216,86 @@ def _list_backups(limit: int = 10) -> list[dict[str, Any]]:
         reverse=True,
     )
     return [_backup_metadata_from_file(path) for path in backups[: max(1, min(limit, 100))]]
+
+
+def _backup_audit_events(con: sqlite3.Connection, tenant_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    rows = con.execute(
+        """
+        SELECT backup_name, event_type, reason, triggered_by_user_id,
+               created_at, sha256, size_bytes, payload_json
+        FROM backup_audit_log
+        WHERE tenant_id = ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?
+        """,
+        (tenant_id, max(1, min(limit, 100))),
+    ).fetchall()
+    events: list[dict[str, Any]] = []
+    for row in rows:
+        events.append(
+            {
+                "backupName": row["backup_name"],
+                "eventType": row["event_type"],
+                "reason": row["reason"],
+                "triggeredByUserId": row["triggered_by_user_id"],
+                "createdAt": row["created_at"],
+                "sha256": row["sha256"],
+                "sizeBytes": int(row["size_bytes"] or 0),
+                "payload": _parse_json(row["payload_json"], {}),
+            }
+        )
+    return events
+
+
+def _record_backup_audit(
+    con: sqlite3.Connection,
+    tenant_id: str,
+    event_type: str,
+    *,
+    backup_name: str = "",
+    reason: str = "",
+    triggered_by_user_id: str | None = None,
+    sha256: str = "",
+    size_bytes: int = 0,
+    payload: dict[str, Any] | None = None,
+) -> None:
+    con.execute(
+        """
+        INSERT INTO backup_audit_log(
+            tenant_id, backup_name, event_type, reason, triggered_by_user_id,
+            created_at, sha256, size_bytes, payload_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            tenant_id,
+            backup_name[:240],
+            event_type[:120],
+            reason[:160],
+            (triggered_by_user_id or "")[:160],
+            _utc_now().isoformat(),
+            sha256,
+            int(size_bytes or 0),
+            _canonical_json(payload or {}),
+        ),
+    )
+
+
+def _last_protective_backup_at(con: sqlite3.Connection, tenant_id: str, reason: str) -> datetime | None:
+    row = con.execute(
+        """
+        SELECT created_at
+        FROM backup_audit_log
+        WHERE tenant_id = ?
+          AND event_type = 'backup.created'
+          AND reason = ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        """,
+        (tenant_id, reason),
+    ).fetchone()
+    if row is None:
+        return None
+    return _parse_datetime(row["created_at"])
 
 
 def _cleanup_old_backups(protected_names: set[str] | None = None) -> list[str]:
@@ -1848,6 +2321,10 @@ def _cleanup_old_backups(protected_names: set[str] | None = None) -> list[str]:
 def _create_sqlite_backup(
     triggered_by_user_id: str | None = None,
     protected_names: set[str] | None = None,
+    *,
+    tenant_id: str = "default",
+    reason: str = "manual",
+    automatic: bool = False,
 ) -> dict[str, Any]:
     if not DB_PATH.exists():
         raise HTTPException(status_code=503, detail="OpenIRN SQLite database does not exist yet")
@@ -1856,7 +2333,7 @@ def _create_sqlite_backup(
     if integrity != "ok":
         raise HTTPException(status_code=500, detail=f"SQLite integrity_check failed before backup: {integrity}")
 
-    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    _ensure_private_backup_dir()
     stamp = _utc_now().strftime("%Y%m%dT%H%M%SZ")
     backup_path = BACKUP_DIR / f"openirn-{stamp}.sqlite3"
     suffix = 1
@@ -1868,15 +2345,14 @@ def _create_sqlite_backup(
         con.execute("pragma busy_timeout = 10000")
         con.execute(f"vacuum main into {_canonical_json(str(backup_path))}")
 
+    _chmod_private(backup_path, 0o600)
     backup_integrity = _sqlite_integrity_check(backup_path)
     if backup_integrity != "ok":
         raise HTTPException(status_code=500, detail=f"SQLite integrity_check failed for produced backup: {backup_integrity}")
 
     digest = _file_sha256(backup_path)
-    backup_path.with_suffix(backup_path.suffix + ".sha256").write_text(
-        f"{digest}  {backup_path.name}\n",
-        encoding="utf-8",
-    )
+    sha_path = backup_path.with_suffix(backup_path.suffix + ".sha256")
+    _write_private_text(sha_path, f"{digest}  {backup_path.name}\n")
 
     counts: dict[str, int | None] = {}
     with sqlite3.connect(backup_path) as con:
@@ -1885,21 +2361,105 @@ def _create_sqlite_backup(
 
     metadata = {
         "type": "openirn.sqliteBackup",
+        "formatVersion": 2,
         "createdAt": _utc_now().isoformat(),
         "sourceDb": str(DB_PATH),
         "backupDb": str(backup_path),
+        "backupName": backup_path.name,
+        "tenantId": tenant_id,
+        "reason": reason,
+        "automatic": automatic,
         "triggeredByUserId": triggered_by_user_id or "",
         "sha256": digest,
         "sizeBytes": backup_path.stat().st_size,
         "integrityCheck": backup_integrity,
+        "retentionKeep": BACKUP_KEEP,
         "counts": counts,
     }
-    backup_path.with_suffix(backup_path.suffix + ".json").write_text(
-        _pretty_json(metadata) + "\n",
-        encoding="utf-8",
-    )
+    signature = _backup_metadata_signature(metadata)
+    if signature:
+        metadata["signatureAlgorithm"] = "hmac-sha256-canonical-json-v1"
+        metadata["signature"] = signature
+        metadata["signatureStatus"] = "valid"
+    else:
+        metadata["signatureAlgorithm"] = ""
+        metadata["signature"] = ""
+        metadata["signatureStatus"] = "unsigned"
+
+    meta_path = backup_path.with_suffix(backup_path.suffix + ".json")
+    _write_private_text(meta_path, _pretty_json(metadata) + "\n")
     removed = _cleanup_old_backups(protected_names=protected_names)
+
+    with _db() as con:
+        with con:
+            _ensure_tenant(con, tenant_id)
+            _record_backup_audit(
+                con,
+                tenant_id,
+                "backup.created",
+                backup_name=backup_path.name,
+                reason=reason,
+                triggered_by_user_id=triggered_by_user_id,
+                sha256=digest,
+                size_bytes=backup_path.stat().st_size,
+                payload={
+                    "automatic": automatic,
+                    "signatureStatus": metadata["signatureStatus"],
+                    "removedOldBackups": removed,
+                },
+            )
+
     return {**metadata, "name": backup_path.name, "removedOldBackups": removed}
+
+
+def _create_protective_backup(
+    tenant_id: str,
+    *,
+    reason: str,
+    triggered_by_user_id: str | None = None,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if not BACKUP_PROTECTIVE_ENABLED:
+        return {"status": "disabled", "reason": reason}
+
+    min_interval = max(0, BACKUP_PROTECTIVE_MIN_INTERVAL_MINUTES)
+    with _db() as con:
+        _ensure_tenant(con, tenant_id)
+        last_created_at = _last_protective_backup_at(con, tenant_id, reason)
+        con.commit()
+
+    if last_created_at is not None and min_interval > 0:
+        elapsed = _utc_now() - last_created_at
+        if elapsed < timedelta(minutes=min_interval):
+            return {
+                "status": "skipped_recent",
+                "reason": reason,
+                "lastCreatedAt": last_created_at.isoformat(),
+                "minIntervalMinutes": min_interval,
+            }
+
+    backup = _create_sqlite_backup(
+        tenant_id=tenant_id,
+        triggered_by_user_id=triggered_by_user_id,
+        reason=reason,
+        automatic=True,
+    )
+    if context:
+        with _db() as con:
+            with con:
+                _ensure_tenant(con, tenant_id)
+                _record_backup_audit(
+                    con,
+                    tenant_id,
+                    "backup.protective_context",
+                    backup_name=str(backup.get("name") or ""),
+                    reason=reason,
+                    triggered_by_user_id=triggered_by_user_id,
+                    sha256=str(backup.get("sha256") or ""),
+                    size_bytes=int(backup.get("sizeBytes") or 0),
+                    payload=context,
+                )
+    return {"status": "created", "backup": backup, "reason": reason}
 
 
 def _backup_path_from_name(backup_name: str) -> Path:
@@ -1920,7 +2480,7 @@ def _backup_path_from_name(backup_name: str) -> Path:
     return backup_path
 
 
-def _verify_backup_file(backup_path: Path) -> str:
+def _verify_backup_file(backup_path: Path) -> dict[str, Any]:
     integrity = _sqlite_integrity_check(backup_path)
     if integrity != "ok":
         raise HTTPException(status_code=500, detail=f"SQLite integrity_check failed for backup: {integrity}")
@@ -1932,16 +2492,33 @@ def _verify_backup_file(backup_path: Path) -> str:
         expected = expected_parts[0].strip() if expected_parts else ""
         if expected and not hmac.compare_digest(digest, expected):
             raise HTTPException(status_code=500, detail="Backup SHA-256 checksum mismatch")
-    return digest
+
+    meta_path = backup_path.with_suffix(backup_path.suffix + ".json")
+    metadata = _parse_json(meta_path.read_text(encoding="utf-8") if meta_path.exists() else None, {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    signature_status = _backup_signature_status(metadata) if metadata else "unsigned"
+    if signature_status == "invalid":
+        raise HTTPException(status_code=500, detail="Backup manifest HMAC signature mismatch")
+    return {"sha256": digest, "integrityCheck": integrity, "signatureStatus": signature_status}
 
 
-def _restore_sqlite_backup(backup_name: str, triggered_by_user_id: str | None = None) -> dict[str, Any]:
+def _restore_sqlite_backup(
+    backup_name: str,
+    triggered_by_user_id: str | None = None,
+    *,
+    tenant_id: str = "default",
+) -> dict[str, Any]:
     backup_path = _backup_path_from_name(backup_name)
-    digest = _verify_backup_file(backup_path)
+    verification = _verify_backup_file(backup_path)
+    digest = str(verification.get("sha256") or "")
 
     safety_backup = _create_sqlite_backup(
+        tenant_id=tenant_id,
         triggered_by_user_id=triggered_by_user_id,
         protected_names={backup_path.name},
+        reason="pre_restore_safety",
+        automatic=True,
     )
 
     try:
@@ -1960,6 +2537,22 @@ def _restore_sqlite_backup(backup_name: str, triggered_by_user_id: str | None = 
 
     with _db() as con:
         counts = _table_counts(con)
+        try:
+            with con:
+                _ensure_tenant(con, tenant_id)
+                _record_backup_audit(
+                    con,
+                    tenant_id,
+                    "backup.restored",
+                    backup_name=backup_path.name,
+                    reason="manual_restore",
+                    triggered_by_user_id=triggered_by_user_id,
+                    sha256=digest,
+                    size_bytes=backup_path.stat().st_size,
+                    payload={"signatureStatus": verification.get("signatureStatus"), "preRestoreBackup": safety_backup.get("name")},
+                )
+        except sqlite3.Error:
+            pass
 
     return {
         "status": "ok",
@@ -1967,6 +2560,7 @@ def _restore_sqlite_backup(backup_name: str, triggered_by_user_id: str | None = 
         "restoredAt": _utc_now().isoformat(),
         "backup": _backup_metadata_from_file(backup_path),
         "backupSha256": digest,
+        "signatureStatus": verification.get("signatureStatus"),
         "preRestoreBackup": safety_backup,
         "triggeredByUserId": triggered_by_user_id or "",
         "integrityCheck": restored_integrity,
@@ -1974,8 +2568,14 @@ def _restore_sqlite_backup(backup_name: str, triggered_by_user_id: str | None = 
     }
 
 
-def _delete_sqlite_backup(backup_name: str) -> dict[str, Any]:
+def _delete_sqlite_backup(
+    backup_name: str,
+    *,
+    tenant_id: str = "default",
+    triggered_by_user_id: str | None = None,
+) -> dict[str, Any]:
     backup_path = _backup_path_from_name(backup_name)
+    metadata = _backup_metadata_from_file(backup_path)
     deleted: list[str] = []
     for companion in [
         backup_path,
@@ -1985,6 +2585,20 @@ def _delete_sqlite_backup(backup_name: str) -> dict[str, Any]:
         if companion.exists():
             companion.unlink()
             deleted.append(companion.name)
+    with _db() as con:
+        with con:
+            _ensure_tenant(con, tenant_id)
+            _record_backup_audit(
+                con,
+                tenant_id,
+                "backup.deleted",
+                backup_name=backup_path.name,
+                reason="manual_delete",
+                triggered_by_user_id=triggered_by_user_id,
+                sha256=str(metadata.get("sha256") or ""),
+                size_bytes=int(metadata.get("sizeBytes") or 0),
+                payload={"deletedFiles": deleted},
+            )
     return {
         "status": "ok",
         "type": "openirn.sqliteBackupDeleted",
@@ -1994,13 +2608,18 @@ def _delete_sqlite_backup(backup_name: str) -> dict[str, Any]:
     }
 
 
-def _maintenance_status(limit: int = 10) -> dict[str, Any]:
+def _maintenance_status(limit: int = 10, tenant_id: str = "default") -> dict[str, Any]:
     with _db() as con:
+        _ensure_tenant(con, tenant_id)
         counts = _table_counts(con)
+        audit_events = _backup_audit_events(con, tenant_id, limit=limit)
+        con.commit()
 
     wal_path = Path(str(DB_PATH) + "-wal")
     shm_path = Path(str(DB_PATH) + "-shm")
     backups = _list_backups(limit=limit)
+    signature_secret_configured = bool(_backup_signing_secret())
+    unsigned_count = sum(1 for backup in backups if backup.get("signatureStatus") != "valid")
     return {
         "status": "ok",
         "type": "openirn.maintenanceStatus",
@@ -2022,6 +2641,18 @@ def _maintenance_status(limit: int = 10) -> dict[str, Any]:
             "count": len(list(BACKUP_DIR.glob("openirn-*.sqlite3"))) if BACKUP_DIR.exists() else 0,
             "latest": backups[0] if backups else None,
             "backups": backups,
+            "auditEvents": audit_events,
+            "security": {
+                "autoEnabled": BACKUP_AUTO_ENABLED,
+                "protectiveEnabled": BACKUP_PROTECTIVE_ENABLED,
+                "protectiveMinIntervalMinutes": BACKUP_PROTECTIVE_MIN_INTERVAL_MINUTES,
+                "privateDirectory": True,
+                "fileMode": "0600",
+                "directoryMode": "0700",
+                "signatureAlgorithm": "hmac-sha256-canonical-json-v1",
+                "signatureSecretConfigured": signature_secret_configured,
+                "unsignedVisibleBackups": unsigned_count,
+            },
         },
     }
 
@@ -2031,8 +2662,8 @@ def devices(
     request: Request,
     tenantId: str = Query(default="default", min_length=1, max_length=80),
 ) -> dict[str, Any]:
-    _require_api_token(request)
     tenant_id = _safe_segment(tenantId, "default")
+    _require_admin_authorization(request, tenant_id)
     with _db() as con:
         _ensure_tenant(con, tenant_id)
         devices_list = _list_devices(con, tenant_id)
@@ -2049,7 +2680,6 @@ def devices(
 
 @app.post("/devices/enrollment")
 async def devices_enrollment(request: Request) -> dict[str, Any]:
-    _require_api_token(request)
     try:
         payload = await request.json()
     except json.JSONDecodeError:
@@ -2058,6 +2688,7 @@ async def devices_enrollment(request: Request) -> dict[str, Any]:
         payload = {}
 
     tenant_id = _safe_segment(payload.get("tenantId"), "default")
+    _require_admin_authorization(request, tenant_id)
     created_by_user_id = str(payload.get("createdByUserId") or "").strip()[:120]
     label = str(payload.get("label") or "").strip()[:120]
     allowed_expiration_minutes = {5, 10, 15}
@@ -2207,7 +2838,6 @@ async def devices_enrollment_consume(request: Request) -> dict[str, Any]:
 
 @app.post("/devices/{device_id}/rename")
 async def device_rename(device_id: str, request: Request) -> dict[str, Any]:
-    _require_api_token(request)
     try:
         payload = await request.json()
     except json.JSONDecodeError:
@@ -2215,6 +2845,7 @@ async def device_rename(device_id: str, request: Request) -> dict[str, Any]:
     if not isinstance(payload, dict):
         payload = {}
     tenant_id = _safe_segment(payload.get("tenantId"), "default")
+    _require_admin_authorization(request, tenant_id)
     name = str(payload.get("name") or "").strip()[:120]
     if not name:
         raise HTTPException(status_code=400, detail="Missing device name")
@@ -2255,8 +2886,8 @@ def device_revoke(
     request: Request,
     tenantId: str = Query(default="default", min_length=1, max_length=80),
 ) -> dict[str, Any]:
-    _require_api_token(request)
     tenant_id = _safe_segment(tenantId, "default")
+    _require_admin_authorization(request, tenant_id)
     now = _utc_now().isoformat()
     with _db() as con:
         row = con.execute(
@@ -2297,8 +2928,8 @@ def official_referential_status(
     request: Request,
     tenantId: str = Query(default="default", min_length=1, max_length=80),
 ) -> dict[str, Any]:
-    _require_api_token(request)
     tenant_id = _safe_segment(tenantId, "default")
+    _require_admin_authorization(request, tenant_id)
     remote = _official_remote_latest()
     with _db() as con:
         _ensure_tenant(con, tenant_id)
@@ -2356,9 +2987,33 @@ def official_referential_current(
     }
 
 
+@app.get("/referential/official/history")
+def official_referential_history(
+    request: Request,
+    tenantId: str = Query(default="default", min_length=1, max_length=80),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict[str, Any]:
+    tenant_id = _safe_segment(tenantId, "default")
+    _require_admin_authorization(request, tenant_id)
+    with _db() as con:
+        _ensure_tenant(con, tenant_id)
+        history = _list_official_referential_history(con, tenant_id, limit=limit)
+        con.commit()
+    return {
+        "status": "ok",
+        "type": "openirn.officialReferentialHistory",
+        "application": "OpenIRN API",
+        "version": APP_VERSION,
+        "tenantId": tenant_id,
+        "serverTime": _utc_now().isoformat(),
+        "limit": limit,
+        "count": len(history),
+        "history": history,
+    }
+
+
 @app.post("/referential/official/update")
 async def official_referential_update(request: Request) -> dict[str, Any]:
-    _require_api_token(request)
     try:
         payload = await request.json()
     except json.JSONDecodeError:
@@ -2367,8 +3022,12 @@ async def official_referential_update(request: Request) -> dict[str, Any]:
         payload = {}
 
     tenant_id = _safe_segment(payload.get("tenantId"), "default")
+    auth_context = _require_admin_authorization(request, tenant_id)
     force = payload.get("force") is True
-    triggered_by_user_id = str(payload.get("triggeredByUserId") or "").strip()[:120]
+    triggered_by_user_id = (
+        str(payload.get("triggeredByUserId") or "").strip()
+        or str(auth_context.get("userId") or "").strip()
+    )[:120]
 
     remote = _official_remote_latest()
     with _db() as con:
@@ -2395,6 +3054,18 @@ async def official_referential_update(request: Request) -> dict[str, Any]:
             "updateAvailable": False,
         }
 
+    protective_backup = _create_protective_backup(
+        tenant_id,
+        reason="pre_official_referential_update",
+        triggered_by_user_id=triggered_by_user_id,
+        context={
+            "force": force,
+            "currentVersion": current.get("version") if isinstance(current, dict) else None,
+            "remoteVersion": remote.get("version"),
+            "remoteBlobId": remote.get("blobId"),
+        },
+    )
+
     raw_xlsx = _download_official_adri_xlsx(remote)
     referential = _adri_parse_workbook(raw_xlsx, version=str(remote.get("version") or "unknown"), remote=remote)
     validation = _adri_validation_report(referential)
@@ -2404,7 +3075,15 @@ async def official_referential_update(request: Request) -> dict[str, Any]:
     with _db() as con:
         with con:
             _ensure_tenant(con, tenant_id)
-            stored = _store_official_referential(con, tenant_id, referential, remote, validation, raw_xlsx)
+            stored = _store_official_referential(
+                con,
+                tenant_id,
+                referential,
+                remote,
+                validation,
+                raw_xlsx,
+                triggered_by_user_id=triggered_by_user_id,
+            )
             con.execute(
                 """
                 INSERT INTO sync_events(tenant_id, event_type, server_sync_id, campaign_id, device_id, created_at, payload_json)
@@ -2437,6 +3116,7 @@ async def official_referential_update(request: Request) -> dict[str, Any]:
         "remote": remote,
         "validation": validation,
         "stored": stored,
+        "protectiveBackup": protective_backup,
         "updateAvailable": False,
     }
 
@@ -2449,7 +3129,7 @@ def health() -> dict[str, Any]:
         "storage": "sqlite",
         "database": str(DB_PATH),
         "authRequired": True,
-        "authMode": "bearer_token_or_device_token",
+        "authMode": "server_session_with_role_policy",
         "endpoints": [
             "/health",
             "/auth/verify",
@@ -2465,6 +3145,7 @@ def health() -> dict[str, Any]:
             "/devices/{device_id}",
             "/referential/official/status",
             "/referential/official/current",
+            "/referential/official/history",
             "/referential/official/update",
             "/sync/push",
             "/sync/status",
@@ -2486,8 +3167,6 @@ def health() -> dict[str, Any]:
 
 @app.post("/sync/push")
 async def sync_push(request: Request) -> dict[str, Any]:
-    _require_api_token(request)
-
     try:
         payload = await request.json()
     except json.JSONDecodeError as exc:
@@ -2503,6 +3182,7 @@ async def sync_push(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Missing sync context")
 
     tenant_id = _safe_segment(sync_context.get("tenantId"), "default")
+    _require_write_authorization(request, tenant_id)
     device_id = _safe_segment(sync_context.get("deviceId"), "unknown-device")
     campaigns = _extract_campaigns(payload)
 
@@ -2713,6 +3393,8 @@ async def auth_verify(request: Request) -> dict[str, Any]:
         "sessionId": session_id,
         "apiToken": session_token,
         "expiresAt": expires_at.isoformat(),
+        "sessionTtlMinutes": max(5, SESSION_TTL_MINUTES),
+        "idleTimeoutMinutes": max(1, SESSION_IDLE_TIMEOUT_MINUTES),
     }
 
 
@@ -2765,7 +3447,7 @@ def security_audit(
     includeDeviceAudit: bool = Query(default=True),
 ) -> dict[str, Any]:
     tenant_id = _safe_segment(tenantId, "default")
-    _require_api_token(request)
+    _require_admin_authorization(request, tenant_id)
     safe_limit = max(25, min(int(limit), 500))
     events: list[dict[str, Any]] = []
 
@@ -2849,6 +3531,60 @@ def security_audit(
     }
 
 
+@app.delete("/auth/session/current")
+def revoke_current_auth_session(
+    request: Request,
+    tenantId: str = Query(default="default", min_length=1, max_length=80),
+) -> dict[str, Any]:
+    tenant_id = _safe_segment(tenantId, "default")
+    provided_token = _extract_bearer_token(request)
+    if not provided_token or not provided_token.startswith("ost_"):
+        raise HTTPException(status_code=401, detail="Session courante requise")
+    token_hash = _secret_hash(provided_token)
+    now = _utc_now()
+
+    with _db() as con:
+        _ensure_tenant(con, tenant_id)
+        row = con.execute(
+            """
+            SELECT session_id, device_id, user_id, revoked_at
+            FROM api_sessions
+            WHERE tenant_id = ? AND token_hash = ?
+            """,
+            (tenant_id, token_hash),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Session inconnue")
+        if row["revoked_at"] is None:
+            con.execute(
+                """
+                UPDATE api_sessions
+                SET revoked_at = ?
+                WHERE tenant_id = ? AND session_id = ?
+                """,
+                (now.isoformat(), tenant_id, row["session_id"]),
+            )
+            _record_device_audit(
+                con,
+                tenant_id,
+                "session.locked",
+                device_id=row["device_id"],
+                payload={"sessionId": row["session_id"], "userId": row["user_id"]},
+            )
+            con.commit()
+
+    return {
+        "status": "ok",
+        "type": "openirn.currentApiSessionRevoked",
+        "application": "OpenIRN API",
+        "version": APP_VERSION,
+        "tenantId": tenant_id,
+        "serverTime": _utc_now().isoformat(),
+        "sessionId": row["session_id"],
+        "message": "Session courante verrouillée.",
+    }
+
+
 @app.get("/auth/sessions")
 def auth_sessions(
     request: Request,
@@ -2856,7 +3592,7 @@ def auth_sessions(
     includeInactive: bool = Query(default=True),
 ) -> dict[str, Any]:
     tenant_id = _safe_segment(tenantId, "default")
-    _require_api_token(request)
+    _require_admin_authorization(request, tenant_id)
     provided_token = _extract_bearer_token(request)
     current_token_hash = _secret_hash(provided_token) if provided_token.startswith("ost_") else ""
     now_iso = _utc_now().isoformat()
@@ -2935,7 +3671,7 @@ def revoke_auth_session(
     safe_session_id = str(session_id or "").strip()[:160]
     if not safe_session_id:
         raise HTTPException(status_code=400, detail="Missing session id")
-    _require_api_token(request)
+    _require_admin_authorization(request, tenant_id)
     provided_token = _extract_bearer_token(request)
     current_token_hash = _secret_hash(provided_token) if provided_token.startswith("ost_") else ""
     now = _utc_now()
@@ -2987,8 +3723,7 @@ def revoke_auth_session(
 @app.get("/users")
 def users(request: Request, tenantId: str = Query(default="default", min_length=1, max_length=80)) -> dict[str, Any]:
     tenant_id = _safe_segment(tenantId, "default")
-    if not _request_has_api_authorization(request):
-        _require_active_device(request, tenant_id)
+    _require_device_or_authorized_read(request, tenant_id)
 
     with _db() as con:
         _ensure_tenant(con, tenant_id)
@@ -3010,8 +3745,6 @@ def users(request: Request, tenantId: str = Query(default="default", min_length=
 
 @app.post("/users/replace")
 async def users_replace(request: Request) -> dict[str, Any]:
-    _require_api_token(request)
-
     try:
         payload = await request.json()
     except json.JSONDecodeError as exc:
@@ -3021,12 +3754,20 @@ async def users_replace(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Payload must be a JSON object")
 
     tenant_id = _safe_segment(payload.get("tenantId"), "default")
+    auth_context = _require_admin_authorization(request, tenant_id)
+    triggered_by_user_id = str(auth_context.get("userId") or "").strip()
     raw_users = payload.get("users")
     if not isinstance(raw_users, list):
         raise HTTPException(status_code=400, detail="Missing users array")
 
     users_to_save = [user for raw_user in raw_users if (user := _sanitize_user(raw_user))]
     user_ids = {user["id"] for user in users_to_save}
+    protective_backup = _create_protective_backup(
+        tenant_id,
+        reason="pre_users_replace",
+        triggered_by_user_id=triggered_by_user_id,
+        context={"incomingUserCount": len(users_to_save)},
+    )
     with _db() as con:
         with con:
             _ensure_tenant(con, tenant_id)
@@ -3050,13 +3791,12 @@ async def users_replace(request: Request) -> dict[str, Any]:
         "tenantId": tenant_id,
         "serverTime": _utc_now().isoformat(),
         "userCount": len(users_to_save),
+        "protectiveBackup": protective_backup,
     }
 
 
 @app.post("/users/pin")
 async def users_pin(request: Request) -> dict[str, Any]:
-    _require_api_token(request)
-
     try:
         payload = await request.json()
     except json.JSONDecodeError as exc:
@@ -3066,10 +3806,19 @@ async def users_pin(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Payload must be a JSON object")
 
     tenant_id = _safe_segment(payload.get("tenantId"), "default")
+    auth_context = _require_admin_authorization(request, tenant_id)
+    triggered_by_user_id = str(auth_context.get("userId") or "").strip()
     user_id = str(payload.get("userId") or "").strip()
     pin = str(payload.get("pin") or payload.get("newPin") or "").strip()
     if not user_id:
         raise HTTPException(status_code=400, detail="Missing userId")
+
+    protective_backup = _create_protective_backup(
+        tenant_id,
+        reason="pre_user_pin_change",
+        triggered_by_user_id=triggered_by_user_id,
+        context={"userId": user_id},
+    )
 
     with _db() as con:
         with con:
@@ -3084,6 +3833,7 @@ async def users_pin(request: Request) -> dict[str, Any]:
         "tenantId": tenant_id,
         "serverTime": _utc_now().isoformat(),
         "userId": user_id,
+        "protectiveBackup": protective_backup,
     }
 
 
@@ -3240,8 +3990,8 @@ def campaign_revisions(
     campaignId: str = Query(min_length=1, max_length=240),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> dict[str, Any]:
-    _require_api_token(request)
     tenant_id = _safe_segment(tenantId, "default")
+    _require_campaign_manager_authorization(request, tenant_id)
     campaign_id = str(campaignId or "").strip()
 
     with _db() as con:
@@ -3293,8 +4043,8 @@ def campaign_conflicts(
     campaignId: str = Query(default="", max_length=240),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> dict[str, Any]:
-    _require_api_token(request)
     tenant_id = _safe_segment(tenantId, "default")
+    _require_campaign_manager_authorization(request, tenant_id)
     campaign_id = str(campaignId or "").strip()
 
     with _db() as con:
@@ -3346,8 +4096,8 @@ def campaign_revision(
     campaignId: str = Query(min_length=1, max_length=240),
     serverRevision: int = Query(ge=1),
 ) -> dict[str, Any]:
-    _require_api_token(request)
     tenant_id = _safe_segment(tenantId, "default")
+    _require_campaign_manager_authorization(request, tenant_id)
     campaign_id = str(campaignId or "").strip()
 
     with _db() as con:
@@ -3379,8 +4129,6 @@ def campaign_revision(
 
 @app.post("/campaigns/restore")
 async def campaign_restore(request: Request) -> dict[str, Any]:
-    _require_api_token(request)
-
     try:
         payload = await request.json()
     except json.JSONDecodeError as exc:
@@ -3390,6 +4138,7 @@ async def campaign_restore(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Payload must be a JSON object")
 
     tenant_id = _safe_segment(payload.get("tenantId"), "default")
+    auth_context = _require_campaign_manager_authorization(request, tenant_id)
     campaign_id = str(payload.get("campaignId") or "").strip()
     restored_by_user_id = str(payload.get("restoredByUserId") or "").strip()
     reason = str(payload.get("reason") or "admin_restore").strip()[:240] or "admin_restore"
@@ -3403,6 +4152,13 @@ async def campaign_restore(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Missing campaignId")
     if source_revision < 1:
         raise HTTPException(status_code=400, detail="serverRevision must be greater than zero")
+
+    protective_backup = _create_protective_backup(
+        tenant_id,
+        reason="pre_campaign_restore",
+        triggered_by_user_id=restored_by_user_id or str(auth_context.get("userId") or "").strip(),
+        context={"campaignId": campaign_id, "sourceRevision": source_revision, "reason": reason},
+    )
 
     restored_at = _utc_now().isoformat()
     server_sync_id = f"restore_{_utc_now().strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:12]}"
@@ -3588,29 +4344,42 @@ async def campaign_restore(request: Request) -> dict[str, Any]:
         "deviceId": device_id,
         "payloadSha256": source_sha256,
         "conflictPolicy": "admin_restore",
+        "protectiveBackup": protective_backup,
     }
 
 
 @app.get("/maintenance/status")
 def maintenance_status(
     request: Request,
+    tenantId: str = Query(default="default", min_length=1, max_length=80),
     limit: int = Query(default=10, ge=1, le=50),
 ) -> dict[str, Any]:
-    _require_api_token(request)
-    return _maintenance_status(limit=limit)
+    tenant_id = _safe_segment(tenantId or request.headers.get("x-openirn-tenant-id"), "default")
+    _require_admin_authorization(request, tenant_id)
+    return _maintenance_status(limit=limit, tenant_id=tenant_id)
 
 
 @app.post("/maintenance/backup")
 async def maintenance_backup(request: Request) -> dict[str, Any]:
-    _require_api_token(request)
     try:
         payload = await request.json()
     except json.JSONDecodeError:
         payload = {}
     if not isinstance(payload, dict):
         payload = {}
-    triggered_by_user_id = str(payload.get("triggeredByUserId") or "").strip() or None
-    backup = _create_sqlite_backup(triggered_by_user_id=triggered_by_user_id)
+    tenant_id = _safe_segment(payload.get("tenantId") or request.headers.get("x-openirn-tenant-id"), "default")
+    auth_context = _require_admin_authorization(request, tenant_id)
+    triggered_by_user_id = (
+        str(payload.get("triggeredByUserId") or "").strip()
+        or str(auth_context.get("userId") or "").strip()
+        or None
+    )
+    backup = _create_sqlite_backup(
+        tenant_id=tenant_id,
+        triggered_by_user_id=triggered_by_user_id,
+        reason="manual",
+        automatic=False,
+    )
     return {
         "status": "ok",
         "type": "openirn.sqliteBackupCreated",
@@ -3618,21 +4387,30 @@ async def maintenance_backup(request: Request) -> dict[str, Any]:
         "version": APP_VERSION,
         "serverTime": _utc_now().isoformat(),
         "backup": backup,
-        "maintenance": _maintenance_status(limit=10),
+        "maintenance": _maintenance_status(limit=10, tenant_id=tenant_id),
     }
 
 
 @app.post("/maintenance/backups/{backup_name}/restore")
 async def maintenance_restore_backup(backup_name: str, request: Request) -> dict[str, Any]:
-    _require_api_token(request)
     try:
         payload = await request.json()
     except json.JSONDecodeError:
         payload = {}
     if not isinstance(payload, dict):
         payload = {}
-    triggered_by_user_id = str(payload.get("triggeredByUserId") or "").strip() or None
-    restore = _restore_sqlite_backup(backup_name, triggered_by_user_id=triggered_by_user_id)
+    tenant_id = _safe_segment(payload.get("tenantId") or request.headers.get("x-openirn-tenant-id"), "default")
+    auth_context = _require_admin_authorization(request, tenant_id)
+    triggered_by_user_id = (
+        str(payload.get("triggeredByUserId") or "").strip()
+        or str(auth_context.get("userId") or "").strip()
+        or None
+    )
+    restore = _restore_sqlite_backup(
+        backup_name,
+        triggered_by_user_id=triggered_by_user_id,
+        tenant_id=tenant_id,
+    )
     return {
         "status": "ok",
         "type": "openirn.sqliteBackupRestored",
@@ -3640,14 +4418,23 @@ async def maintenance_restore_backup(backup_name: str, request: Request) -> dict
         "version": APP_VERSION,
         "serverTime": _utc_now().isoformat(),
         "restore": restore,
-        "maintenance": _maintenance_status(limit=10),
+        "maintenance": _maintenance_status(limit=10, tenant_id=tenant_id),
     }
 
 
 @app.delete("/maintenance/backups/{backup_name}")
-def maintenance_delete_backup(backup_name: str, request: Request) -> dict[str, Any]:
-    _require_api_token(request)
-    deletion = _delete_sqlite_backup(backup_name)
+def maintenance_delete_backup(
+    backup_name: str,
+    request: Request,
+    tenantId: str = Query(default="default", min_length=1, max_length=80),
+) -> dict[str, Any]:
+    tenant_id = _safe_segment(tenantId or request.headers.get("x-openirn-tenant-id"), "default")
+    auth_context = _require_admin_authorization(request, tenant_id)
+    deletion = _delete_sqlite_backup(
+        backup_name,
+        tenant_id=tenant_id,
+        triggered_by_user_id=str(auth_context.get("userId") or "").strip() or None,
+    )
     return {
         "status": "ok",
         "type": "openirn.sqliteBackupDeleted",
@@ -3655,7 +4442,7 @@ def maintenance_delete_backup(backup_name: str, request: Request) -> dict[str, A
         "version": APP_VERSION,
         "serverTime": _utc_now().isoformat(),
         "deletion": deletion,
-        "maintenance": _maintenance_status(limit=10),
+        "maintenance": _maintenance_status(limit=10, tenant_id=tenant_id),
     }
 
 

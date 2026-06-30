@@ -1080,15 +1080,10 @@ class OpenIrnApiClient {
 
   List<AppUser> _sortUsers(List<AppUser> users) {
     final sorted = users.toList();
-    sorted.sort((a, b) {
-      if (a.isDefaultAdministrator) {
-        return -1;
-      }
-      if (b.isDefaultAdministrator) {
-        return 1;
-      }
-      return a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase());
-    });
+    sorted.sort(
+      (a, b) =>
+          a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()),
+    );
     return sorted;
   }
 
@@ -1244,12 +1239,20 @@ class OpenIrnApiClient {
         final sessionExpiresAt = DateTime.tryParse(
           decodedBody?['expiresAt']?.toString() ?? '',
         )?.toUtc();
+        final idleTimeoutMinutes = int.tryParse(
+          decodedBody?['idleTimeoutMinutes']?.toString() ?? '',
+        );
+        final sessionId = decodedBody?['sessionId']?.toString().trim() ?? '';
         if (sessionToken.isNotEmpty) {
           AppSessionManager.instance.startSession(
             apiToken: sessionToken,
             tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
             deviceId: AppSessionManager.instance.deviceId,
+            sessionId: sessionId,
             expiresAt: sessionExpiresAt,
+            idleTimeout: idleTimeoutMinutes == null || idleTimeoutMinutes <= 0
+                ? null
+                : Duration(minutes: idleTimeoutMinutes),
             activeUser: user,
           );
         }
@@ -1700,6 +1703,102 @@ class OpenIrnApiClient {
         message: error.message,
         tenantId: safeTenantId,
         events: const <SecurityAuditEvent>[],
+      );
+    }
+  }
+
+  Future<OpenIrnApiSessionsResult> revokeCurrentApiSession({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final revokeUri = Uri.parse(
+      '$normalizedBaseUrl/auth/session/current',
+    ).replace(queryParameters: <String, String>{'tenantId': safeTenantId});
+
+    try {
+      final response = await _delete(revokeUri, bearerToken: apiToken);
+      final decodedBody = _decodeJsonObject(response.body);
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return OpenIrnApiSessionsResult(
+          status: OpenIrnApiDevicesStatus.available,
+          url: revokeUri.toString(),
+          statusCode: response.statusCode,
+          title: 'Session verrouillée',
+          message:
+              decodedBody?['message']?.toString() ?? 'Session verrouillée.',
+          tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
+          sessions: const <ApiSessionInfo>[],
+          responseBody: decodedBody,
+        );
+      }
+      return OpenIrnApiSessionsResult(
+        status: OpenIrnApiDevicesStatus.rejected,
+        url: revokeUri.toString(),
+        statusCode: response.statusCode,
+        title: 'Verrouillage serveur refusé',
+        message:
+            decodedBody?['detail']?.toString() ??
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        tenantId: safeTenantId,
+        sessions: const <ApiSessionInfo>[],
+        responseBody: decodedBody,
+      );
+    } on TimeoutException {
+      return OpenIrnApiSessionsResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: revokeUri.toString(),
+        statusCode: null,
+        title: 'Délai dépassé',
+        message: 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+        tenantId: safeTenantId,
+        sessions: const <ApiSessionInfo>[],
+      );
+    } on SocketException catch (error) {
+      return OpenIrnApiSessionsResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: revokeUri.toString(),
+        statusCode: null,
+        title: 'Serveur injoignable',
+        message: error.message,
+        tenantId: safeTenantId,
+        sessions: const <ApiSessionInfo>[],
+      );
+    } on HandshakeException catch (error) {
+      return OpenIrnApiSessionsResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: revokeUri.toString(),
+        statusCode: null,
+        title: 'Erreur TLS',
+        message: error.message,
+        tenantId: safeTenantId,
+        sessions: const <ApiSessionInfo>[],
+      );
+    } on FormatException catch (error) {
+      return OpenIrnApiSessionsResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: revokeUri.toString(),
+        statusCode: null,
+        title: 'URL API invalide',
+        message: error.message,
+        tenantId: safeTenantId,
+        sessions: const <ApiSessionInfo>[],
+      );
+    } on HttpException catch (error) {
+      return OpenIrnApiSessionsResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: revokeUri.toString(),
+        statusCode: null,
+        title: 'Erreur HTTP',
+        message: error.message,
+        tenantId: safeTenantId,
+        sessions: const <ApiSessionInfo>[],
       );
     }
   }
@@ -2574,6 +2673,74 @@ class OpenIrnApiClient {
     }
   }
 
+  Future<OfficialReferentialHistoryResult> loadOfficialReferentialHistory({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    int limit = 50,
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final uri = Uri.parse('$normalizedBaseUrl/referential/official/history')
+        .replace(
+          queryParameters: <String, String>{
+            'tenantId': safeTenantId,
+            'limit': limit.clamp(1, 200).toString(),
+          },
+        );
+
+    try {
+      final response = await _get(uri, bearerToken: apiToken);
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return _officialReferentialHistoryResult(response, uri, safeTenantId);
+      }
+      return _officialReferentialHistoryRejectedResult(
+        response,
+        uri,
+        safeTenantId,
+      );
+    } on TimeoutException {
+      return _officialReferentialHistoryNetworkError(
+        uri,
+        safeTenantId,
+        'Délai dépassé',
+        'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+      );
+    } on SocketException catch (error) {
+      return _officialReferentialHistoryNetworkError(
+        uri,
+        safeTenantId,
+        'Serveur injoignable',
+        error.message,
+      );
+    } on HandshakeException catch (error) {
+      return _officialReferentialHistoryNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur TLS',
+        error.message,
+      );
+    } on FormatException catch (error) {
+      return _officialReferentialHistoryNetworkError(
+        uri,
+        safeTenantId,
+        'URL API invalide',
+        error.message,
+      );
+    } on HttpException catch (error) {
+      return _officialReferentialHistoryNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur HTTP',
+        error.message,
+      );
+    }
+  }
+
   Future<OfficialReferentialApiResult> updateOfficialReferential({
     String? baseUrl,
     required String tenantId,
@@ -2935,6 +3102,68 @@ class OpenIrnApiClient {
     );
   }
 
+  OfficialReferentialHistoryResult _officialReferentialHistoryResult(
+    _HttpResponse response,
+    Uri uri,
+    String tenantId,
+  ) {
+    final decodedBody = _decodeJsonObject(response.body);
+    final history = _officialReferentialHistory(decodedBody?['history']);
+    return OfficialReferentialHistoryResult(
+      status: OfficialReferentialApiStatus.available,
+      url: uri.toString(),
+      statusCode: response.statusCode,
+      title: 'Historique référentiel chargé',
+      message: history.isEmpty
+          ? 'Aucune installation du référentiel officiel n’est historisée pour ce tenant.'
+          : '${history.length} installation(s) historisée(s) côté serveur.',
+      tenantId: decodedBody?['tenantId']?.toString() ?? tenantId,
+      history: history,
+      responseBody: decodedBody,
+    );
+  }
+
+  OfficialReferentialHistoryResult _officialReferentialHistoryRejectedResult(
+    _HttpResponse response,
+    Uri uri,
+    String tenantId,
+  ) {
+    final decodedBody = _decodeJsonObject(response.body);
+    final detail = decodedBody?['detail'];
+    final message = detail is Map
+        ? detail['message']?.toString() ??
+              'Le serveur a refusé le chargement de l’historique.'
+        : detail?.toString() ??
+              'Le serveur a répondu avec le statut HTTP ${response.statusCode}.';
+    return OfficialReferentialHistoryResult(
+      status: OfficialReferentialApiStatus.rejected,
+      url: uri.toString(),
+      statusCode: response.statusCode,
+      title: 'Historique indisponible',
+      message: message,
+      tenantId: tenantId,
+      history: const <OfficialReferentialSummary>[],
+      responseBody: decodedBody,
+    );
+  }
+
+  OfficialReferentialHistoryResult _officialReferentialHistoryNetworkError(
+    Uri uri,
+    String tenantId,
+    String title,
+    String message,
+  ) {
+    return OfficialReferentialHistoryResult(
+      status: OfficialReferentialApiStatus.unreachable,
+      url: uri.toString(),
+      statusCode: null,
+      title: title,
+      message: message,
+      tenantId: tenantId,
+      history: const <OfficialReferentialSummary>[],
+    );
+  }
+
   OfficialReferentialApiResult _officialReferentialNetworkError(
     Uri uri,
     String tenantId,
@@ -2962,6 +3191,21 @@ class OpenIrnApiClient {
       );
     }
     return null;
+  }
+
+  List<OfficialReferentialSummary> _officialReferentialHistory(Object? value) {
+    if (value is! List) {
+      return const <OfficialReferentialSummary>[];
+    }
+    return value
+        .whereType<Map>()
+        .map(
+          (item) => OfficialReferentialSummary.fromJson(
+            Map<String, dynamic>.from(item),
+          ),
+        )
+        .where((item) => item.exists)
+        .toList(growable: false);
   }
 
   String _enrollmentConsumeErrorTitle(int statusCode) {

@@ -219,6 +219,37 @@ CREATE TABLE IF NOT EXISTS official_referentials (
 CREATE INDEX IF NOT EXISTS idx_official_referentials_tenant_active
     ON official_referentials(tenant_id, active, imported_at DESC);
 
+
+CREATE TABLE IF NOT EXISTS official_referential_history (
+    tenant_id TEXT NOT NULL,
+    history_id TEXT NOT NULL,
+    referential_id TEXT NOT NULL,
+    version TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 0,
+    source_url TEXT NOT NULL,
+    project_path TEXT NOT NULL,
+    default_branch TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    source_blob_id TEXT NOT NULL DEFAULT '',
+    source_sha256 TEXT NOT NULL,
+    canonical_sha256 TEXT NOT NULL,
+    downloaded_at TEXT NOT NULL,
+    imported_at TEXT NOT NULL,
+    pillar_count INTEGER NOT NULL DEFAULT 0,
+    criterion_count INTEGER NOT NULL DEFAULT 0,
+    triggered_by_user_id TEXT NOT NULL DEFAULT '',
+    import_warnings_json TEXT NOT NULL DEFAULT '[]',
+    validation_report_json TEXT NOT NULL DEFAULT '{}',
+    payload_json TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, history_id),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_official_referential_history_tenant_imported
+    ON official_referential_history(tenant_id, imported_at DESC, history_id DESC);
+CREATE INDEX IF NOT EXISTS idx_official_referential_history_tenant_active
+    ON official_referential_history(tenant_id, active, imported_at DESC);
+
 CREATE TABLE IF NOT EXISTS sync_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tenant_id TEXT NOT NULL,
@@ -234,6 +265,25 @@ CREATE TABLE IF NOT EXISTS sync_events (
 CREATE INDEX IF NOT EXISTS idx_sync_events_tenant_created
     ON sync_events(tenant_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS backup_audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    backup_name TEXT NOT NULL DEFAULT '',
+    event_type TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    triggered_by_user_id TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    sha256 TEXT NOT NULL DEFAULT '',
+    size_bytes INTEGER NOT NULL DEFAULT 0,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_backup_audit_log_tenant_created
+    ON backup_audit_log(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_backup_audit_log_tenant_reason_created
+    ON backup_audit_log(tenant_id, reason, created_at DESC);
+
 INSERT OR IGNORE INTO schema_migrations(version, name)
 VALUES (1, 'initial_sqlite_sync_store');
 INSERT OR IGNORE INTO schema_migrations(version, name)
@@ -244,3 +294,8 @@ INSERT OR IGNORE INTO schema_migrations(version, name)
 VALUES (4, 'api_session_store');
 INSERT OR IGNORE INTO schema_migrations(version, name)
 VALUES (5, 'auth_attempt_rate_limit_store');
+INSERT OR IGNORE INTO schema_migrations(version, name)
+VALUES (6, 'official_referential_history_store');
+INSERT OR IGNORE INTO schema_migrations(version, name)
+VALUES (7, 'backup_audit_log_store');
+

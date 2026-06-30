@@ -1,6 +1,7 @@
 [Unit]
-Description=OpenIRN SQLite backup
+Description=OpenIRN secure SQLite backup
 Documentation=https://github.com/archoad/OpenIRN
+RequiresMountsFor=/var/lib/openirn-api
 
 [Service]
 Type=oneshot
@@ -8,6 +9,16 @@ User=www-data
 Group=www-data
 EnvironmentFile=-/etc/openirn-api.env
 ExecStart=/opt/openirn-api/.venv/bin/python /opt/openirn-api/tools/backup_sqlite.py --verbose
+UMask=0077
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/openirn-api
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true

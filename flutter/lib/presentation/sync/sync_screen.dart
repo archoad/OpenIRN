@@ -849,7 +849,7 @@ class _SyncScreenState extends State<SyncScreen> {
 
     for (final importedUser in importedUsers) {
       if (importedUser.id == AppUser.defaultAdministratorId) {
-        usersById.putIfAbsent(importedUser.id, () => importedUser);
+        // L'ancien administrateur local ne doit plus être réinjecté côté client.
         continue;
       }
       usersById[importedUser.id] = importedUser;
@@ -925,7 +925,7 @@ class _SyncScreenState extends State<SyncScreen> {
             );
           }
 
-          final canManageSync = _accessPolicy.canManageCampaigns(
+          final canManageSync = _accessPolicy.canManageSyncConfiguration(
             data.activeUser,
           );
 
