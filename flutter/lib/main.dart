@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
-import 'data/repositories/asset_irn_referential_repository.dart';
+import 'data/repositories/api_irn_referential_repository.dart';
+import 'data/repositories/legacy_local_storage_purge_service.dart';
 import 'presentation/referential/referential_overview_screen.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await const LegacyLocalStoragePurgeService().purge();
   runApp(const OpenIrnApp());
 }
 
@@ -39,7 +41,7 @@ class OpenIrnApp extends StatelessWidget {
         return _KeyboardDismissScope(child: child ?? const SizedBox.shrink());
       },
       home: const ReferentialOverviewScreen(
-        repository: AssetIrnReferentialRepository(),
+        repository: ApiIrnReferentialRepository(),
       ),
     );
   }

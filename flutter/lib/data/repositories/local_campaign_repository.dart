@@ -1,74 +1,24 @@
-import 'dart:convert';
-
-import 'package:shared_preferences/shared_preferences.dart';
-
 import '../../domain/models/local_campaign.dart';
+import 'server_campaign_store.dart';
 
 class LocalCampaignRepository {
-  const LocalCampaignRepository();
+  final ServerCampaignStore _store;
 
-  static const _schemaVersion = 3;
-  static const _keyPrefix = 'openirn.localCampaigns';
+  const LocalCampaignRepository({ServerCampaignStore? store})
+    : _store = store ?? const ServerCampaignStore();
 
   Future<List<LocalCampaign>> loadCampaigns({
     required String referentialId,
   }) async {
-    final preferences = await SharedPreferences.getInstance();
-    final rawPayload = preferences.getString(_storageKey(referentialId));
-    if (rawPayload == null || rawPayload.trim().isEmpty) {
-      return <LocalCampaign>[];
-    }
-
-    try {
-      final decoded = jsonDecode(rawPayload);
-      if (decoded is! Map<String, dynamic>) {
-        return <LocalCampaign>[];
-      }
-
-      final rawCampaigns = decoded['campaigns'];
-      if (rawCampaigns is! List) {
-        return <LocalCampaign>[];
-      }
-
-      final campaigns = <LocalCampaign>[];
-      for (final rawCampaign in rawCampaigns) {
-        if (rawCampaign is! Map) {
-          continue;
-        }
-        final campaign = LocalCampaign.fromJson(
-          Map<String, dynamic>.from(rawCampaign),
-        );
-        if (campaign.id.isEmpty || campaign.referentialId != referentialId) {
-          continue;
-        }
-        campaigns.add(campaign);
-      }
-
-      campaigns.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-      return campaigns;
-    } on FormatException {
-      return <LocalCampaign>[];
-    }
+    final bundles = await _store.loadBundles(referentialId: referentialId);
+    return bundles.map((bundle) => bundle.campaign).toList(growable: false);
   }
 
   Future<List<LocalCampaign>> ensureDefaultCampaign({
     required String referentialId,
     required String referentialVersion,
-  }) async {
-    final campaigns = await loadCampaigns(referentialId: referentialId);
-    if (campaigns.isNotEmpty) {
-      return campaigns;
-    }
-
-    final defaultCampaign = LocalCampaign.defaultForReferential(
-      referentialId: referentialId,
-      referentialVersion: referentialVersion,
-    );
-    await saveCampaigns(
-      referentialId: referentialId,
-      campaigns: <LocalCampaign>[defaultCampaign],
-    );
-    return <LocalCampaign>[defaultCampaign];
+  }) {
+    return loadCampaigns(referentialId: referentialId);
   }
 
   Future<LocalCampaign> createCampaign({
@@ -77,17 +27,19 @@ class LocalCampaignRepository {
     String description = '',
     CampaignInformation information = const CampaignInformation(),
   }) async {
-    final campaigns = await loadCampaigns(referentialId: referentialId);
+    final bundles = await _store.loadBundles(referentialId: referentialId);
     final campaign = LocalCampaign.create(
       referentialId: referentialId,
       name: name,
       description: description,
       information: information,
     );
-
-    await saveCampaigns(
+    await _store.saveBundles(
       referentialId: referentialId,
-      campaigns: <LocalCampaign>[campaign, ...campaigns],
+      bundles: <ServerCampaignBundle>[
+        ServerCampaignBundle(campaign: campaign),
+        ...bundles,
+      ],
     );
     return campaign;
   }
@@ -96,11 +48,13 @@ class LocalCampaignRepository {
     required String referentialId,
     required String campaignId,
   }) async {
-    final campaigns = await loadCampaigns(referentialId: referentialId);
-    final remaining = campaigns
-        .where((campaign) => campaign.id != campaignId)
-        .toList(growable: false);
-    await saveCampaigns(referentialId: referentialId, campaigns: remaining);
+    final bundles = await _store.loadBundles(referentialId: referentialId);
+    await _store.saveBundles(
+      referentialId: referentialId,
+      bundles: bundles
+          .where((bundle) => bundle.campaign.id != campaignId)
+          .toList(growable: false),
+    );
   }
 
   Future<LocalCampaign?> updateCampaignInformation({
@@ -110,13 +64,12 @@ class LocalCampaignRepository {
     String? description,
     required CampaignInformation information,
   }) async {
-    final campaigns = await loadCampaigns(referentialId: referentialId);
-    final now = DateTime.now().toUtc();
     LocalCampaign? updatedCampaign;
-    final updatedCampaigns = <LocalCampaign>[];
-
-    for (final campaign in campaigns) {
-      if (campaign.id == campaignId) {
+    await _store.updateBundle(
+      referentialId: referentialId,
+      campaignId: campaignId,
+      update: (bundle) {
+        final campaign = bundle.campaign;
         updatedCampaign = campaign.copyWith(
           name: name == null
               ? campaign.name
@@ -125,21 +78,10 @@ class LocalCampaignRepository {
               ? campaign.description
               : description.trim(),
           information: information,
-          updatedAt: now,
+          updatedAt: DateTime.now().toUtc(),
         );
-        updatedCampaigns.add(updatedCampaign);
-      } else {
-        updatedCampaigns.add(campaign);
-      }
-    }
-
-    if (updatedCampaign == null) {
-      return null;
-    }
-
-    await saveCampaigns(
-      referentialId: referentialId,
-      campaigns: updatedCampaigns,
+        return bundle.copyWith(campaign: updatedCampaign);
+      },
     );
     return updatedCampaign;
   }
@@ -149,31 +91,19 @@ class LocalCampaignRepository {
     required String campaignId,
     required LocalCampaignStatus status,
   }) async {
-    final campaigns = await loadCampaigns(referentialId: referentialId);
-    final now = DateTime.now().toUtc();
     LocalCampaign? updatedCampaign;
-    final updatedCampaigns = <LocalCampaign>[];
-
-    for (final campaign in campaigns) {
-      if (campaign.id == campaignId) {
-        updatedCampaign = campaign.copyWith(
+    await _store.updateBundle(
+      referentialId: referentialId,
+      campaignId: campaignId,
+      update: (bundle) {
+        final now = DateTime.now().toUtc();
+        updatedCampaign = bundle.campaign.copyWith(
           status: status,
           updatedAt: now,
           statusUpdatedAt: now,
         );
-        updatedCampaigns.add(updatedCampaign);
-      } else {
-        updatedCampaigns.add(campaign);
-      }
-    }
-
-    if (updatedCampaign == null) {
-      return null;
-    }
-
-    await saveCampaigns(
-      referentialId: referentialId,
-      campaigns: updatedCampaigns,
+        return bundle.copyWith(campaign: updatedCampaign);
+      },
     );
     return updatedCampaign;
   }
@@ -182,17 +112,12 @@ class LocalCampaignRepository {
     required String referentialId,
     required String campaignId,
   }) async {
-    final campaigns = await loadCampaigns(referentialId: referentialId);
-    final now = DateTime.now().toUtc();
-    final updatedCampaigns = <LocalCampaign>[
-      for (final campaign in campaigns)
-        campaign.id == campaignId
-            ? campaign.copyWith(updatedAt: now)
-            : campaign,
-    ];
-    await saveCampaigns(
+    await _store.updateBundle(
       referentialId: referentialId,
-      campaigns: updatedCampaigns,
+      campaignId: campaignId,
+      update: (bundle) => bundle.copyWith(
+        campaign: bundle.campaign.copyWith(updatedAt: DateTime.now().toUtc()),
+      ),
     );
   }
 
@@ -200,24 +125,29 @@ class LocalCampaignRepository {
     required String referentialId,
     required List<LocalCampaign> campaigns,
   }) async {
-    final preferences = await SharedPreferences.getInstance();
-    final payload = <String, dynamic>{
-      'schemaVersion': _schemaVersion,
-      'referentialId': referentialId,
-      'updatedAt': DateTime.now().toUtc().toIso8601String(),
-      'campaigns': <Map<String, dynamic>>[
-        for (final campaign in campaigns)
-          if (campaign.referentialId == referentialId) campaign.toJson(),
-      ],
+    final existingBundles = await _store.loadBundles(
+      referentialId: referentialId,
+    );
+    final bundlesByCampaignId = <String, ServerCampaignBundle>{
+      for (final bundle in existingBundles) bundle.campaign.id: bundle,
     };
 
-    await preferences.setString(
-      _storageKey(referentialId),
-      jsonEncode(payload),
-    );
-  }
+    final nextBundles = <ServerCampaignBundle>[];
+    for (final campaign in campaigns) {
+      if (campaign.referentialId != referentialId) {
+        continue;
+      }
+      final existing = bundlesByCampaignId[campaign.id];
+      nextBundles.add(
+        existing == null
+            ? ServerCampaignBundle(campaign: campaign)
+            : existing.copyWith(campaign: campaign),
+      );
+    }
 
-  String _storageKey(String referentialId) {
-    return '$_keyPrefix.$referentialId';
+    await _store.saveBundles(
+      referentialId: referentialId,
+      bundles: nextBundles,
+    );
   }
 }

@@ -9,7 +9,6 @@ import '../../data/repositories/local_sync_log_repository.dart';
 import '../../data/repositories/local_user_repository.dart';
 import '../models/app_user.dart';
 import '../models/irn_referential.dart';
-import '../models/local_campaign.dart';
 import '../models/sync_configuration.dart';
 import '../models/sync_log_event.dart';
 import 'sync_pull_import_service.dart';
@@ -236,92 +235,23 @@ class SyncAutomationService {
       );
     }
 
-    final users = await userRepository.ensureDefaultUsers();
-    final actor = activeUser ?? await sessionRepository.getActiveUser();
-    final campaigns = await campaignRepository.loadCampaigns(
-      referentialId: referential.id,
-    );
-    final snapshots = await _loadCampaignSnapshots(
-      referential: referential,
-      campaigns: campaigns,
-    );
-    final payload = payloadService.buildPushPayload(
-      referential: referential,
-      configuration: configuration,
-      activeUser: actor,
-      users: users,
-      campaigns: snapshots,
-    );
-
-    final push = await apiClient.pushPayload(
-      baseUrl: configuration.apiBaseUrl,
-      payload: payload,
-      apiToken: configuration.apiToken,
-    );
-    final serverSyncId = push.responseBody?['serverSyncId']?.toString();
+    // Depuis le mode server-only, les écritures métier partent directement vers
+    // l’API au moment de l’action utilisateur. Ce hook reste appelé par certains
+    // écrans historiques, mais il ne doit plus republier un état local.
     await _appendLog(
       configuration: configuration,
-      type: push.isAccepted
-          ? SyncLogEventType.pushSucceeded
-          : SyncLogEventType.pushFailed,
-      title: 'Push automatique : ${push.title}',
-      message: push.message,
-      statusCode: push.statusCode,
-      campaignCount: snapshots.length,
-      serverSyncId: serverSyncId,
+      type: SyncLogEventType.pushSucceeded,
+      title: 'Mode serveur uniquement',
+      message:
+          'Aucun push local nécessaire : les campagnes sont déjà écrites directement côté serveur.',
     );
 
-    if (!push.isAccepted) {
-      return SyncAutomationResult(
-        outcome: push.status == OpenIrnApiPushStatus.unreachable
-            ? SyncAutomationOutcome.offline
-            : SyncAutomationOutcome.failed,
-        title: push.title,
-        message: push.message,
-        serverSyncId: serverSyncId,
-        campaignCount: snapshots.length,
-      );
-    }
-
-    return SyncAutomationResult(
-      outcome: SyncAutomationOutcome.pushed,
-      title: 'Snapshot de ce terminal publié',
-      message: serverSyncId == null || serverSyncId.isEmpty
-          ? 'Le serveur a accepté la version de ce terminal.'
-          : 'Le serveur a accepté la version de ce terminal : $serverSyncId.',
-      serverSyncId: serverSyncId,
-      campaignCount: snapshots.length,
+    return const SyncAutomationResult(
+      outcome: SyncAutomationOutcome.upToDate,
+      title: 'Mode serveur uniquement',
+      message:
+          'Les données métier sont lues et écrites directement via l’API OpenIRN.',
     );
-  }
-
-  Future<List<CampaignSyncSnapshot>> _loadCampaignSnapshots({
-    required IrnReferential referential,
-    required List<LocalCampaign> campaigns,
-  }) async {
-    final snapshots = <CampaignSyncSnapshot>[];
-    for (final campaign in campaigns) {
-      final criterionAnswers = await assessmentRepository.loadCriterionAnswers(
-        referentialId: referential.id,
-        campaignId: campaign.id,
-      );
-      final assignments = await assignmentRepository.loadAssignments(
-        referentialId: referential.id,
-        campaignId: campaign.id,
-      );
-      final activityEvents = await activityRepository.loadEvents(
-        referentialId: referential.id,
-        campaignId: campaign.id,
-      );
-      snapshots.add(
-        CampaignSyncSnapshot(
-          campaign: campaign,
-          criterionAnswers: criterionAnswers,
-          assignments: assignments,
-          activityEvents: activityEvents,
-        ),
-      );
-    }
-    return snapshots;
   }
 
   Future<SyncAutomationResult> _replaceLocalDataWithSnapshot({
@@ -334,14 +264,14 @@ class SyncAutomationService {
       await _appendLog(
         configuration: configuration,
         type: SyncLogEventType.importFailed,
-        title: 'Import automatique refusé',
+        title: 'Snapshot serveur inutilisable',
         message: 'Le snapshot distant ne contient pas de payload importable.',
         serverSyncId: snapshot.serverSyncId,
         sourceDeviceId: snapshot.deviceId,
       );
       return const SyncAutomationResult(
         outcome: SyncAutomationOutcome.failed,
-        title: 'Import automatique impossible',
+        title: 'Snapshot serveur inutilisable',
         message: 'Le snapshot distant ne contient pas de payload importable.',
       );
     }
@@ -355,37 +285,12 @@ class SyncAutomationService {
         mode: SyncPullImportMode.replaceLocal,
       );
 
-      await _mergeImportedUsers(result.users);
-      await campaignRepository.saveCampaigns(
-        referentialId: referential.id,
-        campaigns: result.campaigns
-            .map((campaign) => campaign.campaign)
-            .toList(growable: false),
-      );
-      for (final campaign in result.campaigns) {
-        await assessmentRepository.saveCriterionAnswers(
-          referentialId: referential.id,
-          campaignId: campaign.campaign.id,
-          answers: campaign.criterionAnswers,
-        );
-        await assignmentRepository.saveAssignments(
-          referentialId: referential.id,
-          campaignId: campaign.campaign.id,
-          assignments: campaign.assignments,
-        );
-        await activityRepository.saveEvents(
-          referentialId: referential.id,
-          campaignId: campaign.campaign.id,
-          events: campaign.activityEvents,
-        );
-      }
-
       await _appendLog(
         configuration: configuration,
         type: SyncLogEventType.importSucceeded,
-        title: 'Snapshot distant appliqué automatiquement',
+        title: 'Changement serveur détecté',
         message:
-            '${result.campaignCount} campagne(s) remplacée(s) par la version serveur.',
+            '${result.campaignCount} campagne(s) disponible(s) côté serveur. Les écrans vont relire l’API.',
         serverSyncId: snapshot.serverSyncId,
         sourceDeviceId: snapshot.deviceId,
         campaignCount: result.campaignCount,
@@ -393,9 +298,9 @@ class SyncAutomationService {
 
       return SyncAutomationResult(
         outcome: SyncAutomationOutcome.imported,
-        title: 'Version serveur appliquée',
+        title: 'Changement serveur détecté',
         message:
-            '${result.campaignCount} campagne(s) remplacée(s) par la dernière version serveur.',
+            '${result.campaignCount} campagne(s) disponible(s) côté serveur. Les écrans ont été invités à se rafraîchir.',
         serverSyncId: snapshot.serverSyncId,
         campaignCount: result.campaignCount,
       );
@@ -403,14 +308,14 @@ class SyncAutomationService {
       await _appendLog(
         configuration: configuration,
         type: SyncLogEventType.importFailed,
-        title: 'Import automatique refusé',
+        title: 'Snapshot serveur refusé',
         message: error.message,
         serverSyncId: snapshot.serverSyncId,
         sourceDeviceId: snapshot.deviceId,
       );
       return SyncAutomationResult(
         outcome: SyncAutomationOutcome.failed,
-        title: 'Import automatique refusé',
+        title: 'Snapshot serveur refusé',
         message: error.message,
         serverSyncId: snapshot.serverSyncId,
       );
@@ -418,38 +323,18 @@ class SyncAutomationService {
       await _appendLog(
         configuration: configuration,
         type: SyncLogEventType.importFailed,
-        title: 'Import automatique impossible',
+        title: 'Contrôle serveur impossible',
         message: error.toString(),
         serverSyncId: snapshot.serverSyncId,
         sourceDeviceId: snapshot.deviceId,
       );
       return SyncAutomationResult(
         outcome: SyncAutomationOutcome.failed,
-        title: 'Import automatique impossible',
+        title: 'Contrôle serveur impossible',
         message: error.toString(),
         serverSyncId: snapshot.serverSyncId,
       );
     }
-  }
-
-  Future<void> _mergeImportedUsers(List<AppUser> importedUsers) async {
-    if (importedUsers.isEmpty) {
-      return;
-    }
-    final existingUsers = await userRepository.ensureDefaultUsers();
-    final usersById = <String, AppUser>{
-      for (final user in existingUsers) user.id: user,
-    };
-
-    for (final importedUser in importedUsers) {
-      if (importedUser.id == AppUser.defaultAdministratorId) {
-        usersById.putIfAbsent(importedUser.id, () => importedUser);
-        continue;
-      }
-      usersById[importedUser.id] = importedUser;
-    }
-
-    await userRepository.saveUsers(usersById.values.toList(growable: false));
   }
 
   Future<void> _appendLog({

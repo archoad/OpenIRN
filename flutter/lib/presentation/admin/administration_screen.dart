@@ -6,8 +6,11 @@ import '../campaigns/campaign_management_screen.dart';
 import '../common/openirn_app_bar.dart';
 import '../users/user_list_screen.dart';
 import 'authorized_devices_screen.dart';
+import 'campaign_history_screen.dart';
 import 'official_referential_screen.dart';
+import 'security_audit_screen.dart';
 import 'server_maintenance_screen.dart';
+import 'server_sessions_screen.dart';
 
 class AdministrationScreen extends StatelessWidget {
   final IrnReferential referential;
@@ -20,6 +23,16 @@ class AdministrationScreen extends StatelessWidget {
   });
 
   Future<void> _openCampaignManagement(BuildContext context) async {
+    if (!_hasServerReferential) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Installe ou recharge le référentiel officiel aDRI avant de gérer les campagnes.',
+          ),
+        ),
+      );
+      return;
+    }
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => CampaignManagementScreen(
@@ -29,6 +42,9 @@ class AdministrationScreen extends StatelessWidget {
       ),
     );
   }
+
+  bool get _hasServerReferential =>
+      referential.pillars.isNotEmpty || referential.criteria.isNotEmpty;
 
   Future<void> _openUsersAdministration(BuildContext context) async {
     await Navigator.of(
@@ -44,10 +60,34 @@ class AdministrationScreen extends StatelessWidget {
     );
   }
 
+  Future<void> _openCampaignHistory(BuildContext context) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CampaignHistoryScreen(activeUser: activeUser),
+      ),
+    );
+  }
+
   Future<void> _openOfficialReferential(BuildContext context) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => OfficialReferentialScreen(activeUser: activeUser),
+      ),
+    );
+  }
+
+  Future<void> _openSecurityAudit(BuildContext context) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SecurityAuditScreen(activeUser: activeUser),
+      ),
+    );
+  }
+
+  Future<void> _openServerSessions(BuildContext context) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ServerSessionsScreen(activeUser: activeUser),
       ),
     );
   }
@@ -107,8 +147,9 @@ class AdministrationScreen extends StatelessWidget {
               _AdministrationActionCard(
                 icon: Icons.admin_panel_settings_outlined,
                 title: 'Gérer les campagnes',
-                subtitle:
-                    'Créer une campagne, supprimer une campagne existante et nettoyer le journal associé.',
+                subtitle: _hasServerReferential
+                    ? 'Créer une campagne, supprimer une campagne existante et nettoyer le journal associé.'
+                    : 'Référentiel serveur absent : installe d’abord le référentiel officiel aDRI.',
                 buttonLabel: 'Ouvrir',
                 onPressed: () => _openCampaignManagement(context),
               ),
@@ -132,12 +173,39 @@ class AdministrationScreen extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               _AdministrationActionCard(
+                icon: Icons.security_outlined,
+                title: 'Journal sécurité',
+                subtitle:
+                    'Consulter les authentifications, limitations anti-bruteforce, enrôlements, révocations et événements terminaux.',
+                buttonLabel: 'Ouvrir',
+                onPressed: () => _openSecurityAudit(context),
+              ),
+              const SizedBox(height: 12),
+              _AdministrationActionCard(
+                icon: Icons.lock_clock_outlined,
+                title: 'Sessions serveur',
+                subtitle:
+                    'Consulter les sessions courtes ouvertes côté serveur et révoquer les sessions actives inutiles.',
+                buttonLabel: 'Ouvrir',
+                onPressed: () => _openServerSessions(context),
+              ),
+              const SizedBox(height: 12),
+              _AdministrationActionCard(
                 icon: Icons.system_update_alt_outlined,
                 title: 'Référentiel officiel aDRI',
                 subtitle:
                     'Vérifier la dernière version publiée, la télécharger et l’installer sur le serveur OpenIRN.',
                 buttonLabel: 'Ouvrir',
                 onPressed: () => _openOfficialReferential(context),
+              ),
+              const SizedBox(height: 12),
+              _AdministrationActionCard(
+                icon: Icons.manage_history_outlined,
+                title: 'Historique / conflits',
+                subtitle:
+                    'Consulter les révisions serveur des campagnes, analyser les conflits et restaurer une version si nécessaire.',
+                buttonLabel: 'Ouvrir',
+                onPressed: () => _openCampaignHistory(context),
               ),
               const SizedBox(height: 12),
               _AdministrationActionCard(

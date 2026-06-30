@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openirn/data/repositories/local_session_repository.dart';
-import 'package:openirn/data/repositories/local_user_repository.dart';
 import 'package:openirn/domain/models/app_user.dart';
+import 'package:openirn/domain/services/app_session_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -10,33 +10,38 @@ void main() {
   group('LocalSessionRepository', () {
     setUp(() {
       SharedPreferences.setMockInitialValues(<String, Object>{});
+      AppSessionManager.instance.clearSession();
     });
 
-    test('uses the default administrator as first active user', () async {
+    test('fails when no server session is active', () async {
       const repository = LocalSessionRepository();
 
-      final activeUser = await repository.getActiveUser();
-
-      expect(activeUser.id, AppUser.defaultAdministratorId);
-      expect(activeUser.role, AppUserRole.administrator);
+      expect(
+        repository.getActiveUser(),
+        throwsA(isA<LocalSessionRepositoryException>()),
+      );
     });
 
-    test('stores and reloads the selected active user', () async {
-      const userRepository = LocalUserRepository();
-      final evaluator = await userRepository.createUser(
+    test('returns the authenticated in-memory server user', () async {
+      final user = AppUser.create(
         firstName: 'Alice',
         lastName: 'Martin',
         email: 'alice.martin@example.test',
         role: AppUserRole.evaluator,
       );
-      const sessionRepository = LocalSessionRepository();
+      AppSessionManager.instance.startSession(
+        apiToken: 'ost_test',
+        tenantId: 'archoad',
+        deviceId: 'device-test',
+        expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+        activeUser: user,
+      );
 
-      final selected = await sessionRepository.setActiveUser(evaluator.id);
-      final reloaded = await sessionRepository.getActiveUser();
+      const repository = LocalSessionRepository();
+      final activeUser = await repository.getActiveUser();
 
-      expect(selected.id, evaluator.id);
-      expect(reloaded.id, evaluator.id);
-      expect(reloaded.role, AppUserRole.evaluator);
+      expect(activeUser.id, user.id);
+      expect(activeUser.role, AppUserRole.evaluator);
     });
   });
 }

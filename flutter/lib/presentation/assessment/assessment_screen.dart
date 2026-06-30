@@ -19,13 +19,10 @@ import '../../domain/services/official_rnr_scoring_service.dart';
 import '../../domain/services/referential_catalog_service.dart';
 import '../../domain/services/sync_automation_service.dart';
 import '../activity/activity_log_screen.dart';
-import '../admin/campaign_history_screen.dart';
-import '../admin/server_maintenance_screen.dart';
 import '../assignments/criterion_assignment_screen.dart';
 import '../common/openirn_app_bar.dart';
 import '../common/responsive_autofocus.dart';
 import '../common/responsive_dialog.dart';
-import '../sync/sync_screen.dart';
 import 'assessment_export_screen.dart';
 import 'assessment_quality_screen.dart';
 import 'assessment_summary_screen.dart';
@@ -747,40 +744,6 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     );
   }
 
-  Future<void> _openCampaignHistory() async {
-    if (!_accessPolicy.canManageCampaigns(widget.activeUser)) {
-      _showForbidden(
-        'Seuls les administrateurs et pilotes IRN peuvent consulter l’historique serveur.',
-      );
-      return;
-    }
-
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => CampaignHistoryScreen(
-          activeUser: widget.activeUser,
-          initialCampaignId: _campaign.id,
-          initialCampaignName: _campaign.name,
-        ),
-      ),
-    );
-  }
-
-  Future<void> _openServerMaintenance() async {
-    if (!_accessPolicy.canManageCampaigns(widget.activeUser)) {
-      _showForbidden(
-        'Seuls les administrateurs et pilotes IRN peuvent accéder à la maintenance serveur.',
-      );
-      return;
-    }
-
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => ServerMaintenanceScreen(activeUser: widget.activeUser),
-      ),
-    );
-  }
-
   Future<void> _openActivityLog() async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -788,14 +751,6 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
           referential: widget.referential,
           campaign: _campaign,
         ),
-      ),
-    );
-  }
-
-  Future<void> _openSync() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => SyncScreen(referential: widget.referential),
       ),
     );
   }
@@ -842,13 +797,6 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
               onSelected: _openAssignments,
             ),
           OpenIrnAppBarAction(
-            id: 'sync',
-            label: 'Synchronisation',
-            icon: Icons.cloud_sync_outlined,
-            enabled: !_isLoadingAnswers,
-            onSelected: _openSync,
-          ),
-          OpenIrnAppBarAction(
             id: 'summary',
             label: 'Synthèse',
             icon: Icons.insights_outlined,
@@ -879,22 +827,6 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
               onSelected: _openActivityLog,
             ),
 
-          if (canManageCampaign)
-            OpenIrnAppBarAction(
-              id: 'history_conflicts',
-              label: 'Historique / conflits',
-              icon: Icons.manage_history_outlined,
-              enabled: !_isLoadingAnswers,
-              onSelected: _openCampaignHistory,
-            ),
-          if (canManageCampaign)
-            OpenIrnAppBarAction(
-              id: 'server_maintenance',
-              label: 'Maintenance serveur',
-              icon: Icons.admin_panel_settings_outlined,
-              enabled: !_isLoadingAnswers,
-              onSelected: _openServerMaintenance,
-            ),
           if (canManageCampaign) const OpenIrnAppBarAction.divider(),
           if (canManageCampaign)
             OpenIrnAppBarAction(
