@@ -2,7 +2,12 @@ import 'package:flutter/material.dart';
 
 import 'data/repositories/api_irn_referential_repository.dart';
 import 'data/repositories/legacy_local_storage_purge_service.dart';
+import 'domain/services/app_session_manager.dart';
+import 'domain/services/app_sync_coordinator.dart';
 import 'presentation/referential/referential_overview_screen.dart';
+
+final GlobalKey<NavigatorState> openIrnNavigatorKey =
+    GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,6 +23,7 @@ class OpenIrnApp extends StatelessWidget {
     final colorScheme = ColorScheme.fromSeed(seedColor: Colors.indigo);
 
     return MaterialApp(
+      navigatorKey: openIrnNavigatorKey,
       title: 'OpenIRN',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -38,7 +44,7 @@ class OpenIrnApp extends StatelessWidget {
         ),
       ),
       builder: (context, child) {
-        return _KeyboardDismissScope(child: child ?? const SizedBox.shrink());
+        return _SessionActivityScope(child: child ?? const SizedBox.shrink());
       },
       home: const ReferentialOverviewScreen(
         repository: ApiIrnReferentialRepository(),
@@ -47,22 +53,67 @@ class OpenIrnApp extends StatelessWidget {
   }
 }
 
-class _KeyboardDismissScope extends StatelessWidget {
+class _SessionActivityScope extends StatefulWidget {
   final Widget child;
 
-  const _KeyboardDismissScope({required this.child});
+  const _SessionActivityScope({required this.child});
+
+  @override
+  State<_SessionActivityScope> createState() => _SessionActivityScopeState();
+}
+
+class _SessionActivityScopeState extends State<_SessionActivityScope>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    AppSessionManager.instance.addListener(_handleSessionChanged);
+  }
+
+  @override
+  void dispose() {
+    AppSessionManager.instance.removeListener(_handleSessionChanged);
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      AppSessionManager.instance.validateSession();
+      AppSessionManager.instance.registerActivity();
+    }
+  }
+
+  void _handleSessionChanged() {
+    if (AppSessionManager.instance.hasActiveSession) {
+      return;
+    }
+
+    AppSyncCoordinator.instance.stop();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      openIrnNavigatorKey.currentState?.popUntil((route) => route.isFirst);
+    });
+  }
+
+  void _recordUserActivity() {
+    AppSessionManager.instance.registerActivity();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Listener(
       behavior: HitTestBehavior.translucent,
       onPointerDown: (_) {
+        _recordUserActivity();
         final focusScope = FocusScope.of(context);
         if (!focusScope.hasPrimaryFocus && focusScope.focusedChild != null) {
           focusScope.unfocus();
         }
       },
-      child: child,
+      onPointerSignal: (_) => _recordUserActivity(),
+      child: widget.child,
     );
   }
 }

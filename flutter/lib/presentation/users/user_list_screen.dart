@@ -260,9 +260,7 @@ class _UserListScreenState extends State<UserListScreen> {
               firstName: result.firstName,
               lastName: result.lastName,
               email: normalizedEmail,
-              role: candidate.isDefaultAdministrator
-                  ? AppUserRole.administrator
-                  : result.role,
+              role: result.role,
               updatedAt: DateTime.now().toUtc(),
             );
           })
@@ -441,10 +439,7 @@ class _UserListScreenState extends State<UserListScreen> {
                     onChangePin: state == null || !serverAvailable || _working
                         ? null
                         : () => _changeUserPin(user, state),
-                    onDelete:
-                        user.isDefaultAdministrator ||
-                            !serverAvailable ||
-                            _working
+                    onDelete: !serverAvailable || _working
                         ? null
                         : () => _deleteUser(user),
                   );
@@ -733,7 +728,6 @@ class _UserDialogState extends State<_UserDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final isDefaultAdmin = widget.user?.isDefaultAdministrator ?? false;
     final compact = isResponsiveDialogCompact(context, maxWidth: 820);
 
     Widget buildFirstNameField() {
@@ -833,9 +827,7 @@ class _UserDialogState extends State<_UserDialog> {
                         ),
                       ),
                   ],
-                  onChanged: isDefaultAdmin
-                      ? null
-                      : (role) => setState(() => _role = role ?? _role),
+                  onChanged: (role) => setState(() => _role = role ?? _role),
                 ),
               ],
             ),

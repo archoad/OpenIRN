@@ -6,7 +6,9 @@ import '../../domain/models/app_user.dart';
 import '../../domain/models/irn_referential.dart';
 import '../../domain/models/sync_configuration.dart';
 import '../../domain/repositories/irn_referential_repository.dart';
+import '../../domain/services/app_session_manager.dart';
 import '../../domain/services/app_sync_coordinator.dart';
+import '../../domain/services/access_policy_service.dart';
 import '../../domain/services/referential_catalog_service.dart';
 import '../about/about_screen.dart';
 import '../admin/administration_screen.dart';
@@ -229,7 +231,10 @@ class _HomeContent extends StatefulWidget {
 class _HomeContentState extends State<_HomeContent> {
   final _syncConfigurationRepository = const LocalSyncConfigurationRepository();
   final _apiClient = const OpenIrnApiClient();
+  final _accessPolicy = const AccessPolicyService();
   late Future<SyncConfiguration> _syncConfigurationFuture;
+
+  String _lastDisplayedLockReason = '';
 
   @override
   void initState() {
@@ -237,6 +242,33 @@ class _HomeContentState extends State<_HomeContent> {
     _syncConfigurationFuture = Future<SyncConfiguration>.value(
       widget.initialConfiguration,
     );
+    AppSessionManager.instance.addListener(_handleSessionChanged);
+  }
+
+  @override
+  void dispose() {
+    AppSessionManager.instance.removeListener(_handleSessionChanged);
+    super.dispose();
+  }
+
+  void _handleSessionChanged() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
+    final reason = AppSessionManager.instance.lastLockReason;
+    if (reason.trim().isEmpty || reason == _lastDisplayedLockReason) {
+      return;
+    }
+    _lastDisplayedLockReason = reason;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(reason)));
+    });
   }
 
   @override
@@ -292,6 +324,17 @@ class _HomeContentState extends State<_HomeContent> {
       );
       return;
     }
+    final activeUser = AppSessionManager.instance.activeUser;
+    if (!AppSessionManager.instance.hasActiveSession || activeUser == null) {
+      _showForbidden(
+        'Déverrouille OpenIRN avec ton profil et ton code personnel avant d’ouvrir une campagne.',
+      );
+      return;
+    }
+    if (!_accessPolicy.can(activeUser, OpenIrnPermission.viewCampaignList)) {
+      _showForbidden('Ton profil ne permet pas d’ouvrir les campagnes.');
+      return;
+    }
     if (!_hasServerReferential) {
       _showForbidden(
         'Installe ou recharge le référentiel officiel aDRI depuis l’administration avant d’ouvrir une campagne.',
@@ -301,12 +344,29 @@ class _HomeContentState extends State<_HomeContent> {
 
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => CampaignListScreen(referential: widget.referential),
+        builder: (_) => CampaignListScreen(
+          referential: widget.referential,
+          activeUser: activeUser,
+        ),
       ),
     );
   }
 
   Future<void> _openReferentialCatalog() async {
+    final activeUser = AppSessionManager.instance.activeUser;
+    if (!AppSessionManager.instance.hasActiveSession || activeUser == null) {
+      _showForbidden(
+        'Déverrouille OpenIRN avec ton profil et ton code personnel avant d’ouvrir le référentiel.',
+      );
+      return;
+    }
+    if (!_accessPolicy.can(
+      activeUser,
+      OpenIrnPermission.viewReferentialCatalog,
+    )) {
+      _showForbidden('Ton profil ne permet pas de consulter le référentiel.');
+      return;
+    }
     if (!_hasServerReferential) {
       _showForbidden(
         'Le référentiel officiel n’est pas encore chargé depuis le serveur.',
@@ -338,13 +398,15 @@ class _HomeContentState extends State<_HomeContent> {
       return;
     }
 
-    final selectedUser = await _authenticateAdministratorOrCampaignManager(
-      title: 'Administration',
-      intro:
-          'Sélectionne un administrateur ou un pilote IRN pour ouvrir la console d’administration.',
-      trailingIcon: Icons.admin_panel_settings_outlined,
-    );
-    if (selectedUser == null || !mounted) {
+    final activeUser = AppSessionManager.instance.activeUser;
+    if (!AppSessionManager.instance.hasActiveSession || activeUser == null) {
+      _showForbidden(
+        'Déverrouille OpenIRN avec ton profil et ton code personnel avant d’ouvrir l’administration.',
+      );
+      return;
+    }
+    if (!_accessPolicy.canOpenAdministration(activeUser)) {
+      _showForbidden(_accessPolicy.administrationForbiddenMessage(activeUser));
       return;
     }
 
@@ -352,7 +414,7 @@ class _HomeContentState extends State<_HomeContent> {
       MaterialPageRoute<void>(
         builder: (_) => AdministrationScreen(
           referential: widget.referential,
-          activeUser: selectedUser,
+          activeUser: activeUser,
         ),
       ),
     );
@@ -367,53 +429,43 @@ class _HomeContentState extends State<_HomeContent> {
     });
   }
 
-  Future<AppUser?> _authenticateAdministratorOrCampaignManager({
-    required String title,
-    required String intro,
-    required IconData trailingIcon,
-  }) async {
+  Future<void> _unlockSession() async {
     final authenticationData = await _loadAuthenticatableUsers();
     if (!mounted) {
-      return null;
+      return;
     }
 
     if (authenticationData.source !=
         _AdministrationAuthenticationSource.server) {
       _showForbidden(authenticationData.message);
-      return null;
+      return;
     }
 
-    final managerUsers = authenticationData.users
-        .where(
-          (user) =>
-              user.active &&
-              (user.role == AppUserRole.administrator ||
-                  user.role == AppUserRole.campaignManager),
-        )
+    final activeUsers = authenticationData.users
+        .where((user) => user.active)
         .toList(growable: false);
 
-    if (managerUsers.isEmpty) {
-      _showForbidden(
-        'Aucun administrateur ou pilote IRN actif n’est disponible.',
-      );
-      return null;
+    if (activeUsers.isEmpty) {
+      _showForbidden('Aucun profil utilisateur actif n’est disponible.');
+      return;
     }
 
     final selectedUser = await showDialog<AppUser>(
       context: context,
       barrierDismissible: false,
       builder: (_) => _AdministrationAuthenticationDialog(
-        title: title,
-        intro: intro,
-        users: managerUsers,
+        title: 'Déverrouiller OpenIRN',
+        intro:
+            'Sélectionne ton profil puis saisis ton code personnel pour ouvrir une session serveur courte.',
+        users: activeUsers,
         source: authenticationData.source,
         message: authenticationData.message,
-        trailingIcon: trailingIcon,
+        trailingIcon: Icons.login_outlined,
       ),
     );
 
     if (selectedUser == null || !mounted) {
-      return null;
+      return;
     }
 
     final verified = await _verifySelectedUser(
@@ -421,10 +473,44 @@ class _HomeContentState extends State<_HomeContent> {
       user: selectedUser,
     );
     if (!verified || !mounted) {
-      return null;
+      return;
     }
 
-    return selectedUser;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Session ouverte : ${selectedUser.displayName}')),
+    );
+    widget.onConfigurationChanged();
+    setState(() {
+      _syncConfigurationFuture = _syncConfigurationRepository
+          .loadConfiguration();
+    });
+  }
+
+  Future<void> _lockSession() async {
+    final sessionToken = AppSessionManager.instance.apiToken;
+    final configuration = await _syncConfigurationRepository
+        .loadConfiguration();
+
+    if (sessionToken.isNotEmpty && configuration.isConfigured) {
+      await _apiClient.revokeCurrentApiSession(
+        baseUrl: configuration.apiBaseUrl,
+        tenantId: configuration.tenantId,
+        apiToken: sessionToken,
+      );
+    }
+
+    AppSessionManager.instance.clearSession(
+      reason: 'Session verrouillée manuellement.',
+    );
+    AppSyncCoordinator.instance.stop();
+    if (!mounted) {
+      return;
+    }
+    widget.onConfigurationChanged();
+    setState(() {
+      _syncConfigurationFuture = _syncConfigurationRepository
+          .loadConfiguration();
+    });
   }
 
   Future<bool> _verifySelectedUser({
@@ -551,7 +637,24 @@ class _HomeContentState extends State<_HomeContent> {
                     buttonLabel: 'Appairer',
                     onPressed: _openDeviceEnrollment,
                   )
+                else if (!AppSessionManager.instance.hasActiveSession ||
+                    AppSessionManager.instance.activeUser == null)
+                  _HomeActionCard(
+                    icon: Icons.lock_open_outlined,
+                    title: 'Déverrouiller OpenIRN',
+                    subtitle:
+                        'Ouvrir une session serveur courte avec ton profil et ton code personnel.',
+                    buttonLabel: 'Déverrouiller',
+                    onPressed: _unlockSession,
+                  )
                 else ...[
+                  _SessionStatusCard(
+                    user: AppSessionManager.instance.activeUser!,
+                    expiresAt: AppSessionManager.instance.expiresAt,
+                    idleExpiresAt: AppSessionManager.instance.idleExpiresAt,
+                    onLock: _lockSession,
+                  ),
+                  const SizedBox(height: 12),
                   if (!_hasServerReferential) ...[
                     _ServerReferentialWarningCard(
                       message: widget.referentialError,
@@ -578,14 +681,17 @@ class _HomeContentState extends State<_HomeContent> {
                     ),
                     const SizedBox(height: 12),
                   ],
-                  _HomeActionCard(
-                    icon: Icons.admin_panel_settings_outlined,
-                    title: 'Administration',
-                    subtitle:
-                        'Gérer les campagnes, les utilisateurs et la maintenance serveur',
-                    buttonLabel: 'Administrer',
-                    onPressed: _openAdministration,
-                  ),
+                  if (_accessPolicy.canOpenAdministration(
+                    AppSessionManager.instance.activeUser!,
+                  ))
+                    _HomeActionCard(
+                      icon: Icons.admin_panel_settings_outlined,
+                      title: 'Administration',
+                      subtitle:
+                          'Accéder aux opérations autorisées par ton profil.',
+                      buttonLabel: 'Administrer',
+                      onPressed: _openAdministration,
+                    ),
                 ],
               ],
             ),
@@ -594,6 +700,111 @@ class _HomeContentState extends State<_HomeContent> {
       },
     );
   }
+}
+
+class _SessionStatusCard extends StatelessWidget {
+  final AppUser user;
+  final DateTime? expiresAt;
+  final DateTime? idleExpiresAt;
+  final Future<void> Function() onLock;
+
+  const _SessionStatusCard({
+    required this.user,
+    required this.expiresAt,
+    required this.idleExpiresAt,
+    required this.onLock,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final displayName = user.displayName.trim().isEmpty
+        ? user.id
+        : user.displayName.trim();
+    final expirationText = expiresAt == null
+        ? 'Expiration serveur non communiquée'
+        : 'Expire à ${_formatSessionExpiration(expiresAt!.toLocal())}';
+    final idleText = idleExpiresAt == null
+        ? 'Verrouillage automatique après inactivité'
+        : 'Verrouillage auto à ${_formatSessionExpiration(idleExpiresAt!.toLocal())} en l’absence d’activité';
+    final isNarrow = MediaQuery.sizeOf(context).width < 680;
+
+    final content = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          Icons.verified_user_outlined,
+          size: 38,
+          color: colorScheme.primary,
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Session ouverte', style: theme.textTheme.titleLarge),
+              const SizedBox(height: 6),
+              Text('$displayName — ${user.role.label}'),
+              const SizedBox(height: 4),
+              Text(
+                expirationText,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                idleText,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: isNarrow
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  content,
+                  const SizedBox(height: 14),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      onLock();
+                    },
+                    icon: const Icon(Icons.lock_outline),
+                    label: const Text('Verrouiller'),
+                  ),
+                ],
+              )
+            : Row(
+                children: [
+                  Expanded(child: content),
+                  const SizedBox(width: 16),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      onLock();
+                    },
+                    icon: const Icon(Icons.lock_outline),
+                    label: const Text('Verrouiller'),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+String _formatSessionExpiration(DateTime value) {
+  String twoDigits(int number) => number.toString().padLeft(2, '0');
+  return '${twoDigits(value.hour)}:${twoDigits(value.minute)}';
 }
 
 class _ServerReferentialWarningCard extends StatelessWidget {

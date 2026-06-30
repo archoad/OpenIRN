@@ -8,6 +8,34 @@ void main() {
   });
 
   test(
+    'audits legacy business data and preserves public device metadata',
+    () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'openirn.sync.configuration': '{}',
+        'openirn.sync.deviceId': 'device-1',
+        'openirn.localUsers': '{"users":[]}',
+        'openirn.localSession.activeUserId': 'admin',
+        'openirn.localCampaigns.adri-irn': '[]',
+        'openirn.assessment.answers.adri-irn.campaign-1': '{}',
+        'openirn.criterionAssignments.adri-irn.campaign-1': '[]',
+        'openirn.activityLog.adri-irn.campaign-1': '[]',
+        'openirn.sync.log.events': '[]',
+        'openirn.secureFallback.openirn.secure.sync.configuration': '{}',
+        'unrelated.preference': 'kept',
+      });
+
+      final report = await const LegacyLocalStoragePurgeService().audit();
+
+      expect(report.preservedKeys, <String>[
+        'openirn.sync.configuration',
+        'openirn.sync.deviceId',
+      ]);
+      expect(report.removableCount, 8);
+      expect(report.hasUnexpectedOpenIrnKeys, isFalse);
+    },
+  );
+
+  test(
     'purges legacy business data and preserves public device metadata',
     () async {
       SharedPreferences.setMockInitialValues(<String, Object>{
@@ -28,6 +56,7 @@ void main() {
       final preferences = await SharedPreferences.getInstance();
 
       expect(report.removedCount, 8);
+      expect(report.preservedCount, 2);
       expect(preferences.getString('openirn.sync.configuration'), '{}');
       expect(preferences.getString('openirn.sync.deviceId'), 'device-1');
       expect(preferences.getString('unrelated.preference'), 'kept');
@@ -63,6 +92,35 @@ void main() {
         ),
         isFalse,
       );
+    },
+  );
+
+  test(
+    'removes every non-authorized OpenIRN key to prevent local business storage regressions',
+    () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'openirn.sync.configuration': '{}',
+        'openirn.sync.deviceId': 'device-1',
+        'openirn.future.localBusinessCache': 'forbidden',
+        'openirn.preferences.theme': 'forbidden-for-now',
+        'unrelated.preference': 'kept',
+      });
+
+      final report = await const LegacyLocalStoragePurgeService().purge();
+      final preferences = await SharedPreferences.getInstance();
+
+      expect(report.unexpectedOpenIrnKeys, <String>[
+        'openirn.future.localBusinessCache',
+        'openirn.preferences.theme',
+      ]);
+      expect(preferences.getString('openirn.sync.configuration'), '{}');
+      expect(preferences.getString('openirn.sync.deviceId'), 'device-1');
+      expect(
+        preferences.containsKey('openirn.future.localBusinessCache'),
+        isFalse,
+      );
+      expect(preferences.containsKey('openirn.preferences.theme'), isFalse);
+      expect(preferences.getString('unrelated.preference'), 'kept');
     },
   );
 }

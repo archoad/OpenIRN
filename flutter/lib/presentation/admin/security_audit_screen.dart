@@ -5,6 +5,7 @@ import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/security_audit_event.dart';
 import '../../domain/models/sync_configuration.dart';
+import '../../domain/services/access_policy_service.dart';
 import '../common/openirn_app_bar.dart';
 
 class SecurityAuditScreen extends StatefulWidget {
@@ -19,6 +20,7 @@ class SecurityAuditScreen extends StatefulWidget {
 class _SecurityAuditScreenState extends State<SecurityAuditScreen> {
   final _configurationRepository = const LocalSyncConfigurationRepository();
   final _apiClient = const OpenIrnApiClient();
+  final _accessPolicy = const AccessPolicyService();
 
   late Future<_SecurityAuditStateData> _future;
   bool _includeAuthAttempts = true;
@@ -32,6 +34,15 @@ class _SecurityAuditScreenState extends State<SecurityAuditScreen> {
   }
 
   Future<_SecurityAuditStateData> _loadEvents() async {
+    if (!_accessPolicy.canViewSecurityAudit(widget.activeUser)) {
+      return _SecurityAuditStateData(
+        configuration: SyncConfiguration.empty(),
+        events: const <SecurityAuditEvent>[],
+        serverAvailable: false,
+        title: 'Accès refusé',
+        message: 'Le journal sécurité est réservé aux administrateurs.',
+      );
+    }
     final configuration = await _configurationRepository.loadConfiguration();
     if (!configuration.isConfigured) {
       return _SecurityAuditStateData(

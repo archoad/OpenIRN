@@ -80,6 +80,8 @@ enum AppUserRole {
 }
 
 class AppUser {
+  // Identifiant historique de l'ancien administrateur local.
+  // Il est conservé uniquement pour ignorer proprement les anciens exports.
   static const defaultAdministratorId = 'local-admin';
 
   final String id;
@@ -121,22 +123,6 @@ class AppUser {
       return email.trim();
     }
     return id;
-  }
-
-  bool get isDefaultAdministrator => id == defaultAdministratorId;
-
-  factory AppUser.defaultAdministrator({DateTime? now}) {
-    final timestamp = (now ?? DateTime.now()).toUtc();
-    return AppUser(
-      id: defaultAdministratorId,
-      firstName: 'Administrateur',
-      lastName: 'local',
-      email: 'admin.local@openirn.local',
-      role: AppUserRole.administrator,
-      active: true,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    );
   }
 
   factory AppUser.create({

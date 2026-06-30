@@ -3,12 +3,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 class LegacyLocalStoragePurgeService {
   const LegacyLocalStoragePurgeService();
 
-  static const Set<String> _preservedKeys = <String>{
+  static const String openIrnPrefix = 'openirn.';
+
+  static const Set<String> allowedOpenIrnKeys = <String>{
     'openirn.sync.configuration',
     'openirn.sync.deviceId',
   };
 
-  static const Set<String> _legacyExactKeys = <String>{
+  static const Set<String> legacyExactKeys = <String>{
     'openirn.localUsers',
     'openirn.localSession.activeUserId',
     'openirn.sync.log.events',
@@ -18,7 +20,7 @@ class LegacyLocalStoragePurgeService {
     'openirn.secureFallback.openirn.secure.sync.deviceId',
   };
 
-  static const List<String> _legacyPrefixes = <String>[
+  static const List<String> legacyPrefixes = <String>[
     'openirn.localCampaigns.',
     'openirn.assessment.answers.',
     'openirn.criterionAssignments.',
@@ -26,38 +28,95 @@ class LegacyLocalStoragePurgeService {
     'openirn.secureFallback.',
   ];
 
-  Future<LegacyLocalStoragePurgeReport> purge() async {
+  Future<LegacyLocalStorageAuditReport> audit() async {
     final preferences = await SharedPreferences.getInstance();
     final keys = preferences.getKeys().toList(growable: false)..sort();
-    final removedKeys = <String>[];
+    final preservedKeys = <String>[];
+    final removableKeys = <String>[];
+    final unexpectedOpenIrnKeys = <String>[];
 
     for (final key in keys) {
-      if (_shouldRemove(key)) {
-        await preferences.remove(key);
-        removedKeys.add(key);
+      if (!key.startsWith(openIrnPrefix)) {
+        continue;
+      }
+      if (allowedOpenIrnKeys.contains(key)) {
+        preservedKeys.add(key);
+        continue;
+      }
+      removableKeys.add(key);
+      if (!_isKnownLegacyKey(key)) {
+        unexpectedOpenIrnKeys.add(key);
       }
     }
 
-    return LegacyLocalStoragePurgeReport(removedKeys: removedKeys);
+    return LegacyLocalStorageAuditReport(
+      preservedKeys: preservedKeys,
+      removableKeys: removableKeys,
+      unexpectedOpenIrnKeys: unexpectedOpenIrnKeys,
+    );
   }
 
-  bool _shouldRemove(String key) {
-    if (_preservedKeys.contains(key)) {
-      return false;
+  Future<LegacyLocalStoragePurgeReport> purge() async {
+    final preferences = await SharedPreferences.getInstance();
+    final auditReport = await audit();
+    final removedKeys = <String>[];
+
+    for (final key in auditReport.removableKeys) {
+      await preferences.remove(key);
+      removedKeys.add(key);
     }
-    if (_legacyExactKeys.contains(key)) {
+
+    return LegacyLocalStoragePurgeReport(
+      preservedKeys: auditReport.preservedKeys,
+      removedKeys: removedKeys,
+      unexpectedOpenIrnKeys: auditReport.unexpectedOpenIrnKeys,
+    );
+  }
+
+  bool _isKnownLegacyKey(String key) {
+    if (legacyExactKeys.contains(key)) {
       return true;
     }
-    return _legacyPrefixes.any(key.startsWith);
+    return legacyPrefixes.any(key.startsWith);
   }
 }
 
-class LegacyLocalStoragePurgeReport {
-  final List<String> removedKeys;
+class LegacyLocalStorageAuditReport {
+  final List<String> preservedKeys;
+  final List<String> removableKeys;
+  final List<String> unexpectedOpenIrnKeys;
 
-  const LegacyLocalStoragePurgeReport({required this.removedKeys});
+  const LegacyLocalStorageAuditReport({
+    required this.preservedKeys,
+    required this.removableKeys,
+    required this.unexpectedOpenIrnKeys,
+  });
+
+  int get preservedCount => preservedKeys.length;
+
+  int get removableCount => removableKeys.length;
+
+  bool get hasRemovableKeys => removableKeys.isNotEmpty;
+
+  bool get hasUnexpectedOpenIrnKeys => unexpectedOpenIrnKeys.isNotEmpty;
+}
+
+class LegacyLocalStoragePurgeReport {
+  final List<String> preservedKeys;
+  final List<String> removedKeys;
+  final List<String> unexpectedOpenIrnKeys;
+
+  const LegacyLocalStoragePurgeReport({
+    required this.preservedKeys,
+    required this.removedKeys,
+    required this.unexpectedOpenIrnKeys,
+  });
+
+  int get preservedCount => preservedKeys.length;
 
   int get removedCount => removedKeys.length;
 
   bool get hasRemovedKeys => removedKeys.isNotEmpty;
+
+  bool get hasUnexpectedOpenIrnKeys => unexpectedOpenIrnKeys.isNotEmpty;
 }

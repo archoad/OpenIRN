@@ -517,8 +517,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   }
 
   Future<void> _resetAnswers() async {
-    if (!_accessPolicy.canManageCampaigns(widget.activeUser) ||
-        _campaign.isReadOnly ||
+    if (!_accessPolicy.canResetCampaignAnswers(widget.activeUser, _campaign) ||
         _criterionAnswers.isEmpty) {
       return;
     }
@@ -594,7 +593,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   Map<IrnPillar, List<IrnCriterion>> _visibleCriteriaByPillar(
     Map<IrnPillar, List<IrnCriterion>> criteriaByPillar,
   ) {
-    if (widget.activeUser.role != AppUserRole.evaluator) {
+    if (!_accessPolicy.shouldLimitToAssignedCriteria(widget.activeUser)) {
       return criteriaByPillar;
     }
 
@@ -661,8 +660,10 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   }
 
   Future<void> _editCampaignInformation() async {
-    if (!_accessPolicy.canManageCampaigns(widget.activeUser) ||
-        _campaign.isReadOnly) {
+    if (!_accessPolicy.canEditCampaignInformation(
+      widget.activeUser,
+      _campaign,
+    )) {
       _showForbidden(
         _campaign.isReadOnly
             ? 'La campagne est en lecture seule.'
@@ -717,6 +718,10 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   }
 
   Future<void> _openExport() async {
+    if (!_accessPolicy.canExportCampaign(widget.activeUser)) {
+      _showForbidden('Ton profil ne permet pas d’exporter cette campagne.');
+      return;
+    }
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => AssessmentExportScreen(
@@ -745,6 +750,12 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   }
 
   Future<void> _openActivityLog() async {
+    if (!_accessPolicy.canViewCampaignActivityLog(widget.activeUser)) {
+      _showForbidden(
+        'Ton profil ne permet pas de consulter le journal de campagne.',
+      );
+      return;
+    }
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => ActivityLogScreen(
@@ -758,10 +769,20 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   @override
   Widget build(BuildContext context) {
     final answers = _answers;
-    final canManageCampaign = _accessPolicy.canManageCampaigns(
+    final canEditCampaign = _accessPolicy.canEditCampaignInformation(
+      widget.activeUser,
+      _campaign,
+    );
+    final canExportCampaign = _accessPolicy.canExportCampaign(
       widget.activeUser,
     );
-    final canEditCampaign = canManageCampaign && !_campaign.isReadOnly;
+    final canViewActivityLog = _accessPolicy.canViewCampaignActivityLog(
+      widget.activeUser,
+    );
+    final canResetAnswers = _accessPolicy.canResetCampaignAnswers(
+      widget.activeUser,
+      _campaign,
+    );
     final canManageAssignments = _accessPolicy.canManageAssignments(
       widget.activeUser,
       _campaign,
@@ -803,7 +824,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
             enabled: !_isLoadingAnswers,
             onSelected: _openSummary,
           ),
-          if (canManageCampaign)
+          if (canExportCampaign)
             OpenIrnAppBarAction(
               id: 'export',
               label: 'Export JSON',
@@ -818,7 +839,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
             enabled: !_isLoadingAnswers,
             onSelected: _openQuality,
           ),
-          if (canManageCampaign)
+          if (canViewActivityLog)
             OpenIrnAppBarAction(
               id: 'journal',
               label: 'Journal',
@@ -827,8 +848,8 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
               onSelected: _openActivityLog,
             ),
 
-          if (canManageCampaign) const OpenIrnAppBarAction.divider(),
-          if (canManageCampaign)
+          if (canResetAnswers) const OpenIrnAppBarAction.divider(),
+          if (canResetAnswers)
             OpenIrnAppBarAction(
               id: 'reset',
               label: 'Réinitialiser',
@@ -860,7 +881,10 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
               _AssignmentStatusCard(
                 isLoading: _isLoadingAssignments,
                 assignmentCount: _assignmentsByCriterionId.length,
-                totalCriteria: widget.activeUser.role == AppUserRole.evaluator
+                totalCriteria:
+                    _accessPolicy.shouldLimitToAssignedCriteria(
+                      widget.activeUser,
+                    )
                     ? visibleCriteriaCount
                     : widget.referential.criteria
                           .where((criterion) => criterion.active)
