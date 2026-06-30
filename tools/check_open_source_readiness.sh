@@ -23,8 +23,6 @@ required_files=(
   "SECURITY.md"
   "CODE_OF_CONDUCT.md"
   ".gitignore"
-  "flutter/assets/referentials/manifest.json"
-  "flutter/assets/referentials/adri_irn_v1_1.json"
 )
 
 for file in "${required_files[@]}"; do
@@ -35,50 +33,58 @@ for file in "${required_files[@]}"; do
   fi
 done
 
-for forbidden in \
-  "Questionnaire_IRN_v.1.1.xlsx" \
-  "Questionnaire_IRN_v.1.1.ods" \
-  "canonical_irn_v1_1.json" \
-  "Evaluation IRN.xlsx" \
-  "company_seed.json" \
-  "validation_report.json" \
-  "validation_referential_report.json"; do
-  if [[ -e "$forbidden" ]]; then
-    fail "fichier de travail à ne pas publier détecté : $forbidden"
+check_absent_find() {
+  local description="$1"
+  shift
+  local matches
+  matches=$(find . \
+    \( -name .git -o -path './flutter/build' -o -path './flutter/.dart_tool' -o -path './server/openirn-api/.venv' -o -path './node_modules' \) -prune -o \
+    "$@" -print | sort)
+  if [[ -n "$matches" ]]; then
+    fail "$description détecté :"
+    echo "$matches" | sed 's/^/  - /'
   else
-    ok "$forbidden absent"
+    ok "$description absent"
   fi
-done
+}
 
-if [[ -e "flutter/assets/referentials/.gitkeep" ]]; then
-  fail "flutter/assets/referentials/.gitkeep doit être supprimé maintenant que le bundle JSON est versionné"
+check_absent_find "métadonnées macOS" -type f \( -name '.DS_Store' -o -name '._*' \)
+check_absent_find "swap ou sauvegarde d’éditeur" -type f \( -name '*.swp' -o -name '.*.swp' -o -name '*.swo' -o -name '.*.swo' -o -name '*~' -o -name '*.bak' \)
+
+if [[ -d ".tmp" ]]; then
+  fail "répertoire temporaire .tmp présent"
 else
-  ok "flutter/assets/referentials/.gitkeep absent"
+  ok "répertoire temporaire .tmp absent"
 fi
 
-allowed_referential_json=(
-  "flutter/assets/referentials/manifest.json"
-  "flutter/assets/referentials/adri_irn_v1_1.json"
-)
+check_absent_find "fichier de travail référentiel" -type f \( \
+  -name 'Questionnaire_IRN_*.xlsx' -o \
+  -name 'Questionnaire_IRN_*.ods' -o \
+  -name 'canonical_irn_*.json' -o \
+  -name 'validation_referential_report.json' \
+\)
+
+check_absent_find "donnée entreprise ou campagne exportée" -type f \( \
+  -name 'Evaluation IRN*.xlsx' -o \
+  -name 'company_seed.json' -o \
+  -name 'validation_report.json' -o \
+  -name 'openirn_*.json' -o \
+  -name '*_campaign_export.json' \
+\)
+
+check_absent_find "secret potentiel" -type f \( \
+  -name '.env' -o \
+  -name '.env.*' -o \
+  -name '*.pem' -o \
+  -name '*.key' -o \
+  -name '*.p12' -o \
+  -name '*.mobileprovision' \
+\)
 
 if [[ -d "flutter/assets/referentials" ]]; then
-  while IFS= read -r json_file; do
-    allowed=false
-    for expected in "${allowed_referential_json[@]}"; do
-      if [[ "$json_file" == "$expected" ]]; then
-        allowed=true
-        break
-      fi
-    done
-    if [[ "$allowed" == true ]]; then
-      ok "bundle JSON attendu : $json_file"
-    else
-      fail "bundle JSON inattendu dans flutter/assets/referentials : $json_file"
-    fi
-  done < <(find flutter/assets/referentials -maxdepth 1 -type f -name '*.json' | sort)
-fi
-
-python3 - <<'PY'
+  echo
+  echo "[INFO] flutter/assets/referentials existe encore ; validation opportuniste du bundle éventuel."
+  python3 - <<'PY'
 import json
 from pathlib import Path
 import sys
@@ -93,53 +99,59 @@ def fail(message: str) -> None:
 def ok(message: str) -> None:
     print(f"[OK] {message}")
 
-manifest_path = Path("flutter/assets/referentials/manifest.json")
-referential_path = Path("flutter/assets/referentials/adri_irn_v1_1.json")
+referentials_dir = Path("flutter/assets/referentials")
+manifest_path = referentials_dir / "manifest.json"
+referential_path = referentials_dir / "adri_irn_v1_1.json"
+allowed = {manifest_path, referential_path}
 
-if manifest_path.exists() and referential_path.exists():
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    referential = json.loads(referential_path.read_text(encoding="utf-8"))
+for json_file in sorted(referentials_dir.glob("*.json")):
+    if json_file not in allowed:
+        fail(f"bundle JSON inattendu : {json_file}")
 
-    if manifest.get("activeReferentialId") == referential.get("id"):
-        ok("manifest cohérent avec le référentiel actif")
+if manifest_path.exists() or referential_path.exists():
+    if not manifest_path.exists() or not referential_path.exists():
+        fail("bundle référentiel partiel dans flutter/assets/referentials")
     else:
-        fail("manifest incohérent avec le référentiel actif")
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            referential = json.loads(referential_path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            fail(f"bundle référentiel illisible : {exc}")
+        else:
+            if manifest.get("activeReferentialId") == referential.get("id"):
+                ok("manifest cohérent avec le référentiel actif")
+            else:
+                fail("manifest incohérent avec le référentiel actif")
 
-    if len(referential.get("pillars") or []) == 8:
-        ok("référentiel : 8 piliers")
-    else:
-        fail("référentiel : nombre de piliers inattendu")
+            if len(referential.get("pillars") or []) == 8:
+                ok("référentiel : 8 piliers")
+            else:
+                fail("référentiel : nombre de piliers inattendu")
 
-    if len(referential.get("criteria") or []) == 30:
-        ok("référentiel : 30 critères")
-    else:
-        fail("référentiel : nombre de critères inattendu")
+            if len(referential.get("criteria") or []) == 30:
+                ok("référentiel : 30 critères")
+            else:
+                fail("référentiel : nombre de critères inattendu")
 
-    source = referential.get("source") or {}
-    if source.get("url") and source.get("license"):
-        ok("attribution du référentiel présente")
-    else:
-        fail("attribution du référentiel incomplète")
+            source = referential.get("source") or {}
+            if source.get("url") and source.get("license"):
+                ok("attribution du référentiel présente")
+            else:
+                fail("attribution du référentiel incomplète")
 else:
-    fail("impossible de valider le bundle JSON embarqué")
+    ok("aucun bundle référentiel Flutter embarqué à valider")
 
 sys.exit(status)
 PY
-if [[ $? -ne 0 ]]; then
-  status=1
+  if [[ $? -ne 0 ]]; then
+    status=1
+  fi
 fi
 
-if find . -type f \( -name '*.pem' -o -name '*.key' -o -name '.env' -o -name '.env.*' \) | grep -q .; then
-  fail "secret potentiel détecté"
-else
-  ok "aucun secret évident détecté"
-fi
-
+echo
 if [[ $status -eq 0 ]]; then
-  echo
-  echo "OpenIRN semble prêt pour publication : le bundle référentiel officiel est embarqué avec attribution."
+  echo "OpenIRN semble prêt pour publication : aucun artefact local évident détecté."
 else
-  echo
   echo "Corrige les erreurs avant publication."
 fi
 

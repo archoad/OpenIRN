@@ -3,6 +3,25 @@
 .AppleDouble
 .LSOverride
 
+
+# Editor swap / backup files
+*.swp
+.*.swp
+*.swo
+.*.swo
+*.bak
+*.tmp
+*~
+
+# Local temporary directories
+.tmp/
+tmp/
+
+# Extra OS metadata
+._*
+Thumbs.db
+Desktop.ini
+
 # Python
 .venv/
 __pycache__/
