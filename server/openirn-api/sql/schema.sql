@@ -141,6 +141,44 @@ CREATE TABLE IF NOT EXISTS device_enrollment_codes (
 CREATE INDEX IF NOT EXISTS idx_device_enrollment_codes_tenant_expires
     ON device_enrollment_codes(tenant_id, expires_at DESC);
 
+
+CREATE TABLE IF NOT EXISTS api_sessions (
+    tenant_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    device_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    last_seen_at TEXT,
+    revoked_at TEXT,
+    PRIMARY KEY (tenant_id, session_id),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_sessions_tenant_device_expires
+    ON api_sessions(tenant_id, device_id, expires_at DESC);
+
+CREATE TABLE IF NOT EXISTS auth_attempts (
+    tenant_id TEXT NOT NULL,
+    attempt_id TEXT NOT NULL,
+    device_id TEXT NOT NULL DEFAULT '',
+    user_id TEXT NOT NULL DEFAULT '',
+    ip_address TEXT NOT NULL DEFAULT '',
+    successful INTEGER NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, attempt_id),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_attempts_tenant_device_created
+    ON auth_attempts(tenant_id, device_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_auth_attempts_tenant_user_created
+    ON auth_attempts(tenant_id, user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_auth_attempts_tenant_ip_created
+    ON auth_attempts(tenant_id, ip_address, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS device_audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tenant_id TEXT NOT NULL,
@@ -202,3 +240,7 @@ INSERT OR IGNORE INTO schema_migrations(version, name)
 VALUES (2, 'device_enrollment_store');
 INSERT OR IGNORE INTO schema_migrations(version, name)
 VALUES (3, 'official_referential_store');
+INSERT OR IGNORE INTO schema_migrations(version, name)
+VALUES (4, 'api_session_store');
+INSERT OR IGNORE INTO schema_migrations(version, name)
+VALUES (5, 'auth_attempt_rate_limit_store');

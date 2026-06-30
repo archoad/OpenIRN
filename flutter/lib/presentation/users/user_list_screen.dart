@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../data/api/openirn_api_client.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
-import '../../data/repositories/local_user_repository.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/services/app_sync_coordinator.dart';
 import '../common/openirn_app_bar.dart';
@@ -17,7 +16,6 @@ class UserListScreen extends StatefulWidget {
 }
 
 class _UserListScreenState extends State<UserListScreen> {
-  final _repository = const LocalUserRepository();
   final _syncConfigurationRepository = const LocalSyncConfigurationRepository();
   final _apiClient = const OpenIrnApiClient();
   final _appSyncCoordinator = AppSyncCoordinator.instance;
@@ -49,17 +47,16 @@ class _UserListScreenState extends State<UserListScreen> {
   }
 
   Future<_UserListStateData> _loadUsers() async {
-    final cachedUsers = await _repository.ensureDefaultUsers();
     final configuration = await _syncConfigurationRepository
         .loadConfiguration();
 
     if (!configuration.isConfigured) {
-      return _UserListStateData(
-        users: cachedUsers,
+      return const _UserListStateData(
+        users: <AppUser>[],
         serverAvailable: false,
-        sourceLabel: 'API non configurée',
+        sourceLabel: 'Terminal non autorisé',
         sourceMessage:
-            'La base utilisateurs centrale n’est pas configurée. Les modifications sont désactivées sur ce terminal.',
+            'Autorise ce terminal avant d’accéder à la base utilisateurs serveur.',
       );
     }
 
@@ -71,7 +68,6 @@ class _UserListScreenState extends State<UserListScreen> {
 
     if (centralUsers.isAvailable ||
         centralUsers.status == OpenIrnApiUsersStatus.empty) {
-      await _repository.saveUsers(centralUsers.users);
       return _UserListStateData(
         users: centralUsers.users,
         serverAvailable: true,
@@ -84,11 +80,11 @@ class _UserListScreenState extends State<UserListScreen> {
     }
 
     return _UserListStateData(
-      users: cachedUsers,
+      users: const <AppUser>[],
       serverAvailable: false,
-      sourceLabel: 'Lecture seule hors ligne',
+      sourceLabel: 'Serveur indisponible',
       sourceMessage:
-          '${centralUsers.title} — ${centralUsers.message}. Les modifications utilisateurs doivent être faites avec le serveur disponible.',
+          '${centralUsers.title} — ${centralUsers.message}. Les utilisateurs ne sont plus mis en cache localement.',
       apiBaseUrl: configuration.apiBaseUrl,
       tenantId: configuration.tenantId,
       apiToken: configuration.apiToken,
@@ -163,7 +159,6 @@ class _UserListScreenState extends State<UserListScreen> {
         throw _UserSyncException('${result.title} — ${result.message}');
       }
 
-      await _repository.saveUsers(result.users);
       await _refresh();
       await _appSyncCoordinator.pushNow();
 

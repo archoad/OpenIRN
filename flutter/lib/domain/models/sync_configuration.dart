@@ -36,30 +36,45 @@ class SyncConfiguration {
 
   bool get usesDeviceToken => apiToken.trim().startsWith('odt_');
 
-  bool get usesLegacyBearerToken => hasApiToken && !usesDeviceToken;
+  bool get usesSessionToken => apiToken.trim().startsWith('ost_');
+
+  bool get usesLegacyBearerToken =>
+      hasApiToken && !usesDeviceToken && !usesSessionToken;
 
   String get authorizationModeLabel {
+    if (!isConfigured) {
+      return 'Terminal non autorisé';
+    }
     if (!hasApiToken) {
-      return 'Non autorisé';
+      return 'Terminal autorisé, session absente';
+    }
+    if (usesSessionToken) {
+      return 'Session serveur en mémoire';
     }
     if (usesDeviceToken) {
-      return 'Jeton terminal';
+      return 'Jeton terminal de transition';
     }
-    return 'Bearer de transition';
+    return 'Bearer de transition en mémoire';
   }
 
   String get authorizationModeDescription {
-    if (!hasApiToken) {
+    if (!isConfigured) {
       return 'Ce terminal doit être autorisé avec un code d’appairage.';
     }
-    if (usesDeviceToken) {
-      return 'Ce terminal utilise un jeton individuel révocable côté serveur.';
+    if (!hasApiToken) {
+      return 'Aucun secret n’est stocké localement. Déverrouille OpenIRN avec ton profil et ton code personnel pour ouvrir une session courte.';
     }
-    return 'Ce terminal utilise encore le bearer global historique. Réautorise-le dès que possible avec un code d’appairage.';
+    if (usesSessionToken) {
+      return 'La session serveur est conservée uniquement en mémoire et sera perdue à la fermeture de l’application.';
+    }
+    if (usesDeviceToken) {
+      return 'Ce terminal utilise encore un ancien jeton terminal. Il ne sera plus réenregistré localement.';
+    }
+    return 'Bearer utilisé uniquement pour cette session courante. Il ne sera pas stocké localement.';
   }
 
   bool get isConfigured =>
-      enabled && hasApiBaseUrl && hasTenantId && hasDeviceId && hasApiToken;
+      enabled && hasApiBaseUrl && hasTenantId && hasDeviceId;
 
   String get maskedApiToken {
     final token = apiToken.trim();

@@ -2,10 +2,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import '../../domain/models/api_session.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/authorized_device.dart';
+import '../../domain/models/irn_referential.dart';
 import '../../domain/models/official_referential.dart';
+import '../../domain/models/security_audit_event.dart';
 import '../../domain/models/sync_configuration.dart';
+import '../../domain/services/app_session_manager.dart';
 
 enum OpenIrnApiReachability { ready, reachable, unreachable }
 
@@ -224,7 +228,84 @@ class OpenIrnSyncEvent {
   }
 }
 
+enum OpenIrnApiCurrentReferentialStatus { available, rejected, unreachable }
+
+class OpenIrnApiCurrentReferentialResult {
+  final OpenIrnApiCurrentReferentialStatus status;
+  final String url;
+  final int? statusCode;
+  final String title;
+  final String message;
+  final String tenantId;
+  final IrnReferential? referential;
+  final OfficialReferentialSummary? summary;
+  final Map<String, dynamic>? responseBody;
+
+  const OpenIrnApiCurrentReferentialResult({
+    required this.status,
+    required this.url,
+    required this.statusCode,
+    required this.title,
+    required this.message,
+    required this.tenantId,
+    this.referential,
+    this.summary,
+    this.responseBody,
+  });
+
+  bool get isAvailable =>
+      status == OpenIrnApiCurrentReferentialStatus.available;
+}
+
 enum OpenIrnApiDevicesStatus { available, rejected, unreachable }
+
+class OpenIrnApiSessionsResult {
+  final OpenIrnApiDevicesStatus status;
+  final String url;
+  final int? statusCode;
+  final String title;
+  final String message;
+  final String tenantId;
+  final List<ApiSessionInfo> sessions;
+  final Map<String, dynamic>? responseBody;
+
+  const OpenIrnApiSessionsResult({
+    required this.status,
+    required this.url,
+    required this.statusCode,
+    required this.title,
+    required this.message,
+    required this.tenantId,
+    required this.sessions,
+    this.responseBody,
+  });
+
+  bool get isAvailable => status == OpenIrnApiDevicesStatus.available;
+}
+
+class OpenIrnApiSecurityAuditResult {
+  final OpenIrnApiDevicesStatus status;
+  final String url;
+  final int? statusCode;
+  final String title;
+  final String message;
+  final String tenantId;
+  final List<SecurityAuditEvent> events;
+  final Map<String, dynamic>? responseBody;
+
+  const OpenIrnApiSecurityAuditResult({
+    required this.status,
+    required this.url,
+    required this.statusCode,
+    required this.title,
+    required this.message,
+    required this.tenantId,
+    required this.events,
+    this.responseBody,
+  });
+
+  bool get isAvailable => status == OpenIrnApiDevicesStatus.available;
+}
 
 class OpenIrnApiDevicesResult {
   final OpenIrnApiDevicesStatus status;
@@ -1147,6 +1228,7 @@ class OpenIrnApiClient {
     try {
       final response = await _postJson(authUri, <String, dynamic>{
         'tenantId': safeTenantId,
+        'deviceId': AppSessionManager.instance.deviceId,
         'userId': safeUserId,
         'pin': pin,
       }, bearerToken: apiToken);
@@ -1158,6 +1240,19 @@ class OpenIrnApiClient {
             ? AppUser.fromJson(Map<String, dynamic>.from(rawUser))
             : null;
         final mustChangePin = decodedBody?['mustChangePin'] == true;
+        final sessionToken = decodedBody?['apiToken']?.toString().trim() ?? '';
+        final sessionExpiresAt = DateTime.tryParse(
+          decodedBody?['expiresAt']?.toString() ?? '',
+        )?.toUtc();
+        if (sessionToken.isNotEmpty) {
+          AppSessionManager.instance.startSession(
+            apiToken: sessionToken,
+            tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
+            deviceId: AppSessionManager.instance.deviceId,
+            expiresAt: sessionExpiresAt,
+            activeUser: user,
+          );
+        }
         return OpenIrnApiAuthResult(
           status: OpenIrnApiAuthStatus.accepted,
           url: authUri.toString(),
@@ -1372,6 +1467,335 @@ class OpenIrnApiClient {
         message: error.message,
         tenantId: safeTenantId,
         userId: safeUserId,
+      );
+    }
+  }
+
+  Future<OpenIrnApiSessionsResult> loadApiSessions({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    bool includeInactive = true,
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final sessionsUri = Uri.parse('$normalizedBaseUrl/auth/sessions').replace(
+      queryParameters: <String, String>{
+        'tenantId': safeTenantId,
+        'includeInactive': includeInactive ? 'true' : 'false',
+      },
+    );
+
+    try {
+      final response = await _get(sessionsUri, bearerToken: apiToken);
+      final decodedBody = _decodeJsonObject(response.body);
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final rawSessions = decodedBody?['sessions'];
+        final sessions = rawSessions is List
+            ? rawSessions
+                  .whereType<Map>()
+                  .map(
+                    (item) => ApiSessionInfo.fromJson(
+                      Map<String, dynamic>.from(item),
+                    ),
+                  )
+                  .where((session) => session.sessionId.trim().isNotEmpty)
+                  .toList(growable: false)
+            : const <ApiSessionInfo>[];
+        return OpenIrnApiSessionsResult(
+          status: OpenIrnApiDevicesStatus.available,
+          url: sessionsUri.toString(),
+          statusCode: response.statusCode,
+          title: 'Sessions récupérées',
+          message: '${sessions.length} session(s) serveur récupérée(s).',
+          tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
+          sessions: sessions,
+          responseBody: decodedBody,
+        );
+      }
+
+      return OpenIrnApiSessionsResult(
+        status: OpenIrnApiDevicesStatus.rejected,
+        url: sessionsUri.toString(),
+        statusCode: response.statusCode,
+        title: response.statusCode == 401 || response.statusCode == 403
+            ? 'Authentification refusée'
+            : 'Sessions refusées',
+        message:
+            decodedBody?['detail']?.toString() ??
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        tenantId: safeTenantId,
+        sessions: const <ApiSessionInfo>[],
+        responseBody: decodedBody,
+      );
+    } on TimeoutException {
+      return OpenIrnApiSessionsResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: sessionsUri.toString(),
+        statusCode: null,
+        title: 'Délai dépassé',
+        message: 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+        tenantId: safeTenantId,
+        sessions: const <ApiSessionInfo>[],
+      );
+    } on SocketException catch (error) {
+      return OpenIrnApiSessionsResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: sessionsUri.toString(),
+        statusCode: null,
+        title: 'Serveur injoignable',
+        message: error.message,
+        tenantId: safeTenantId,
+        sessions: const <ApiSessionInfo>[],
+      );
+    } on HandshakeException catch (error) {
+      return OpenIrnApiSessionsResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: sessionsUri.toString(),
+        statusCode: null,
+        title: 'Erreur TLS',
+        message: error.message,
+        tenantId: safeTenantId,
+        sessions: const <ApiSessionInfo>[],
+      );
+    } on FormatException catch (error) {
+      return OpenIrnApiSessionsResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: sessionsUri.toString(),
+        statusCode: null,
+        title: 'URL API invalide',
+        message: error.message,
+        tenantId: safeTenantId,
+        sessions: const <ApiSessionInfo>[],
+      );
+    } on HttpException catch (error) {
+      return OpenIrnApiSessionsResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: sessionsUri.toString(),
+        statusCode: null,
+        title: 'Erreur HTTP',
+        message: error.message,
+        tenantId: safeTenantId,
+        sessions: const <ApiSessionInfo>[],
+      );
+    }
+  }
+
+  Future<OpenIrnApiSecurityAuditResult> loadSecurityAuditEvents({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    int limit = 100,
+    bool includeAuthAttempts = true,
+    bool includeDeviceAudit = true,
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final auditUri = Uri.parse('$normalizedBaseUrl/security/audit').replace(
+      queryParameters: <String, String>{
+        'tenantId': safeTenantId,
+        'limit': limit.clamp(25, 500).toString(),
+        'includeAuthAttempts': includeAuthAttempts ? 'true' : 'false',
+        'includeDeviceAudit': includeDeviceAudit ? 'true' : 'false',
+      },
+    );
+
+    try {
+      final response = await _get(auditUri, bearerToken: apiToken);
+      final decodedBody = _decodeJsonObject(response.body);
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final rawEvents = decodedBody?['events'];
+        final events = rawEvents is List
+            ? rawEvents
+                  .whereType<Map>()
+                  .map(
+                    (item) => SecurityAuditEvent.fromJson(
+                      Map<String, dynamic>.from(item),
+                    ),
+                  )
+                  .toList(growable: false)
+            : const <SecurityAuditEvent>[];
+        return OpenIrnApiSecurityAuditResult(
+          status: OpenIrnApiDevicesStatus.available,
+          url: auditUri.toString(),
+          statusCode: response.statusCode,
+          title: 'Journal sécurité récupéré',
+          message: '${events.length} événement(s) sécurité récupéré(s).',
+          tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
+          events: events,
+          responseBody: decodedBody,
+        );
+      }
+
+      return OpenIrnApiSecurityAuditResult(
+        status: OpenIrnApiDevicesStatus.rejected,
+        url: auditUri.toString(),
+        statusCode: response.statusCode,
+        title: response.statusCode == 401 || response.statusCode == 403
+            ? 'Authentification refusée'
+            : 'Journal sécurité refusé',
+        message:
+            decodedBody?['detail']?.toString() ??
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        tenantId: safeTenantId,
+        events: const <SecurityAuditEvent>[],
+        responseBody: decodedBody,
+      );
+    } on TimeoutException {
+      return OpenIrnApiSecurityAuditResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: auditUri.toString(),
+        statusCode: null,
+        title: 'Délai dépassé',
+        message: 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+        tenantId: safeTenantId,
+        events: const <SecurityAuditEvent>[],
+      );
+    } on SocketException catch (error) {
+      return OpenIrnApiSecurityAuditResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: auditUri.toString(),
+        statusCode: null,
+        title: 'Serveur injoignable',
+        message: error.message,
+        tenantId: safeTenantId,
+        events: const <SecurityAuditEvent>[],
+      );
+    } on HandshakeException catch (error) {
+      return OpenIrnApiSecurityAuditResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: auditUri.toString(),
+        statusCode: null,
+        title: 'Erreur TLS',
+        message: error.message,
+        tenantId: safeTenantId,
+        events: const <SecurityAuditEvent>[],
+      );
+    } on FormatException catch (error) {
+      return OpenIrnApiSecurityAuditResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: auditUri.toString(),
+        statusCode: null,
+        title: 'URL API invalide',
+        message: error.message,
+        tenantId: safeTenantId,
+        events: const <SecurityAuditEvent>[],
+      );
+    } on HttpException catch (error) {
+      return OpenIrnApiSecurityAuditResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: auditUri.toString(),
+        statusCode: null,
+        title: 'Erreur HTTP',
+        message: error.message,
+        tenantId: safeTenantId,
+        events: const <SecurityAuditEvent>[],
+      );
+    }
+  }
+
+  Future<OpenIrnApiSessionsResult> revokeApiSession({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    required String sessionId,
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final revokeUri = Uri.parse(
+      '$normalizedBaseUrl/auth/sessions/$sessionId',
+    ).replace(queryParameters: <String, String>{'tenantId': safeTenantId});
+
+    try {
+      final response = await _delete(revokeUri, bearerToken: apiToken);
+      final decodedBody = _decodeJsonObject(response.body);
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return OpenIrnApiSessionsResult(
+          status: OpenIrnApiDevicesStatus.available,
+          url: revokeUri.toString(),
+          statusCode: response.statusCode,
+          title: 'Session révoquée',
+          message: decodedBody?['message']?.toString() ?? 'Session révoquée.',
+          tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
+          sessions: const <ApiSessionInfo>[],
+          responseBody: decodedBody,
+        );
+      }
+      return OpenIrnApiSessionsResult(
+        status: OpenIrnApiDevicesStatus.rejected,
+        url: revokeUri.toString(),
+        statusCode: response.statusCode,
+        title: 'Révocation refusée',
+        message:
+            decodedBody?['detail']?.toString() ??
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        tenantId: safeTenantId,
+        sessions: const <ApiSessionInfo>[],
+        responseBody: decodedBody,
+      );
+    } on TimeoutException {
+      return OpenIrnApiSessionsResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: revokeUri.toString(),
+        statusCode: null,
+        title: 'Délai dépassé',
+        message: 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+        tenantId: safeTenantId,
+        sessions: const <ApiSessionInfo>[],
+      );
+    } on SocketException catch (error) {
+      return OpenIrnApiSessionsResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: revokeUri.toString(),
+        statusCode: null,
+        title: 'Serveur injoignable',
+        message: error.message,
+        tenantId: safeTenantId,
+        sessions: const <ApiSessionInfo>[],
+      );
+    } on HandshakeException catch (error) {
+      return OpenIrnApiSessionsResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: revokeUri.toString(),
+        statusCode: null,
+        title: 'Erreur TLS',
+        message: error.message,
+        tenantId: safeTenantId,
+        sessions: const <ApiSessionInfo>[],
+      );
+    } on FormatException catch (error) {
+      return OpenIrnApiSessionsResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: revokeUri.toString(),
+        statusCode: null,
+        title: 'URL API invalide',
+        message: error.message,
+        tenantId: safeTenantId,
+        sessions: const <ApiSessionInfo>[],
+      );
+    } on HttpException catch (error) {
+      return OpenIrnApiSessionsResult(
+        status: OpenIrnApiDevicesStatus.unreachable,
+        url: revokeUri.toString(),
+        statusCode: null,
+        title: 'Erreur HTTP',
+        message: error.message,
+        tenantId: safeTenantId,
+        sessions: const <ApiSessionInfo>[],
       );
     }
   }
@@ -1675,14 +2099,14 @@ class OpenIrnApiClient {
           statusCode: response.statusCode,
           title: 'Terminal autorisé',
           message:
-              'Ce terminal dispose maintenant de son propre jeton serveur.',
+              'Ce terminal est autorisé. Aucun secret n’est stocké localement.',
           tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
           enrollmentId: device?.enrollmentId ?? '',
           code: '',
           expiresAt: null,
           expiresInMinutes: 0,
           qrPayloadText: '',
-          apiToken: decodedBody?['apiToken']?.toString() ?? '',
+          apiToken: '',
           device: device,
           responseBody: decodedBody,
         );
@@ -1942,13 +2366,7 @@ class OpenIrnApiClient {
         request.headers.set(HttpHeaders.acceptHeader, 'text/event-stream');
         request.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
         request.headers.set(HttpHeaders.userAgentHeader, 'OpenIRN');
-        final trimmedToken = apiToken.trim();
-        if (trimmedToken.isNotEmpty) {
-          request.headers.set(
-            HttpHeaders.authorizationHeader,
-            'Bearer $trimmedToken',
-          );
-        }
+        _applyAuthorizationHeaders(request, bearerToken: apiToken);
 
         final response = await request.close().timeout(timeout);
         if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -2065,6 +2483,97 @@ class OpenIrnApiClient {
     }
   }
 
+  Future<OpenIrnApiCurrentReferentialResult> loadCurrentOfficialReferential({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final uri = Uri.parse(
+      '$normalizedBaseUrl/referential/official/current',
+    ).replace(queryParameters: <String, String>{'tenantId': safeTenantId});
+
+    try {
+      final response = await _get(uri, bearerToken: apiToken);
+      final decodedBody = _decodeJsonObject(response.body);
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final rawReferential = decodedBody?['referential'];
+        final referential = rawReferential is Map
+            ? IrnReferential.fromJson(Map<String, dynamic>.from(rawReferential))
+            : null;
+
+        if (referential == null) {
+          return OpenIrnApiCurrentReferentialResult(
+            status: OpenIrnApiCurrentReferentialStatus.rejected,
+            url: uri.toString(),
+            statusCode: response.statusCode,
+            title: 'Référentiel serveur invalide',
+            message: 'Le serveur a répondu sans objet référentiel exploitable.',
+            tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
+            summary: _officialReferentialSummary(decodedBody?['summary']),
+            responseBody: decodedBody,
+          );
+        }
+
+        return OpenIrnApiCurrentReferentialResult(
+          status: OpenIrnApiCurrentReferentialStatus.available,
+          url: uri.toString(),
+          statusCode: response.statusCode,
+          title: 'Référentiel serveur chargé',
+          message:
+              'Le référentiel officiel actif a été récupéré depuis le serveur OpenIRN.',
+          tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
+          referential: referential,
+          summary: _officialReferentialSummary(decodedBody?['summary']),
+          responseBody: decodedBody,
+        );
+      }
+
+      return _currentReferentialRejectedResult(response, uri, safeTenantId);
+    } on TimeoutException {
+      return _currentReferentialNetworkError(
+        uri,
+        safeTenantId,
+        'Délai dépassé',
+        'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+      );
+    } on SocketException catch (error) {
+      return _currentReferentialNetworkError(
+        uri,
+        safeTenantId,
+        'Serveur injoignable',
+        error.message,
+      );
+    } on HandshakeException catch (error) {
+      return _currentReferentialNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur TLS',
+        error.message,
+      );
+    } on FormatException catch (error) {
+      return _currentReferentialNetworkError(
+        uri,
+        safeTenantId,
+        'URL API invalide',
+        error.message,
+      );
+    } on HttpException catch (error) {
+      return _currentReferentialNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur HTTP',
+        error.message,
+      );
+    }
+  }
+
   Future<OfficialReferentialApiResult> updateOfficialReferential({
     String? baseUrl,
     required String tenantId,
@@ -2163,19 +2672,35 @@ class OpenIrnApiClient {
     }
   }
 
+  void _applyAuthorizationHeaders(
+    HttpClientRequest request, {
+    String bearerToken = '',
+  }) {
+    final session = AppSessionManager.instance;
+    final trimmedToken = bearerToken.trim().isNotEmpty
+        ? bearerToken.trim()
+        : session.apiToken;
+    if (trimmedToken.isNotEmpty) {
+      request.headers.set(
+        HttpHeaders.authorizationHeader,
+        'Bearer $trimmedToken',
+      );
+    }
+    if (session.deviceId.trim().isNotEmpty) {
+      request.headers.set('X-OpenIRN-Device-Id', session.deviceId.trim());
+    }
+    if (session.tenantId.trim().isNotEmpty) {
+      request.headers.set('X-OpenIRN-Tenant-Id', session.tenantId.trim());
+    }
+  }
+
   Future<_HttpResponse> _get(Uri uri, {String bearerToken = ''}) async {
     final client = HttpClient();
     try {
       final request = await client.getUrl(uri).timeout(timeout);
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
       request.headers.set(HttpHeaders.userAgentHeader, 'OpenIRN');
-      final trimmedToken = bearerToken.trim();
-      if (trimmedToken.isNotEmpty) {
-        request.headers.set(
-          HttpHeaders.authorizationHeader,
-          'Bearer $trimmedToken',
-        );
-      }
+      _applyAuthorizationHeaders(request, bearerToken: bearerToken);
       final response = await request.close().timeout(timeout);
       final body = await response
           .transform(utf8.decoder)
@@ -2193,13 +2718,7 @@ class OpenIrnApiClient {
       final request = await client.deleteUrl(uri).timeout(timeout);
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
       request.headers.set(HttpHeaders.userAgentHeader, 'OpenIRN');
-      final trimmedToken = bearerToken.trim();
-      if (trimmedToken.isNotEmpty) {
-        request.headers.set(
-          HttpHeaders.authorizationHeader,
-          'Bearer $trimmedToken',
-        );
-      }
+      _applyAuthorizationHeaders(request, bearerToken: bearerToken);
       final response = await request.close().timeout(timeout);
       final body = await response
           .transform(utf8.decoder)
@@ -2225,13 +2744,7 @@ class OpenIrnApiClient {
         'application/json; charset=utf-8',
       );
       request.headers.set(HttpHeaders.userAgentHeader, 'OpenIRN');
-      final trimmedToken = bearerToken.trim();
-      if (trimmedToken.isNotEmpty) {
-        request.headers.set(
-          HttpHeaders.authorizationHeader,
-          'Bearer $trimmedToken',
-        );
-      }
+      _applyAuthorizationHeaders(request, bearerToken: bearerToken);
       request.add(utf8.encode(jsonEncode(payload)));
       final response = await request.close().timeout(timeout);
       final body = await response
@@ -2305,6 +2818,52 @@ class OpenIrnApiClient {
       message: message,
       tenantId: tenantId,
       devices: const <AuthorizedDevice>[],
+    );
+  }
+
+  OpenIrnApiCurrentReferentialResult _currentReferentialRejectedResult(
+    _HttpResponse response,
+    Uri uri,
+    String tenantId,
+  ) {
+    final decodedBody = _decodeJsonObject(response.body);
+    final detail = decodedBody?['detail'];
+    String message;
+    if (detail is Map) {
+      message =
+          detail['message']?.toString() ??
+          'Le serveur a refusé le chargement du référentiel officiel.';
+    } else {
+      message =
+          detail?.toString() ??
+          'Le serveur a répondu avec le statut HTTP ${response.statusCode}.';
+    }
+
+    return OpenIrnApiCurrentReferentialResult(
+      status: OpenIrnApiCurrentReferentialStatus.rejected,
+      url: uri.toString(),
+      statusCode: response.statusCode,
+      title: 'Référentiel serveur indisponible',
+      message: message,
+      tenantId: tenantId,
+      summary: _officialReferentialSummary(decodedBody?['summary']),
+      responseBody: decodedBody,
+    );
+  }
+
+  OpenIrnApiCurrentReferentialResult _currentReferentialNetworkError(
+    Uri uri,
+    String tenantId,
+    String title,
+    String message,
+  ) {
+    return OpenIrnApiCurrentReferentialResult(
+      status: OpenIrnApiCurrentReferentialStatus.unreachable,
+      url: uri.toString(),
+      statusCode: null,
+      title: title,
+      message: message,
+      tenantId: tenantId,
     );
   }
 

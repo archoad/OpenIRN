@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../data/api/openirn_api_client.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
-import '../../data/repositories/local_user_repository.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/irn_referential.dart';
 import '../../domain/models/sync_configuration.dart';
@@ -29,25 +28,76 @@ class ReferentialOverviewScreen extends StatefulWidget {
 }
 
 class _ReferentialOverviewScreenState extends State<ReferentialOverviewScreen> {
-  late final Future<IrnReferential> _referentialFuture;
+  final _syncConfigurationRepository = const LocalSyncConfigurationRepository();
+  late Future<_ReferentialBootstrap> _bootstrapFuture;
 
   @override
   void initState() {
     super.initState();
-    _referentialFuture = widget.repository.getActiveReferential();
-    _referentialFuture.then((referential) {
+    _bootstrapFuture = _loadBootstrap();
+  }
+
+  Future<_ReferentialBootstrap> _loadBootstrap() async {
+    final configuration = await _syncConfigurationRepository
+        .loadConfiguration();
+
+    if (!configuration.isConfigured) {
+      AppSyncCoordinator.instance.stop();
+      return _ReferentialBootstrap(
+        referential: _emptyServerReferential(),
+        configuration: configuration,
+        referentialError: null,
+        requiresDeviceEnrollment: true,
+      );
+    }
+
+    try {
+      final referential = await widget.repository.getActiveReferential();
       AppSyncCoordinator.instance.start(referential: referential);
+      return _ReferentialBootstrap(
+        referential: referential,
+        configuration: configuration,
+        referentialError: null,
+        requiresDeviceEnrollment: false,
+      );
+    } catch (error) {
+      AppSyncCoordinator.instance.stop();
+      final errorMessage = error.toString();
+      return _ReferentialBootstrap(
+        referential: _emptyServerReferential(),
+        configuration: configuration,
+        referentialError: errorMessage,
+        requiresDeviceEnrollment: _isDeviceEnrollmentRequiredError(
+          errorMessage,
+        ),
+      );
+    }
+  }
+
+  void _reloadBootstrap() {
+    setState(() {
+      _bootstrapFuture = _loadBootstrap();
     });
   }
 
   Future<void> _openAbout() async {
-    final referential = await _referentialFuture;
+    final bootstrap = await _bootstrapFuture;
     if (!mounted) {
+      return;
+    }
+    if (!bootstrap.hasReferential) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Le référentiel serveur doit être chargé avant d’ouvrir À propos.',
+          ),
+        ),
+      );
       return;
     }
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => AboutScreen(referential: referential),
+        builder: (_) => AboutScreen(referential: bootstrap.referential),
       ),
     );
   }
@@ -66,8 +116,8 @@ class _ReferentialOverviewScreenState extends State<ReferentialOverviewScreen> {
           ),
         ],
       ),
-      body: FutureBuilder<IrnReferential>(
-        future: _referentialFuture,
+      body: FutureBuilder<_ReferentialBootstrap>(
+        future: _bootstrapFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
             return const Center(child: CircularProgressIndicator());
@@ -75,29 +125,108 @@ class _ReferentialOverviewScreenState extends State<ReferentialOverviewScreen> {
           if (snapshot.hasError) {
             return _ErrorState(error: snapshot.error.toString());
           }
-          final referential = snapshot.data;
-          if (referential == null) {
-            return const _ErrorState(error: 'Référentiel absent.');
+          final bootstrap = snapshot.data;
+          if (bootstrap == null) {
+            return const _ErrorState(error: 'État d’accueil absent.');
           }
 
-          return _HomeContent(referential: referential);
+          return _HomeContent(
+            referential: bootstrap.referential,
+            initialConfiguration: bootstrap.configuration,
+            referentialError: bootstrap.referentialError,
+            requiresDeviceEnrollment: bootstrap.requiresDeviceEnrollment,
+            onConfigurationChanged: _reloadBootstrap,
+          );
         },
       ),
     );
   }
 }
 
+class _ReferentialBootstrap {
+  final IrnReferential referential;
+  final SyncConfiguration configuration;
+  final String? referentialError;
+  final bool requiresDeviceEnrollment;
+
+  const _ReferentialBootstrap({
+    required this.referential,
+    required this.configuration,
+    required this.referentialError,
+    required this.requiresDeviceEnrollment,
+  });
+
+  bool get hasReferential =>
+      referential.pillars.isNotEmpty || referential.criteria.isNotEmpty;
+}
+
+bool _isDeviceEnrollmentRequiredError(String? message) {
+  final normalized = (message ?? '')
+      .toLowerCase()
+      .replaceAll('é', 'e')
+      .replaceAll('è', 'e')
+      .replaceAll('ê', 'e')
+      .replaceAll('à', 'a')
+      .replaceAll('ù', 'u')
+      .replaceAll('ç', 'c');
+
+  if (normalized.contains('terminal non autorise') ||
+      normalized.contains('terminal revoque') ||
+      normalized.contains('terminal suspendu') ||
+      normalized.contains('appairage') ||
+      normalized.contains('enrollment')) {
+    return true;
+  }
+
+  final hasAuthStatus =
+      normalized.contains('http 401') ||
+      normalized.contains('http 403') ||
+      normalized.contains('statut 401') ||
+      normalized.contains('statut 403');
+
+  return hasAuthStatus &&
+      (normalized.contains('terminal') || normalized.contains('autorisation'));
+}
+
+IrnReferential _emptyServerReferential() {
+  return IrnReferential(
+    id: 'openirn-server-referential-pending',
+    version: 'Non chargé',
+    importedAt: null,
+    source: const IrnSource(
+      type: 'server',
+      url: SyncConfiguration.fixedApiBaseUrl,
+      projectPath: 'digitalresilienceinitiative/adri-irn',
+      defaultBranch: 'main',
+      filePath: '',
+      license: 'Référentiel officiel aDRI IRN',
+    ),
+    pillars: const <IrnPillar>[],
+    criteria: const <IrnCriterion>[],
+    importWarnings: const <String>[],
+  );
+}
+
 class _HomeContent extends StatefulWidget {
   final IrnReferential referential;
+  final SyncConfiguration initialConfiguration;
+  final String? referentialError;
+  final bool requiresDeviceEnrollment;
+  final VoidCallback onConfigurationChanged;
 
-  const _HomeContent({required this.referential});
+  const _HomeContent({
+    required this.referential,
+    required this.initialConfiguration,
+    required this.referentialError,
+    required this.requiresDeviceEnrollment,
+    required this.onConfigurationChanged,
+  });
 
   @override
   State<_HomeContent> createState() => _HomeContentState();
 }
 
 class _HomeContentState extends State<_HomeContent> {
-  final _userRepository = const LocalUserRepository();
   final _syncConfigurationRepository = const LocalSyncConfigurationRepository();
   final _apiClient = const OpenIrnApiClient();
   late Future<SyncConfiguration> _syncConfigurationFuture;
@@ -105,24 +234,40 @@ class _HomeContentState extends State<_HomeContent> {
   @override
   void initState() {
     super.initState();
-    _syncConfigurationFuture = _syncConfigurationRepository.loadConfiguration();
+    _syncConfigurationFuture = Future<SyncConfiguration>.value(
+      widget.initialConfiguration,
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _HomeContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialConfiguration.deviceId !=
+            widget.initialConfiguration.deviceId ||
+        oldWidget.initialConfiguration.enabled !=
+            widget.initialConfiguration.enabled ||
+        oldWidget.initialConfiguration.tenantId !=
+            widget.initialConfiguration.tenantId ||
+        oldWidget.requiresDeviceEnrollment != widget.requiresDeviceEnrollment) {
+      _syncConfigurationFuture = Future<SyncConfiguration>.value(
+        widget.initialConfiguration,
+      );
+    }
   }
 
   Future<void> _openDeviceEnrollment() async {
     final enrolled = await Navigator.of(context).push<bool>(
-      MaterialPageRoute<bool>(
-        builder: (_) => DeviceEnrollmentScreen(referential: widget.referential),
-      ),
+      MaterialPageRoute<bool>(builder: (_) => const DeviceEnrollmentScreen()),
     );
     if (!mounted) {
       return;
     }
     if (enrolled == true) {
+      widget.onConfigurationChanged();
       setState(() {
         _syncConfigurationFuture = _syncConfigurationRepository
             .loadConfiguration();
       });
-      AppSyncCoordinator.instance.start(referential: widget.referential);
     }
   }
 
@@ -136,6 +281,24 @@ class _HomeContentState extends State<_HomeContent> {
   }
 
   Future<void> _openCampaigns() async {
+    final configuration = await _syncConfigurationRepository
+        .loadConfiguration();
+    if (!mounted) {
+      return;
+    }
+    if (widget.requiresDeviceEnrollment || !configuration.isConfigured) {
+      _showForbidden(
+        'Autorise ce terminal avant d’ouvrir une campagne d’évaluation.',
+      );
+      return;
+    }
+    if (!_hasServerReferential) {
+      _showForbidden(
+        'Installe ou recharge le référentiel officiel aDRI depuis l’administration avant d’ouvrir une campagne.',
+      );
+      return;
+    }
+
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => CampaignListScreen(referential: widget.referential),
@@ -144,6 +307,12 @@ class _HomeContentState extends State<_HomeContent> {
   }
 
   Future<void> _openReferentialCatalog() async {
+    if (!_hasServerReferential) {
+      _showForbidden(
+        'Le référentiel officiel n’est pas encore chargé depuis le serveur.',
+      );
+      return;
+    }
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) =>
@@ -152,7 +321,23 @@ class _HomeContentState extends State<_HomeContent> {
     );
   }
 
+  bool get _hasServerReferential =>
+      widget.referential.pillars.isNotEmpty ||
+      widget.referential.criteria.isNotEmpty;
+
   Future<void> _openAdministration() async {
+    final configuration = await _syncConfigurationRepository
+        .loadConfiguration();
+    if (!mounted) {
+      return;
+    }
+    if (widget.requiresDeviceEnrollment || !configuration.isConfigured) {
+      _showForbidden(
+        'Autorise ce terminal avant d’ouvrir la console d’administration.',
+      );
+      return;
+    }
+
     final selectedUser = await _authenticateAdministratorOrCampaignManager(
       title: 'Administration',
       intro:
@@ -171,6 +356,15 @@ class _HomeContentState extends State<_HomeContent> {
         ),
       ),
     );
+
+    if (!mounted) {
+      return;
+    }
+    widget.onConfigurationChanged();
+    setState(() {
+      _syncConfigurationFuture = _syncConfigurationRepository
+          .loadConfiguration();
+    });
   }
 
   Future<AppUser?> _authenticateAdministratorOrCampaignManager({
@@ -180,6 +374,12 @@ class _HomeContentState extends State<_HomeContent> {
   }) async {
     final authenticationData = await _loadAuthenticatableUsers();
     if (!mounted) {
+      return null;
+    }
+
+    if (authenticationData.source !=
+        _AdministrationAuthenticationSource.server) {
+      _showForbidden(authenticationData.message);
       return null;
     }
 
@@ -233,7 +433,10 @@ class _HomeContentState extends State<_HomeContent> {
   }) async {
     if (authenticationData.source !=
         _AdministrationAuthenticationSource.server) {
-      return true;
+      _showForbidden(
+        'Authentification serveur obligatoire pour accéder à l’administration.',
+      );
+      return false;
     }
 
     final pin = await showDialog<String>(
@@ -278,9 +481,17 @@ class _HomeContentState extends State<_HomeContent> {
   }
 
   Future<_AdministrationAuthenticationData> _loadAuthenticatableUsers() async {
-    final localUsers = await _userRepository.ensureDefaultUsers();
     final configuration = await _syncConfigurationRepository
         .loadConfiguration();
+
+    if (widget.requiresDeviceEnrollment || !configuration.isConfigured) {
+      return const _AdministrationAuthenticationData(
+        source: _AdministrationAuthenticationSource.localOnly,
+        message:
+            'Terminal non autorisé : appaire ce terminal avant d’accéder aux fonctions protégées.',
+        users: <AppUser>[],
+      );
+    }
 
     if (configuration.isConfigured) {
       final centralUsers = await _apiClient.loadUsers(
@@ -290,7 +501,6 @@ class _HomeContentState extends State<_HomeContent> {
       );
 
       if (centralUsers.hasUsers) {
-        await _userRepository.saveUsers(centralUsers.users);
         return _AdministrationAuthenticationData(
           source: _AdministrationAuthenticationSource.server,
           message:
@@ -305,73 +515,140 @@ class _HomeContentState extends State<_HomeContent> {
       return _AdministrationAuthenticationData(
         source: _AdministrationAuthenticationSource.localFallback,
         message:
-            '${centralUsers.title} — bascule temporaire sur la base utilisateurs de secours.',
-        users: localUsers,
+            '${centralUsers.title} — authentification serveur indisponible. Réessaie lorsque le serveur OpenIRN répond.',
+        users: const <AppUser>[],
       );
     }
 
     return const _AdministrationAuthenticationData(
       source: _AdministrationAuthenticationSource.localOnly,
       message:
-          'Synchronisation non configurée : sélection dans la base utilisateurs de secours.',
+          'Terminal non autorisé : appaire ce terminal avant d’accéder aux fonctions protégées.',
       users: <AppUser>[],
-    ).copyWith(users: localUsers);
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 1100),
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _HomeActionCard(
-              icon: Icons.fact_check_outlined,
-              title: 'Evaluation Indice de Résilience Numérique',
-              subtitle: 'Créer ou ouvrir une campagne d\'évaluation',
-              buttonLabel: 'Ouvrir',
-              onPressed: _openCampaigns,
-            ),
-            const SizedBox(height: 12),
-            _HomeActionCard(
-              icon: Icons.manage_search_outlined,
-              title: 'Référentiel aDRI IRN',
-              subtitle:
-                  'Présentation et moteur de recherche du référentiel IRN',
-              buttonLabel: 'Accéder',
-              onPressed: _openReferentialCatalog,
-            ),
-            const SizedBox(height: 12),
-            _HomeActionCard(
-              icon: Icons.admin_panel_settings_outlined,
-              title: 'Administration',
-              subtitle:
-                  'Gérer les campagnes, les utilisateurs et la maintenance serveur',
-              buttonLabel: 'Administrer',
-              onPressed: _openAdministration,
-            ),
-            FutureBuilder<SyncConfiguration>(
-              future: _syncConfigurationFuture,
-              builder: (context, snapshot) {
-                final configuration = snapshot.data;
-                if (configuration == null || configuration.isConfigured) {
-                  return const SizedBox.shrink();
-                }
-                return Column(
-                  children: [
+    return FutureBuilder<SyncConfiguration>(
+      future: _syncConfigurationFuture,
+      builder: (context, snapshot) {
+        final configuration = snapshot.data;
+        final isConfigured = configuration?.isConfigured ?? false;
+
+        return Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1100),
+            child: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                if (widget.requiresDeviceEnrollment || !isConfigured)
+                  _HomeActionCard(
+                    icon: Icons.phonelink_lock_outlined,
+                    title: 'Autoriser ce terminal',
+                    subtitle:
+                        'Appairer ce poste avec le serveur OpenIRN avant d’accéder aux campagnes et à l’administration.',
+                    buttonLabel: 'Appairer',
+                    onPressed: _openDeviceEnrollment,
+                  )
+                else ...[
+                  if (!_hasServerReferential) ...[
+                    _ServerReferentialWarningCard(
+                      message: widget.referentialError,
+                      onOpenAdministration: _openAdministration,
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  if (_hasServerReferential) ...[
+                    _HomeActionCard(
+                      icon: Icons.fact_check_outlined,
+                      title: 'Evaluation Indice de Résilience Numérique',
+                      subtitle: "Créer ou ouvrir une campagne d'évaluation",
+                      buttonLabel: 'Ouvrir',
+                      onPressed: _openCampaigns,
+                    ),
                     const SizedBox(height: 12),
                     _HomeActionCard(
-                      icon: Icons.phonelink_lock_outlined,
-                      title: 'Autoriser ce terminal',
+                      icon: Icons.manage_search_outlined,
+                      title: 'Référentiel aDRI IRN',
                       subtitle:
-                          'Appairer ce poste avec le serveur OpenIRN sans saisir manuellement le bearer.',
-                      buttonLabel: 'Appairer',
-                      onPressed: _openDeviceEnrollment,
+                          'Présentation et moteur de recherche du référentiel IRN',
+                      buttonLabel: 'Accéder',
+                      onPressed: _openReferentialCatalog,
                     ),
+                    const SizedBox(height: 12),
                   ],
-                );
-              },
+                  _HomeActionCard(
+                    icon: Icons.admin_panel_settings_outlined,
+                    title: 'Administration',
+                    subtitle:
+                        'Gérer les campagnes, les utilisateurs et la maintenance serveur',
+                    buttonLabel: 'Administrer',
+                    onPressed: _openAdministration,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ServerReferentialWarningCard extends StatelessWidget {
+  final String? message;
+  final VoidCallback onOpenAdministration;
+
+  const _ServerReferentialWarningCard({
+    required this.message,
+    required this.onOpenAdministration,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final effectiveMessage = message == null || message!.trim().isEmpty
+        ? 'Aucun référentiel officiel actif n’est disponible côté serveur.'
+        : message!.trim();
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.cloud_off_outlined, size: 38),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Référentiel serveur non chargé',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'OpenIRN ne charge plus le référentiel embarqué dans l’application. Installe ou recharge le référentiel officiel aDRI depuis le serveur.',
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SelectableText(effectiveMessage),
+            const SizedBox(height: 14),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                onPressed: onOpenAdministration,
+                icon: const Icon(Icons.admin_panel_settings_outlined),
+                label: const Text('Ouvrir l’administration'),
+              ),
             ),
           ],
         ),
@@ -1142,7 +1419,7 @@ class _ErrorState extends StatelessWidget {
             SelectableText(error, textAlign: TextAlign.center),
             const SizedBox(height: 16),
             const Text(
-              'Vérifie que le bundle a été généré dans flutter/assets/referentials/.',
+              'Vérifie que le terminal est autorisé et que le référentiel officiel est installé côté serveur.',
               textAlign: TextAlign.center,
             ),
           ],

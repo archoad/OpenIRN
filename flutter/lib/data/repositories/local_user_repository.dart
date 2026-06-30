@@ -1,75 +1,43 @@
-import 'dart:convert';
-
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../domain/models/app_user.dart';
+import '../api/openirn_api_client.dart';
+import 'local_sync_configuration_repository.dart';
 
 class LocalUserRepository {
-  const LocalUserRepository();
+  const LocalUserRepository({
+    this.syncConfigurationRepository = const LocalSyncConfigurationRepository(),
+    this.apiClient = const OpenIrnApiClient(),
+  });
 
-  static const _schemaVersion = 1;
-  static const _storageKey = 'openirn.localUsers';
+  static const _legacyStorageKey = 'openirn.localUsers';
+
+  final LocalSyncConfigurationRepository syncConfigurationRepository;
+  final OpenIrnApiClient apiClient;
 
   Future<List<AppUser>> loadUsers() async {
-    final preferences = await SharedPreferences.getInstance();
-    final rawPayload = preferences.getString(_storageKey);
-    if (rawPayload == null || rawPayload.trim().isEmpty) {
-      return <AppUser>[];
+    await _purgeLegacyLocalUsers();
+
+    final configuration = await syncConfigurationRepository.loadConfiguration();
+    if (!configuration.isConfigured) {
+      return const <AppUser>[];
     }
 
-    try {
-      final decoded = jsonDecode(rawPayload);
-      if (decoded is! Map<String, dynamic>) {
-        return <AppUser>[];
-      }
-      final rawUsers = decoded['users'];
-      if (rawUsers is! List) {
-        return <AppUser>[];
-      }
+    final result = await apiClient.loadUsers(
+      baseUrl: configuration.apiBaseUrl,
+      tenantId: configuration.tenantId,
+      apiToken: configuration.apiToken,
+    );
 
-      final users = <AppUser>[];
-      for (final rawUser in rawUsers) {
-        if (rawUser is! Map) {
-          continue;
-        }
-        final user = AppUser.fromJson(
-          rawUser.map((key, value) => MapEntry(key.toString(), value)),
-        );
-        if (user.id.trim().isEmpty) {
-          continue;
-        }
-        users.add(user);
-      }
-
-      users.sort((a, b) {
-        if (a.isDefaultAdministrator) {
-          return -1;
-        }
-        if (b.isDefaultAdministrator) {
-          return 1;
-        }
-        return a.displayName.toLowerCase().compareTo(
-          b.displayName.toLowerCase(),
-        );
-      });
-      return users;
-    } on FormatException {
-      return <AppUser>[];
+    if (result.isAvailable || result.status == OpenIrnApiUsersStatus.empty) {
+      return _sortUsers(result.users);
     }
+
+    throw LocalUserRepositoryException('${result.title} — ${result.message}');
   }
 
   Future<List<AppUser>> ensureDefaultUsers() async {
-    final users = await loadUsers();
-    final hasDefaultAdmin = users.any(
-      (user) => user.id == AppUser.defaultAdministratorId,
-    );
-    if (hasDefaultAdmin) {
-      return users;
-    }
-
-    final updated = <AppUser>[AppUser.defaultAdministrator(), ...users];
-    await saveUsers(updated);
-    return updated;
+    return loadUsers();
   }
 
   Future<AppUser> createUser({
@@ -78,12 +46,12 @@ class LocalUserRepository {
     required String email,
     required AppUserRole role,
   }) async {
-    final users = await ensureDefaultUsers();
+    final users = await loadUsers();
     final normalizedEmail = email.trim().toLowerCase();
     final existing = users.where((user) => user.email == normalizedEmail);
     if (existing.isNotEmpty) {
       throw const LocalUserRepositoryException(
-        'Un utilisateur avec cet email existe déjà.',
+        'Un utilisateur avec cet email existe déjà côté serveur.',
       );
     }
 
@@ -93,12 +61,12 @@ class LocalUserRepository {
       email: normalizedEmail,
       role: role,
     );
-    await saveUsers(<AppUser>[...users, user]);
+    await _replaceUsers(<AppUser>[...users, user]);
     return user;
   }
 
   Future<AppUser?> updateUser(AppUser updatedUser) async {
-    final users = await ensureDefaultUsers();
+    final users = await loadUsers();
     final now = DateTime.now().toUtc();
     AppUser? savedUser;
     final updated = <AppUser>[];
@@ -115,30 +83,66 @@ class LocalUserRepository {
     if (savedUser == null) {
       return null;
     }
-    await saveUsers(updated);
+    await _replaceUsers(updated);
     return savedUser;
   }
 
   Future<void> deleteUser({required String userId}) async {
-    if (userId == AppUser.defaultAdministratorId) {
+    final users = await loadUsers();
+    final updated = users
+        .where((user) => user.id != userId)
+        .toList(growable: false);
+    if (updated.length == users.length) {
       throw const LocalUserRepositoryException(
-        'L’administrateur local ne peut pas être supprimé.',
+        'Utilisateur introuvable côté serveur.',
       );
     }
-    final users = await ensureDefaultUsers();
-    await saveUsers(
-      users.where((user) => user.id != userId).toList(growable: false),
-    );
+    await _replaceUsers(updated);
   }
 
   Future<void> saveUsers(List<AppUser> users) async {
+    // OpenIRN est désormais server-only pour les utilisateurs : cette méthode
+    // est conservée uniquement pour compatibilité avec les anciens écrans qui
+    // réalignaient un cache local après lecture API. Elle ne persiste plus rien.
+    await _purgeLegacyLocalUsers();
+  }
+
+  Future<void> _replaceUsers(List<AppUser> users) async {
+    final configuration = await syncConfigurationRepository.loadConfiguration();
+    if (!configuration.isConfigured) {
+      throw const LocalUserRepositoryException(
+        'Synchronisation impossible : terminal non autorisé.',
+      );
+    }
+
+    final result = await apiClient.replaceUsers(
+      baseUrl: configuration.apiBaseUrl,
+      tenantId: configuration.tenantId,
+      apiToken: configuration.apiToken,
+      users: _sortUsers(users),
+    );
+
+    if (!result.isAvailable && result.status != OpenIrnApiUsersStatus.empty) {
+      throw LocalUserRepositoryException('${result.title} — ${result.message}');
+    }
+  }
+
+  List<AppUser> _sortUsers(List<AppUser> users) {
+    final sorted = users.toList();
+    sorted.sort((a, b) {
+      final activeWeightA = a.active ? 0 : 1;
+      final activeWeightB = b.active ? 0 : 1;
+      if (activeWeightA != activeWeightB) {
+        return activeWeightA.compareTo(activeWeightB);
+      }
+      return a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase());
+    });
+    return sorted;
+  }
+
+  Future<void> _purgeLegacyLocalUsers() async {
     final preferences = await SharedPreferences.getInstance();
-    final payload = <String, dynamic>{
-      'schemaVersion': _schemaVersion,
-      'updatedAt': DateTime.now().toUtc().toIso8601String(),
-      'users': <Map<String, dynamic>>[for (final user in users) user.toJson()],
-    };
-    await preferences.setString(_storageKey, jsonEncode(payload));
+    await preferences.remove(_legacyStorageKey);
   }
 }
 

@@ -1,60 +1,23 @@
-import 'dart:convert';
-
-import 'package:shared_preferences/shared_preferences.dart';
-
 import '../../domain/models/criterion_assignment.dart';
+import 'server_campaign_store.dart';
 
 class LocalCriterionAssignmentRepository {
-  const LocalCriterionAssignmentRepository();
+  final ServerCampaignStore _store;
 
-  static const _schemaVersion = 1;
-  static const _keyPrefix = 'openirn.criterionAssignments';
+  const LocalCriterionAssignmentRepository({ServerCampaignStore? store})
+    : _store = store ?? const ServerCampaignStore();
 
   Future<List<CriterionAssignment>> loadAssignments({
     required String referentialId,
     required String campaignId,
   }) async {
-    final preferences = await SharedPreferences.getInstance();
-    final rawPayload = preferences.getString(
-      _storageKey(referentialId, campaignId),
+    final bundle = await _store.loadBundle(
+      referentialId: referentialId,
+      campaignId: campaignId,
     );
-    if (rawPayload == null || rawPayload.trim().isEmpty) {
-      return <CriterionAssignment>[];
-    }
-
-    try {
-      final decoded = jsonDecode(rawPayload);
-      if (decoded is! Map<String, dynamic>) {
-        return <CriterionAssignment>[];
-      }
-      final rawAssignments = decoded['assignments'];
-      if (rawAssignments is! List) {
-        return <CriterionAssignment>[];
-      }
-
-      final assignments = <CriterionAssignment>[];
-      for (final rawAssignment in rawAssignments) {
-        if (rawAssignment is! Map) {
-          continue;
-        }
-        final assignment = CriterionAssignment.fromJson(
-          rawAssignment.map((key, value) => MapEntry(key.toString(), value)),
-        );
-        if (assignment.referentialId != referentialId ||
-            assignment.campaignId != campaignId) {
-          continue;
-        }
-        if (assignment.criterionId.trim().isEmpty ||
-            assignment.userId.trim().isEmpty) {
-          continue;
-        }
-        assignments.add(assignment);
-      }
-      assignments.sort((a, b) => a.criterionId.compareTo(b.criterionId));
-      return assignments;
-    } on FormatException {
-      return <CriterionAssignment>[];
-    }
+    return List<CriterionAssignment>.from(
+      bundle?.assignments ?? const <CriterionAssignment>[],
+    )..sort((a, b) => a.criterionId.compareTo(b.criterionId));
   }
 
   Future<Map<String, CriterionAssignment>> loadAssignmentsByCriterion({
@@ -77,46 +40,46 @@ class LocalCriterionAssignmentRepository {
     required String userId,
     String assignedByUserId = '',
   }) async {
-    final assignments = await loadAssignments(
-      referentialId: referentialId,
-      campaignId: campaignId,
-    );
     final now = DateTime.now().toUtc();
-    final existing = assignments
-        .where((assignment) => assignment.criterionId == criterionId)
-        .toList(growable: false);
-    final next = <CriterionAssignment>[];
-    CriterionAssignment savedAssignment;
+    late CriterionAssignment savedAssignment;
 
-    if (existing.isEmpty) {
-      savedAssignment = CriterionAssignment.create(
-        referentialId: referentialId,
-        campaignId: campaignId,
-        criterionId: criterionId,
-        userId: userId,
-        assignedByUserId: assignedByUserId,
-        now: now,
-      );
-      next.addAll(assignments);
-      next.add(savedAssignment);
-    } else {
-      savedAssignment = existing.first.copyWith(
-        userId: userId,
-        assignedByUserId: assignedByUserId,
-        updatedAt: now,
-      );
-      for (final assignment in assignments) {
-        next.add(
-          assignment.criterionId == criterionId ? savedAssignment : assignment,
-        );
-      }
-    }
-
-    await saveAssignments(
+    await _store.updateBundle(
       referentialId: referentialId,
       campaignId: campaignId,
-      assignments: next,
+      update: (bundle) {
+        final existing = bundle.assignments
+            .where((assignment) => assignment.criterionId == criterionId)
+            .toList(growable: false);
+        final next = <CriterionAssignment>[];
+        if (existing.isEmpty) {
+          savedAssignment = CriterionAssignment.create(
+            referentialId: referentialId,
+            campaignId: campaignId,
+            criterionId: criterionId,
+            userId: userId,
+            assignedByUserId: assignedByUserId,
+            now: now,
+          );
+          next.addAll(bundle.assignments);
+          next.add(savedAssignment);
+        } else {
+          savedAssignment = existing.first.copyWith(
+            userId: userId,
+            assignedByUserId: assignedByUserId,
+            updatedAt: now,
+          );
+          for (final assignment in bundle.assignments) {
+            next.add(
+              assignment.criterionId == criterionId
+                  ? savedAssignment
+                  : assignment,
+            );
+          }
+        }
+        return bundle.copyWith(assignments: next);
+      },
     );
+
     return savedAssignment;
   }
 
@@ -125,16 +88,14 @@ class LocalCriterionAssignmentRepository {
     required String campaignId,
     required String criterionId,
   }) async {
-    final assignments = await loadAssignments(
+    await _store.updateBundle(
       referentialId: referentialId,
       campaignId: campaignId,
-    );
-    await saveAssignments(
-      referentialId: referentialId,
-      campaignId: campaignId,
-      assignments: assignments
-          .where((assignment) => assignment.criterionId != criterionId)
-          .toList(growable: false),
+      update: (bundle) => bundle.copyWith(
+        assignments: bundle.assignments
+            .where((assignment) => assignment.criterionId != criterionId)
+            .toList(growable: false),
+      ),
     );
   }
 
@@ -143,26 +104,18 @@ class LocalCriterionAssignmentRepository {
     required String campaignId,
     required List<CriterionAssignment> assignments,
   }) async {
-    final preferences = await SharedPreferences.getInstance();
-    final payload = <String, dynamic>{
-      'schemaVersion': _schemaVersion,
-      'referentialId': referentialId,
-      'campaignId': campaignId,
-      'updatedAt': DateTime.now().toUtc().toIso8601String(),
-      'assignments': <Map<String, dynamic>>[
-        for (final assignment in assignments)
-          if (assignment.referentialId == referentialId &&
-              assignment.campaignId == campaignId)
-            assignment.toJson(),
-      ],
-    };
-    await preferences.setString(
-      _storageKey(referentialId, campaignId),
-      jsonEncode(payload),
+    await _store.updateBundle(
+      referentialId: referentialId,
+      campaignId: campaignId,
+      update: (bundle) => bundle.copyWith(
+        assignments: assignments
+            .where(
+              (assignment) =>
+                  assignment.referentialId == referentialId &&
+                  assignment.campaignId == campaignId,
+            )
+            .toList(growable: false),
+      ),
     );
-  }
-
-  String _storageKey(String referentialId, String campaignId) {
-    return '$_keyPrefix.$referentialId.$campaignId';
   }
 }

@@ -1,6 +1,5 @@
-import 'package:shared_preferences/shared_preferences.dart';
-
 import '../../domain/models/app_user.dart';
+import '../../domain/services/app_session_manager.dart';
 import 'local_user_repository.dart';
 
 class LocalSessionRepository {
@@ -8,57 +7,34 @@ class LocalSessionRepository {
     this.userRepository = const LocalUserRepository(),
   });
 
-  static const _activeUserIdKey = 'openirn.localSession.activeUserId';
-
   final LocalUserRepository userRepository;
 
   Future<AppUser> getActiveUser() async {
-    final users = await userRepository.ensureDefaultUsers();
-    final preferences = await SharedPreferences.getInstance();
-    final storedUserId = preferences.getString(_activeUserIdKey)?.trim();
-
-    for (final user in users) {
-      if (user.id == storedUserId && user.active) {
-        return user;
-      }
+    final activeUser = AppSessionManager.instance.activeUser;
+    if (activeUser != null && activeUser.active) {
+      return activeUser;
     }
 
-    final fallback = _fallbackUser(users);
-    await preferences.setString(_activeUserIdKey, fallback.id);
-    return fallback;
+    throw const LocalSessionRepositoryException(
+      'Aucune session utilisateur serveur active. Authentifie-toi avec ton profil et ton code personnel.',
+    );
   }
 
   Future<AppUser> setActiveUser(String userId) async {
-    final users = await userRepository.ensureDefaultUsers();
+    final users = await userRepository.loadUsers();
     for (final user in users) {
       if (user.id == userId && user.active) {
-        final preferences = await SharedPreferences.getInstance();
-        await preferences.setString(_activeUserIdKey, user.id);
+        AppSessionManager.instance.setActiveUser(user);
         return user;
       }
     }
     throw const LocalSessionRepositoryException(
-      'Utilisateur actif introuvable ou inactif.',
+      'Utilisateur actif introuvable côté serveur.',
     );
   }
 
   Future<void> clearActiveUser() async {
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.remove(_activeUserIdKey);
-  }
-
-  AppUser _fallbackUser(List<AppUser> users) {
-    for (final user in users) {
-      if (user.id == AppUser.defaultAdministratorId && user.active) {
-        return user;
-      }
-    }
-    for (final user in users) {
-      if (user.active) {
-        return user;
-      }
-    }
-    return AppUser.defaultAdministrator();
+    AppSessionManager.instance.clearSession();
   }
 }
 

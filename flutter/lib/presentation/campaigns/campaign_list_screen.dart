@@ -4,7 +4,6 @@ import '../../data/api/openirn_api_client.dart';
 import '../../data/repositories/local_assessment_repository.dart';
 import '../../data/repositories/local_campaign_repository.dart';
 import '../../data/repositories/local_session_repository.dart';
-import '../../data/repositories/local_user_repository.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/irn_assessment.dart';
@@ -31,7 +30,6 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
   final _campaignRepository = const LocalCampaignRepository();
   final _assessmentRepository = const LocalAssessmentRepository();
   final _sessionRepository = const LocalSessionRepository();
-  final _userRepository = const LocalUserRepository();
   final _syncConfigurationRepository = const LocalSyncConfigurationRepository();
   final _apiClient = const OpenIrnApiClient();
   final _scoringService = const OfficialRnrScoringService();
@@ -185,7 +183,10 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
     required AppUser user,
   }) async {
     if (authenticationData.source != _CampaignAuthenticationSource.server) {
-      return true;
+      _showForbidden(
+        'Authentification serveur obligatoire pour ouvrir une campagne.',
+      );
+      return false;
     }
 
     final pin = await showDialog<String>(
@@ -230,44 +231,42 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
   }
 
   Future<_CampaignAuthenticationData> _loadAuthenticatableUsers() async {
-    final localUsers = await _userRepository.ensureDefaultUsers();
     final configuration = await _syncConfigurationRepository
         .loadConfiguration();
 
-    if (configuration.isConfigured) {
-      final centralUsers = await _apiClient.loadUsers(
-        baseUrl: configuration.apiBaseUrl,
-        tenantId: configuration.tenantId,
-        apiToken: configuration.apiToken,
-      );
-
-      if (centralUsers.hasUsers) {
-        await _userRepository.saveUsers(centralUsers.users);
-        return _CampaignAuthenticationData(
-          source: _CampaignAuthenticationSource.server,
-          message:
-              '${centralUsers.message} Sélectionne ton identité puis saisis ton code personnel.',
-          users: centralUsers.users,
-          apiBaseUrl: configuration.apiBaseUrl,
-          tenantId: configuration.tenantId,
-          apiToken: configuration.apiToken,
-        );
-      }
-
-      return _CampaignAuthenticationData(
-        source: _CampaignAuthenticationSource.localFallback,
+    if (!configuration.isConfigured) {
+      return const _CampaignAuthenticationData(
+        source: _CampaignAuthenticationSource.localOnly,
         message:
-            '${centralUsers.title} — bascule temporaire sur la base utilisateurs de secours.',
-        users: localUsers,
+            'Terminal non autorisé : appaire ce terminal avant d’ouvrir une campagne.',
+        users: <AppUser>[],
       );
     }
 
-    return const _CampaignAuthenticationData(
-      source: _CampaignAuthenticationSource.localOnly,
+    final centralUsers = await _apiClient.loadUsers(
+      baseUrl: configuration.apiBaseUrl,
+      tenantId: configuration.tenantId,
+      apiToken: configuration.apiToken,
+    );
+
+    if (centralUsers.hasUsers) {
+      return _CampaignAuthenticationData(
+        source: _CampaignAuthenticationSource.server,
+        message:
+            '${centralUsers.message} Sélectionne ton identité puis saisis ton code personnel.',
+        users: centralUsers.users,
+        apiBaseUrl: configuration.apiBaseUrl,
+        tenantId: configuration.tenantId,
+        apiToken: configuration.apiToken,
+      );
+    }
+
+    return _CampaignAuthenticationData(
+      source: _CampaignAuthenticationSource.localFallback,
       message:
-          'Synchronisation non configurée : sélection dans la base utilisateurs de secours.',
-      users: <AppUser>[],
-    ).copyWith(users: localUsers);
+          '${centralUsers.title} — ${centralUsers.message}. Aucun utilisateur local de secours n’est disponible.',
+      users: const <AppUser>[],
+    );
   }
 
   @override

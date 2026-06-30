@@ -33,11 +33,16 @@ PIN_DEFAULT = os.environ.get("OPENIRN_DEFAULT_USER_PIN", "0000")
 PIN_ITERATIONS = int(os.environ.get("OPENIRN_PIN_ITERATIONS", "200000"))
 OFFICIAL_ADRI_GITLAB_API = os.environ.get("OPENIRN_ADRI_GITLAB_API", "https://gitlab.com/api/v4").rstrip("/")
 OFFICIAL_ADRI_PROJECT_PATH = os.environ.get("OPENIRN_ADRI_PROJECT_PATH", "digitalresilienceinitiative/adri-irn")
-OFFICIAL_ADRI_TREE_PATH = os.environ.get("OPENIRN_ADRI_TREE_PATH", "Grille d'évaluation IRN (FR)/xlsx")
+OFFICIAL_ADRI_TREE_PATH = os.environ.get("OPENIRN_ADRI_TREE_PATH", "Référentiel d'évaluation IRN (FR)")
 OFFICIAL_ADRI_DEFAULT_BRANCH = os.environ.get("OPENIRN_ADRI_DEFAULT_BRANCH", "main")
 OFFICIAL_ADRI_SOURCE_URL = os.environ.get("OPENIRN_ADRI_SOURCE_URL", "https://gitlab.com/digitalresilienceinitiative/adri-irn")
 OFFICIAL_ADRI_LICENSE = os.environ.get("OPENIRN_ADRI_LICENSE", "CC BY-NC-ND 4.0")
 OFFICIAL_REFERENTIAL_DIR = Path(os.environ.get("OPENIRN_REFERENTIAL_DIR", str(DATA_DIR / "referentials")))
+AUTH_ATTEMPT_WINDOW_MINUTES = int(os.environ.get("OPENIRN_AUTH_ATTEMPT_WINDOW_MINUTES", "15"))
+AUTH_MAX_FAILED_BY_DEVICE = int(os.environ.get("OPENIRN_AUTH_MAX_FAILED_BY_DEVICE", "5"))
+AUTH_MAX_FAILED_BY_USER = int(os.environ.get("OPENIRN_AUTH_MAX_FAILED_BY_USER", "5"))
+AUTH_MAX_FAILED_BY_IP = int(os.environ.get("OPENIRN_AUTH_MAX_FAILED_BY_IP", "20"))
+AUTH_ATTEMPT_RETENTION_DAYS = int(os.environ.get("OPENIRN_AUTH_ATTEMPT_RETENTION_DAYS", "30"))
 
 
 app = FastAPI(
@@ -121,14 +126,36 @@ def _secret_hash(value: str) -> str:
     return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()
 
 
-def _enrollment_code_hash(tenant_id: str, code: str) -> str:
+def _enrollment_code_hash_with_pepper(tenant_id: str, code: str, pepper: str) -> str:
     normalized = _normalize_enrollment_code(code)
-    pepper = _configured_api_token() or "openirn-device-enrollment"
     return hmac.new(
         pepper.encode("utf-8"),
         f"{tenant_id}:{normalized}".encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
+
+
+def _enrollment_code_hash(tenant_id: str, code: str) -> str:
+    pepper = _configured_api_token() or "openirn-device-enrollment"
+    return _enrollment_code_hash_with_pepper(tenant_id, code, pepper)
+
+
+def _bootstrap_enrollment_code_hash(tenant_id: str, code: str) -> str:
+    return _enrollment_code_hash_with_pepper(
+        tenant_id,
+        code,
+        "openirn-device-enrollment-bootstrap-v1",
+    )
+
+
+def _enrollment_code_hash_candidates(tenant_id: str, code: str) -> list[str]:
+    hashes = [
+        _enrollment_code_hash(tenant_id, code),
+        _bootstrap_enrollment_code_hash(tenant_id, code),
+    ]
+    fallback_hash = _enrollment_code_hash_with_pepper(tenant_id, code, "openirn-device-enrollment")
+    hashes.append(fallback_hash)
+    return list(dict.fromkeys(hashes))
 
 
 def _normalize_enrollment_code(value: Any) -> str:
@@ -148,6 +175,275 @@ def _new_enrollment_code() -> str:
 
 def _new_device_token() -> str:
     return "odt_" + secrets.token_urlsafe(36)
+
+
+def _new_session_token() -> str:
+    return "ost_" + secrets.token_urlsafe(36)
+
+
+def _is_active_session_token(provided_token: str) -> bool:
+    token_hash = _secret_hash(provided_token)
+    now = _utc_now()
+    try:
+        with _db() as con:
+            row = con.execute(
+                """
+                SELECT tenant_id, session_id, device_id, expires_at, revoked_at
+                FROM api_sessions
+                WHERE token_hash = ? AND revoked_at IS NULL
+                """,
+                (token_hash,),
+            ).fetchone()
+            if row is None:
+                return False
+            if _parse_datetime(row["expires_at"]) < now:
+                return False
+            device = con.execute(
+                """
+                SELECT 1
+                FROM authorized_devices
+                WHERE tenant_id = ? AND device_id = ?
+                  AND status = 'active' AND revoked_at IS NULL
+                """,
+                (row["tenant_id"], row["device_id"]),
+            ).fetchone()
+            if device is None:
+                return False
+            con.execute(
+                """
+                UPDATE api_sessions
+                SET last_seen_at = ?
+                WHERE tenant_id = ? AND session_id = ?
+                """,
+                (now.isoformat(), row["tenant_id"], row["session_id"]),
+            )
+            con.execute(
+                """
+                UPDATE authorized_devices
+                SET last_seen_at = ?
+                WHERE tenant_id = ? AND device_id = ?
+                """,
+                (now.isoformat(), row["tenant_id"], row["device_id"]),
+            )
+            con.commit()
+            return True
+    except sqlite3.Error:
+        return False
+
+
+def _request_has_api_authorization(request: Request) -> bool:
+    provided_token = _extract_bearer_token(request)
+    if not provided_token:
+        return False
+
+    expected_token = _configured_api_token()
+    if expected_token and hmac.compare_digest(provided_token, expected_token):
+        return True
+
+    if _is_active_session_token(provided_token):
+        return True
+
+    if _is_active_device_token(provided_token):
+        return True
+
+    return False
+
+
+def _request_device_id(request: Request, payload: dict[str, Any] | None = None) -> str:
+    header_value = request.headers.get("x-openirn-device-id", "").strip()
+    if header_value:
+        return header_value[:160]
+    if payload:
+        body_value = str(payload.get("deviceId") or "").strip()
+        if body_value:
+            return body_value[:160]
+    return ""
+
+
+def _request_client_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for", "").strip()
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip()[:80]
+    real_ip = request.headers.get("x-real-ip", "").strip()
+    if real_ip:
+        return real_ip[:80]
+    if request.client and request.client.host:
+        return request.client.host[:80]
+    return "unknown"
+
+
+def _record_auth_attempt(
+    con: sqlite3.Connection,
+    tenant_id: str,
+    *,
+    device_id: str,
+    user_id: str,
+    ip_address: str,
+    successful: bool,
+    reason: str,
+) -> None:
+    now = _utc_now()
+    retention_start = now - timedelta(days=max(1, AUTH_ATTEMPT_RETENTION_DAYS))
+    con.execute(
+        """
+        DELETE FROM auth_attempts
+        WHERE tenant_id = ? AND created_at < ?
+        """,
+        (tenant_id, retention_start.isoformat()),
+    )
+    con.execute(
+        """
+        INSERT INTO auth_attempts(
+            tenant_id, attempt_id, device_id, user_id, ip_address,
+            successful, reason, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            tenant_id,
+            "auth-" + secrets.token_urlsafe(18),
+            device_id[:160],
+            user_id[:160],
+            ip_address[:80],
+            1 if successful else 0,
+            reason[:120],
+            now.isoformat(),
+        ),
+    )
+
+
+def _recent_auth_failures(
+    con: sqlite3.Connection,
+    tenant_id: str,
+    column: str,
+    value: str,
+) -> int:
+    allowed_columns = {"device_id", "user_id", "ip_address"}
+    if column not in allowed_columns or not value:
+        return 0
+    window_start = (_utc_now() - timedelta(minutes=max(1, AUTH_ATTEMPT_WINDOW_MINUTES))).isoformat()
+    row = con.execute(
+        f"""
+        SELECT COUNT(*) AS total
+        FROM auth_attempts
+        WHERE tenant_id = ?
+          AND successful = 0
+          AND created_at >= ?
+          AND {column} = ?
+        """,
+        (tenant_id, window_start, value),
+    ).fetchone()
+    return int(row["total"] if row is not None else 0)
+
+
+def _enforce_auth_rate_limit(
+    con: sqlite3.Connection,
+    tenant_id: str,
+    *,
+    device_id: str,
+    user_id: str,
+    ip_address: str,
+) -> None:
+    checks = [
+        ("device_id", device_id, AUTH_MAX_FAILED_BY_DEVICE, "Trop de codes invalides pour ce terminal"),
+        ("user_id", user_id, AUTH_MAX_FAILED_BY_USER, "Trop de codes invalides pour ce profil"),
+        ("ip_address", ip_address, AUTH_MAX_FAILED_BY_IP, "Trop de tentatives depuis cette adresse réseau"),
+    ]
+    for column, value, limit, message in checks:
+        if limit <= 0:
+            continue
+        if _recent_auth_failures(con, tenant_id, column, value) >= limit:
+            _record_auth_attempt(
+                con,
+                tenant_id,
+                device_id=device_id,
+                user_id=user_id,
+                ip_address=ip_address,
+                successful=False,
+                reason=f"rate_limited:{column}",
+            )
+            _record_device_audit(
+                con,
+                tenant_id,
+                "auth.rate_limited",
+                device_id=device_id,
+                payload={
+                    "userId": user_id,
+                    "ipAddress": ip_address,
+                    "scope": column,
+                    "windowMinutes": AUTH_ATTEMPT_WINDOW_MINUTES,
+                    "limit": limit,
+                },
+            )
+            con.commit()
+            raise HTTPException(
+                status_code=429,
+                detail=f"{message}. Réessayez dans quelques minutes.",
+            )
+
+
+def _require_active_device(
+    request: Request,
+    tenant_id: str,
+    payload: dict[str, Any] | None = None,
+) -> str:
+    device_id = _request_device_id(request, payload)
+    if not device_id:
+        raise HTTPException(status_code=401, detail="Missing OpenIRN device id")
+    now = _utc_now().isoformat()
+    with _db() as con:
+        row = con.execute(
+            """
+            SELECT 1
+            FROM authorized_devices
+            WHERE tenant_id = ? AND device_id = ?
+              AND status = 'active' AND revoked_at IS NULL
+            """,
+            (tenant_id, device_id),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=403, detail="Terminal non autorisé ou révoqué")
+        con.execute(
+            """
+            UPDATE authorized_devices
+            SET last_seen_at = ?
+            WHERE tenant_id = ? AND device_id = ?
+            """,
+            (now, tenant_id, device_id),
+        )
+        con.commit()
+    return device_id
+
+
+def _create_api_session(
+    con: sqlite3.Connection,
+    tenant_id: str,
+    device_id: str,
+    user_id: str,
+    ttl_hours: int = 8,
+) -> tuple[str, str, datetime]:
+    token = _new_session_token()
+    session_id = "session-" + secrets.token_urlsafe(18)
+    now = _utc_now()
+    expires_at = now + timedelta(hours=ttl_hours)
+    con.execute(
+        """
+        INSERT INTO api_sessions(
+            tenant_id, session_id, token_hash, device_id, user_id,
+            created_at, expires_at, last_seen_at, revoked_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+        """,
+        (
+            tenant_id,
+            session_id,
+            _secret_hash(token),
+            device_id,
+            user_id,
+            now.isoformat(),
+            expires_at.isoformat(),
+            now.isoformat(),
+        ),
+    )
+    return session_id, token, expires_at
 
 
 def _is_active_device_token(provided_token: str) -> bool:
@@ -180,21 +476,28 @@ def _is_active_device_token(provided_token: str) -> bool:
 
 
 def _require_api_token(request: Request) -> None:
-    provided_token = _extract_bearer_token(request)
-    if not provided_token:
-        raise HTTPException(status_code=401, detail="Missing Bearer token")
-
-    expected_token = _configured_api_token()
-    if expected_token and hmac.compare_digest(provided_token, expected_token):
+    if _request_has_api_authorization(request):
         return
 
-    if _is_active_device_token(provided_token):
-        return
-
-    if not expected_token:
+    if not _configured_api_token():
         raise HTTPException(status_code=503, detail="OpenIRN API token is not configured on the server")
 
-    raise HTTPException(status_code=403, detail="Invalid API token")
+    raise HTTPException(status_code=403, detail="Invalid API token or expired session")
+
+
+def _require_sync_read_access(request: Request, tenant_id: str) -> None:
+    """Authorize read-only synchronization endpoints.
+
+    OpenIRN v0.3.x is migrating away from persistent client-side secrets.
+    Background connectivity checks and SSE listeners therefore must be allowed
+    for an enrolled, active terminal identified by X-OpenIRN-Device-Id, even
+    when no short-lived user session is currently stored in memory.
+    Mutating endpoints continue to require a bearer/session token.
+    """
+    if _request_has_api_authorization(request):
+        return
+
+    _require_active_device(request, tenant_id)
 
 
 def _pin_hash(pin: str, salt: str, iterations: int = PIN_ITERATIONS) -> str:
@@ -356,7 +659,7 @@ def _list_devices(con: sqlite3.Connection, tenant_id: str) -> list[dict[str, Any
 
 ADRI_PILLAR_RE = re.compile(r"^RES-[1-8]$")
 ADRI_CRITERION_RE = re.compile(r"^(RES-[1-8])([.-])([0-9]+)$")
-ADRI_VERSION_RE = re.compile(r"Questionnaire_IRN_v\.([0-9]+(?:\.[0-9]+)*)\.xlsx$", re.IGNORECASE)
+ADRI_VERSION_RE = re.compile(r"(?:Questionnaire_IRN|Référentiel\s+IRN)_v\.?([0-9]+(?:\.[0-9]+)*)\.xlsx$", re.IGNORECASE)
 
 ADRI_DEFAULT_PILLAR_LABELS = {
     "RES-1": "Résilience stratégique",
@@ -644,42 +947,103 @@ def _gitlab_request_bytes(path: str, query: dict[str, str] | None = None) -> byt
         raise HTTPException(status_code=502, detail=f"GitLab est injoignable: {exc.reason}") from exc
 
 
+def _gitlab_repository_tree(
+    project_id: str,
+    *,
+    tree_path: str,
+    ref: str,
+    recursive: bool = False,
+) -> list[dict[str, Any]]:
+    query = {
+        "ref": ref,
+        "per_page": "100",
+    }
+    if tree_path:
+        query["path"] = tree_path
+    if recursive:
+        query["recursive"] = "true"
+
+    tree = _gitlab_request_json(
+        f"/projects/{project_id}/repository/tree",
+        query,
+    )
+    if not isinstance(tree, list):
+        raise HTTPException(status_code=502, detail="Réponse GitLab repository/tree invalide")
+    return [item for item in tree if isinstance(item, dict)]
+
+
 def _official_remote_latest() -> dict[str, Any]:
     project_id = _gitlab_quote(OFFICIAL_ADRI_PROJECT_PATH)
     project = _gitlab_request_json(f"/projects/{project_id}")
     default_branch = str(project.get("default_branch") or OFFICIAL_ADRI_DEFAULT_BRANCH)
-    tree = _gitlab_request_json(
-        f"/projects/{project_id}/repository/tree",
-        {
-            "path": OFFICIAL_ADRI_TREE_PATH,
-            "ref": default_branch,
-            "per_page": "100",
-        },
-    )
-    if not isinstance(tree, list):
-        raise HTTPException(status_code=502, detail="Réponse GitLab repository/tree invalide")
 
+    candidate_tree_paths = [
+        OFFICIAL_ADRI_TREE_PATH,
+        "Référentiel d'évaluation IRN (FR)",
+        "Grille d'évaluation IRN (FR)/xlsx",
+        "",
+    ]
+
+    seen_paths: set[str] = set()
     candidates: list[dict[str, Any]] = []
-    for item in tree:
-        if not isinstance(item, dict) or item.get("type") != "blob":
+    last_error: HTTPException | None = None
+
+    for tree_path in candidate_tree_paths:
+        if tree_path in seen_paths:
             continue
-        name = str(item.get("name") or "")
-        if not ADRI_VERSION_RE.search(name):
-            continue
-        version = _adri_version_from_filename(name)
-        file_path = str(item.get("path") or "")
-        candidates.append({
-            "version": version,
-            "fileName": name,
-            "filePath": file_path,
-            "blobId": str(item.get("id") or ""),
-            "defaultBranch": default_branch,
-            "projectPath": OFFICIAL_ADRI_PROJECT_PATH,
-            "sourceUrl": OFFICIAL_ADRI_SOURCE_URL,
-            "webUrl": f"{OFFICIAL_ADRI_SOURCE_URL}/-/blob/{urllib.parse.quote(default_branch, safe='')}/{urllib.parse.quote(file_path)}",
-        })
+        seen_paths.add(tree_path)
+
+        try:
+            tree = _gitlab_repository_tree(
+                project_id,
+                tree_path=tree_path,
+                ref=default_branch,
+                recursive=True,
+            )
+        except HTTPException as exc:
+            last_error = exc
+            detail = str(exc.detail)
+            if "HTTP 404" in detail or exc.status_code == 404:
+                continue
+            raise
+
+        for item in tree:
+            if item.get("type") != "blob":
+                continue
+            name = str(item.get("name") or "")
+            if not ADRI_VERSION_RE.search(name):
+                continue
+            version = _adri_version_from_filename(name)
+            file_path = str(item.get("path") or "")
+            candidates.append({
+                "version": version,
+                "fileName": name,
+                "filePath": file_path,
+                "blobId": str(item.get("id") or ""),
+                "defaultBranch": default_branch,
+                "projectPath": OFFICIAL_ADRI_PROJECT_PATH,
+                "sourceUrl": OFFICIAL_ADRI_SOURCE_URL,
+                "webUrl": f"{OFFICIAL_ADRI_SOURCE_URL}/-/blob/{urllib.parse.quote(default_branch, safe='')}/{urllib.parse.quote(file_path)}",
+            })
+
+        if candidates:
+            break
+
     if not candidates:
-        raise HTTPException(status_code=404, detail="Aucun Questionnaire_IRN_v*.xlsx trouvé dans le dépôt aDRI")
+        if last_error is not None:
+            detail = str(last_error.detail)
+            if "HTTP 404" in detail:
+                detail = (
+                    "Le chemin GitLab configuré pour le référentiel aDRI est introuvable. "
+                    "Le dépôt officiel utilise maintenant le dossier "
+                    "Référentiel d'évaluation IRN (FR)/V1. "
+                    "Vérifiez OPENIRN_ADRI_TREE_PATH si cette variable est définie."
+                )
+                raise HTTPException(status_code=404, detail=detail) from last_error
+        raise HTTPException(
+            status_code=404,
+            detail="Aucun fichier Référentiel IRN_v*.xlsx ou Questionnaire_IRN_v*.xlsx trouvé dans le dépôt aDRI",
+        )
     candidates.sort(key=lambda item: _adri_version_key(str(item.get("version") or "")), reverse=True)
     return candidates[0]
 
@@ -1781,18 +2145,19 @@ async def devices_enrollment_consume(request: Request) -> dict[str, Any]:
     device_name = str(payload.get("deviceName") or "").strip()[:120] or "Terminal OpenIRN"
     platform = str(payload.get("platform") or "").strip()[:80]
     now = _utc_now()
-    code_hash = _enrollment_code_hash(tenant_id, code)
+    code_hashes = _enrollment_code_hash_candidates(tenant_id, code)
+    placeholders = ", ".join("?" for _ in code_hashes)
 
     with _db() as con:
         _ensure_tenant(con, tenant_id)
         enrollment = con.execute(
-            """
+            f"""
             SELECT tenant_id, enrollment_id, created_by_user_id, label,
                    expires_at, consumed_at, consumed_by_device_id, created_at
             FROM device_enrollment_codes
-            WHERE tenant_id = ? AND code_hash = ?
+            WHERE tenant_id = ? AND code_hash IN ({placeholders})
             """,
-            (tenant_id, code_hash),
+            (tenant_id, *code_hashes),
         ).fetchone()
         if enrollment is None:
             raise HTTPException(status_code=404, detail="Unknown enrollment code")
@@ -1834,7 +2199,7 @@ async def devices_enrollment_consume(request: Request) -> dict[str, Any]:
         "status": "ok",
         "type": "openirn.deviceEnrollmentConsumed",
         "tenantId": tenant_id,
-        "apiToken": token,
+        "apiToken": "",
         "device": device,
         "serverTime": _utc_now().isoformat(),
     }
@@ -1969,8 +2334,9 @@ def official_referential_current(
     request: Request,
     tenantId: str = Query(default="default", min_length=1, max_length=80),
 ) -> dict[str, Any]:
-    _require_api_token(request)
     tenant_id = _safe_segment(tenantId, "default")
+    if not _request_has_api_authorization(request):
+        _require_active_device(request, tenant_id)
     with _db() as con:
         current_row = _load_current_official_referential(con, tenant_id)
         if current_row is None:
@@ -2087,6 +2453,8 @@ def health() -> dict[str, Any]:
         "endpoints": [
             "/health",
             "/auth/verify",
+            "/auth/sessions",
+            "/security/audit",
             "/users",
             "/users/replace",
             "/users/pin",
@@ -2219,8 +2587,6 @@ async def sync_push(request: Request) -> dict[str, Any]:
 
 @app.post("/auth/verify")
 async def auth_verify(request: Request) -> dict[str, Any]:
-    _require_api_token(request)
-
     try:
         payload = await request.json()
     except json.JSONDecodeError as exc:
@@ -2232,6 +2598,8 @@ async def auth_verify(request: Request) -> dict[str, Any]:
     tenant_id = _safe_segment(payload.get("tenantId"), "default")
     user_id = str(payload.get("userId") or "").strip()
     pin = str(payload.get("pin") or "")
+    device_id = _require_active_device(request, tenant_id, payload)
+    ip_address = _request_client_ip(request)
     if not user_id:
         raise HTTPException(status_code=400, detail="Missing userId")
     if not pin.strip():
@@ -2239,18 +2607,98 @@ async def auth_verify(request: Request) -> dict[str, Any]:
 
     with _db() as con:
         _ensure_tenant(con, tenant_id)
+        _enforce_auth_rate_limit(
+            con,
+            tenant_id,
+            device_id=device_id,
+            user_id=user_id,
+            ip_address=ip_address,
+        )
         users = _load_central_users(con, tenant_id)
         _ensure_user_credentials(con, tenant_id, users)
         con.commit()
         user = next((candidate for candidate in users if candidate.get("id") == user_id), None)
         if user is None:
+            _record_auth_attempt(
+                con,
+                tenant_id,
+                device_id=device_id,
+                user_id=user_id,
+                ip_address=ip_address,
+                successful=False,
+                reason="unknown_user",
+            )
+            _record_device_audit(
+                con,
+                tenant_id,
+                "auth.failed",
+                device_id=device_id,
+                payload={"userId": user_id, "reason": "unknown_user", "ipAddress": ip_address},
+            )
+            con.commit()
             raise HTTPException(status_code=404, detail="Unknown user")
         if user.get("active") is not True:
+            _record_auth_attempt(
+                con,
+                tenant_id,
+                device_id=device_id,
+                user_id=user_id,
+                ip_address=ip_address,
+                successful=False,
+                reason="inactive_user",
+            )
+            _record_device_audit(
+                con,
+                tenant_id,
+                "auth.failed",
+                device_id=device_id,
+                payload={"userId": user_id, "reason": "inactive_user", "ipAddress": ip_address},
+            )
+            con.commit()
             raise HTTPException(status_code=403, detail="Inactive user")
         accepted, requires_change = _verify_user_pin(con, tenant_id, user_id, pin)
-
-    if not accepted:
-        raise HTTPException(status_code=403, detail="Invalid user code")
+        if not accepted:
+            _record_auth_attempt(
+                con,
+                tenant_id,
+                device_id=device_id,
+                user_id=user_id,
+                ip_address=ip_address,
+                successful=False,
+                reason="invalid_pin",
+            )
+            _record_device_audit(
+                con,
+                tenant_id,
+                "auth.failed",
+                device_id=device_id,
+                payload={"userId": user_id, "reason": "invalid_pin", "ipAddress": ip_address},
+            )
+            con.commit()
+            raise HTTPException(status_code=403, detail="Invalid user code")
+        session_id, session_token, expires_at = _create_api_session(
+            con,
+            tenant_id,
+            device_id,
+            user_id,
+        )
+        _record_auth_attempt(
+            con,
+            tenant_id,
+            device_id=device_id,
+            user_id=user_id,
+            ip_address=ip_address,
+            successful=True,
+            reason="accepted",
+        )
+        _record_device_audit(
+            con,
+            tenant_id,
+            "session.created",
+            device_id=device_id,
+            payload={"userId": user_id, "sessionId": session_id, "ipAddress": ip_address},
+        )
+        con.commit()
 
     return {
         "status": "accepted",
@@ -2262,13 +2710,285 @@ async def auth_verify(request: Request) -> dict[str, Any]:
         "userId": user_id,
         "mustChangePin": requires_change,
         "user": user,
+        "sessionId": session_id,
+        "apiToken": session_token,
+        "expiresAt": expires_at.isoformat(),
+    }
+
+
+
+def _session_row_to_payload(row: sqlite3.Row, *, current_token_hash: str = '') -> dict[str, Any]:
+    now = _utc_now()
+    expires_at = _parse_datetime(row["expires_at"])
+    revoked_at_raw = row["revoked_at"]
+    revoked_at = _parse_datetime(revoked_at_raw) if revoked_at_raw else None
+    if revoked_at is not None:
+        status = "revoked"
+    elif expires_at < now:
+        status = "expired"
+    else:
+        status = "active"
+
+    user_payload = _parse_json(row["user_payload_json"], {})
+    first_name = str(user_payload.get("firstName") or user_payload.get("first_name") or "").strip()
+    last_name = str(user_payload.get("lastName") or user_payload.get("last_name") or "").strip()
+    full_name = " ".join(part for part in (first_name, last_name) if part).strip()
+    email = str(user_payload.get("email") or "").strip()
+    role = str(user_payload.get("role") or row["user_role"] or "").strip()
+
+    return {
+        "sessionId": row["session_id"],
+        "tenantId": row["tenant_id"],
+        "deviceId": row["device_id"],
+        "deviceName": row["device_name"] or row["device_id"],
+        "devicePlatform": row["device_platform"] or "",
+        "userId": row["user_id"],
+        "userDisplayName": full_name or email or row["user_id"],
+        "userEmail": email,
+        "userRole": role,
+        "status": status,
+        "isCurrentSession": bool(current_token_hash and hmac.compare_digest(row["token_hash"], current_token_hash)),
+        "createdAt": row["created_at"],
+        "expiresAt": row["expires_at"],
+        "lastSeenAt": row["last_seen_at"],
+        "revokedAt": row["revoked_at"],
+    }
+
+
+
+@app.get("/security/audit")
+def security_audit(
+    request: Request,
+    tenantId: str = Query(default="default", min_length=1, max_length=80),
+    limit: int = Query(default=100, ge=25, le=500),
+    includeAuthAttempts: bool = Query(default=True),
+    includeDeviceAudit: bool = Query(default=True),
+) -> dict[str, Any]:
+    tenant_id = _safe_segment(tenantId, "default")
+    _require_api_token(request)
+    safe_limit = max(25, min(int(limit), 500))
+    events: list[dict[str, Any]] = []
+
+    with _db() as con:
+        _ensure_tenant(con, tenant_id)
+        if includeDeviceAudit:
+            audit_rows = con.execute(
+                """
+                SELECT id, tenant_id, device_id, event_type, created_at, payload_json
+                FROM device_audit_log
+                WHERE tenant_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (tenant_id, safe_limit),
+            ).fetchall()
+            for row in audit_rows:
+                events.append(
+                    {
+                        "source": "deviceAudit",
+                        "eventId": f"audit-{row['id']}",
+                        "tenantId": row["tenant_id"],
+                        "deviceId": row["device_id"] or "",
+                        "eventType": row["event_type"] or "",
+                        "createdAt": row["created_at"],
+                        "payload": _parse_json(row["payload_json"], {}),
+                    }
+                )
+
+        if includeAuthAttempts:
+            attempt_rows = con.execute(
+                """
+                SELECT
+                    tenant_id, attempt_id, device_id, user_id, ip_address,
+                    successful, reason, created_at
+                FROM auth_attempts
+                WHERE tenant_id = ?
+                ORDER BY created_at DESC, attempt_id DESC
+                LIMIT ?
+                """,
+                (tenant_id, safe_limit),
+            ).fetchall()
+            for row in attempt_rows:
+                events.append(
+                    {
+                        "source": "authAttempt",
+                        "eventId": row["attempt_id"],
+                        "tenantId": row["tenant_id"],
+                        "deviceId": row["device_id"] or "",
+                        "eventType": "auth.success" if bool(row["successful"]) else "auth.failed",
+                        "createdAt": row["created_at"],
+                        "userId": row["user_id"] or "",
+                        "ipAddress": row["ip_address"] or "",
+                        "successful": bool(row["successful"]),
+                        "reason": row["reason"] or "",
+                        "payload": {
+                            "reason": row["reason"] or "",
+                            "successful": bool(row["successful"]),
+                        },
+                    }
+                )
+
+    events.sort(key=lambda item: str(item.get("createdAt") or ""), reverse=True)
+    events = events[:safe_limit]
+    auth_count = sum(1 for event in events if event.get("source") == "authAttempt")
+    device_count = sum(1 for event in events if event.get("source") == "deviceAudit")
+    failure_count = sum(1 for event in events if event.get("successful") is False)
+
+    return {
+        "status": "ok",
+        "type": "openirn.securityAudit",
+        "application": "OpenIRN API",
+        "version": APP_VERSION,
+        "tenantId": tenant_id,
+        "serverTime": _utc_now().isoformat(),
+        "eventCount": len(events),
+        "authAttemptCount": auth_count,
+        "deviceAuditCount": device_count,
+        "failureCount": failure_count,
+        "events": events,
+    }
+
+
+@app.get("/auth/sessions")
+def auth_sessions(
+    request: Request,
+    tenantId: str = Query(default="default", min_length=1, max_length=80),
+    includeInactive: bool = Query(default=True),
+) -> dict[str, Any]:
+    tenant_id = _safe_segment(tenantId, "default")
+    _require_api_token(request)
+    provided_token = _extract_bearer_token(request)
+    current_token_hash = _secret_hash(provided_token) if provided_token.startswith("ost_") else ""
+    now_iso = _utc_now().isoformat()
+
+    where_inactive = "" if includeInactive else "AND s.revoked_at IS NULL AND s.expires_at >= ?"
+    params: tuple[Any, ...]
+    if includeInactive:
+        params = (tenant_id,)
+    else:
+        params = (tenant_id, now_iso)
+
+    with _db() as con:
+        _ensure_tenant(con, tenant_id)
+        rows = con.execute(
+            f"""
+            SELECT
+                s.tenant_id,
+                s.session_id,
+                s.token_hash,
+                s.device_id,
+                s.user_id,
+                s.created_at,
+                s.expires_at,
+                s.last_seen_at,
+                s.revoked_at,
+                d.name AS device_name,
+                d.platform AS device_platform,
+                u.role AS user_role,
+                u.payload_json AS user_payload_json
+            FROM api_sessions s
+            LEFT JOIN authorized_devices d
+              ON d.tenant_id = s.tenant_id AND d.device_id = s.device_id
+            LEFT JOIN users u
+              ON u.tenant_id = s.tenant_id AND u.user_id = s.user_id
+            WHERE s.tenant_id = ?
+              {where_inactive}
+            ORDER BY
+              CASE WHEN s.revoked_at IS NULL AND s.expires_at >= ? THEN 0 ELSE 1 END,
+              s.last_seen_at DESC,
+              s.created_at DESC
+            LIMIT 250
+            """,
+            params + (now_iso,),
+        ).fetchall()
+
+    sessions = [
+        _session_row_to_payload(row, current_token_hash=current_token_hash)
+        for row in rows
+    ]
+    active_count = sum(1 for session in sessions if session["status"] == "active")
+    expired_count = sum(1 for session in sessions if session["status"] == "expired")
+    revoked_count = sum(1 for session in sessions if session["status"] == "revoked")
+
+    return {
+        "status": "ok",
+        "type": "openirn.apiSessions",
+        "application": "OpenIRN API",
+        "version": APP_VERSION,
+        "tenantId": tenant_id,
+        "serverTime": _utc_now().isoformat(),
+        "sessionCount": len(sessions),
+        "activeCount": active_count,
+        "expiredCount": expired_count,
+        "revokedCount": revoked_count,
+        "sessions": sessions,
+    }
+
+
+@app.delete("/auth/sessions/{session_id}")
+def revoke_auth_session(
+    session_id: str,
+    request: Request,
+    tenantId: str = Query(default="default", min_length=1, max_length=80),
+) -> dict[str, Any]:
+    tenant_id = _safe_segment(tenantId, "default")
+    safe_session_id = str(session_id or "").strip()[:160]
+    if not safe_session_id:
+        raise HTTPException(status_code=400, detail="Missing session id")
+    _require_api_token(request)
+    provided_token = _extract_bearer_token(request)
+    current_token_hash = _secret_hash(provided_token) if provided_token.startswith("ost_") else ""
+    now = _utc_now()
+
+    with _db() as con:
+        _ensure_tenant(con, tenant_id)
+        row = con.execute(
+            """
+            SELECT session_id, token_hash, device_id, user_id, revoked_at
+            FROM api_sessions
+            WHERE tenant_id = ? AND session_id = ?
+            """,
+            (tenant_id, safe_session_id),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Session inconnue")
+        if current_token_hash and hmac.compare_digest(row["token_hash"], current_token_hash):
+            raise HTTPException(status_code=400, detail="La session courante ne peut pas être révoquée depuis cette action")
+        if row["revoked_at"] is None:
+            con.execute(
+                """
+                UPDATE api_sessions
+                SET revoked_at = ?
+                WHERE tenant_id = ? AND session_id = ?
+                """,
+                (now.isoformat(), tenant_id, safe_session_id),
+            )
+            _record_device_audit(
+                con,
+                tenant_id,
+                "session.revoked",
+                device_id=row["device_id"],
+                payload={"sessionId": safe_session_id, "userId": row["user_id"]},
+            )
+            con.commit()
+
+    return {
+        "status": "ok",
+        "type": "openirn.apiSessionRevoked",
+        "application": "OpenIRN API",
+        "version": APP_VERSION,
+        "tenantId": tenant_id,
+        "serverTime": _utc_now().isoformat(),
+        "sessionId": safe_session_id,
+        "message": "Session révoquée.",
     }
 
 
 @app.get("/users")
 def users(request: Request, tenantId: str = Query(default="default", min_length=1, max_length=80)) -> dict[str, Any]:
-    _require_api_token(request)
     tenant_id = _safe_segment(tenantId, "default")
+    if not _request_has_api_authorization(request):
+        _require_active_device(request, tenant_id)
 
     with _db() as con:
         _ensure_tenant(con, tenant_id)
@@ -2369,8 +3089,8 @@ async def users_pin(request: Request) -> dict[str, Any]:
 
 @app.get("/sync/status")
 def sync_status(request: Request, tenantId: str = Query(default="default", min_length=1, max_length=80)) -> dict[str, Any]:
-    _require_api_token(request)
     tenant_id = _safe_segment(tenantId, "default")
+    _require_sync_read_access(request, tenant_id)
 
     with _db() as con:
         latest_row = con.execute(
@@ -2427,8 +3147,8 @@ def sync_pull(
     tenantId: str = Query(default="default", min_length=1, max_length=80),
     limit: int = Query(default=10, ge=1, le=50),
 ) -> dict[str, Any]:
-    _require_api_token(request)
     tenant_id = _safe_segment(tenantId, "default")
+    _require_sync_read_access(request, tenant_id)
 
     with _db() as con:
         rows = con.execute(
@@ -2468,8 +3188,8 @@ def campaigns(
     tenantId: str = Query(default="default", min_length=1, max_length=80),
     limit: int = Query(default=100, ge=1, le=500),
 ) -> dict[str, Any]:
-    _require_api_token(request)
     tenant_id = _safe_segment(tenantId, "default")
+    _require_sync_read_access(request, tenant_id)
 
     with _db() as con:
         rows = con.execute(
@@ -2946,8 +3666,8 @@ async def sync_events(
     since: str = Query(default="", max_length=120),
     interval: float = Query(default=2.0, ge=1.0, le=30.0),
 ) -> StreamingResponse:
-    _require_api_token(request)
     tenant_id = _safe_segment(tenantId, "default")
+    _require_sync_read_access(request, tenant_id)
     last_server_sync_id = str(since or "").strip()
 
     async def event_stream():

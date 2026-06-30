@@ -6,8 +6,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  setUp(() {
+  setUp(() async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
+    await const LocalSyncLogRepository().clear();
   });
 
   test('stores sync log events newest first', () async {

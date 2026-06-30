@@ -6,16 +6,12 @@ import 'package:flutter/services.dart';
 
 import '../../data/api/openirn_api_client.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
-import '../../domain/models/irn_referential.dart';
 import '../../domain/models/sync_configuration.dart';
-import '../../domain/services/app_sync_coordinator.dart';
 import '../common/openirn_app_bar.dart';
 import '../common/responsive_autofocus.dart';
 
 class DeviceEnrollmentScreen extends StatefulWidget {
-  final IrnReferential referential;
-
-  const DeviceEnrollmentScreen({required this.referential, super.key});
+  const DeviceEnrollmentScreen({super.key});
 
   @override
   State<DeviceEnrollmentScreen> createState() => _DeviceEnrollmentScreenState();
@@ -105,9 +101,8 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
       return;
     }
 
-    final token = result.apiToken.trim();
     final deviceId = result.device?.deviceId.trim() ?? '';
-    if (token.isEmpty || deviceId.isEmpty) {
+    if (deviceId.isEmpty) {
       setState(() {
         _working = false;
         _enrollmentResult = OpenIrnApiEnrollmentResult(
@@ -116,7 +111,7 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
           statusCode: result.statusCode,
           title: 'Réponse serveur incomplète',
           message:
-              'Le serveur a accepté le code, mais n’a pas retourné de jeton terminal complet.',
+              'Le serveur a accepté le code, mais n’a pas retourné l’identifiant du terminal.',
           tenantId: result.tenantId,
           enrollmentId: result.enrollmentId,
           code: '',
@@ -135,14 +130,11 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
       tenantId: result.tenantId,
       deviceId: deviceId,
       enabled: true,
-      apiToken: token,
+      apiToken: '',
     );
     final saved = await _configurationRepository.saveConfiguration(
       configuration,
     );
-
-    AppSyncCoordinator.instance.start(referential: widget.referential);
-    await AppSyncCoordinator.instance.pullLatestNow();
 
     if (!mounted) {
       return;
@@ -156,7 +148,9 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Terminal autorisé. Synchronisation initiale lancée.'),
+        content: Text(
+          'Terminal autorisé. Le référentiel serveur va être chargé.',
+        ),
       ),
     );
     Navigator.of(context).pop(true);

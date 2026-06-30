@@ -166,16 +166,6 @@ class _SyncScreenState extends State<SyncScreen> {
   }
 
   Future<void> _saveConfiguration() async {
-    if (_enabled && _apiTokenController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Autorise ce terminal avec un code d’appairage avant d’activer la synchronisation.',
-          ),
-        ),
-      );
-      return;
-    }
     if (_apiTokenController.text.trim().isNotEmpty &&
         _apiTokenController.text.trim().length < 16) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1509,7 +1499,7 @@ class _ConfigurationCard extends StatelessWidget {
                 children: [
                   const Text(
                     'L’usage normal est l’autorisation par code d’appairage depuis Administration → Terminaux autorisés. '
-                    'La saisie manuelle du bearer reste disponible pour récupérer un environnement ou migrer un ancien terminal.',
+                    'La saisie manuelle du bearer reste disponible pour récupérer un environnement ou migrer un ancien terminal. Le bearer n’est conservé qu’en mémoire et disparaît à la fermeture de l’application.',
                   ),
                   const SizedBox(height: 10),
                   TextFormField(
@@ -1522,7 +1512,7 @@ class _ConfigurationCard extends StatelessWidget {
                     decoration: InputDecoration(
                       labelText: 'Bearer / jeton serveur',
                       helperText:
-                          'Masqué dans l’usage normal. Ne pas transmettre aux utilisateurs.',
+                          'Session courante uniquement : non stocké localement.',
                       border: const OutlineInputBorder(),
                       suffixIcon: IconButton(
                         tooltip: obscureApiToken
