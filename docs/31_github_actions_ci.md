@@ -1,20 +1,20 @@
 # GitHub Actions CI
 
-This patch adds the first CI layer for OpenIRN.
+Cette documentation décrit les contrôles CI de qualité et de publication du dépôt OpenIRN.
 
 ## Workflows
 
 ### Flutter CI
 
-File:
+Fichier :
 
 ```text
 .github/workflows/flutter_ci.yml
 ```
 
-The workflow runs on every push and pull request targeting `main` or `master`.
+Le workflow s’exécute à chaque push et pull request vers `main` ou `master`.
 
-It executes:
+Il lance :
 
 ```bash
 cd flutter
@@ -24,39 +24,35 @@ flutter analyze
 flutter test
 ```
 
-The workflow intentionally does not build platform artifacts yet. Build jobs for Android, iOS, macOS, and Windows will be added later, once packaging/signing choices are stable.
-
 ### Open source readiness
 
-File:
+Fichier :
 
 ```text
 .github/workflows/open_source_readiness.yml
 ```
 
-This workflow runs:
+Ce workflow lance :
 
 ```bash
 ./tools/check_open_source_readiness.sh
 ```
 
-Its role is to prevent accidental publication of generated referential files, private campaign exports, internal Excel files, or secrets.
+Son rôle est d’éviter la publication accidentelle de fichiers temporaires, de métadonnées OS, de fichiers de travail référentiel, d’exports de campagnes, de données internes ou de secrets.
 
 ## Dependabot
 
-File:
+Fichier :
 
 ```text
 .github/dependabot.yml
 ```
 
-Dependabot checks weekly for updates to:
+Dependabot vérifie chaque semaine les mises à jour de :
 
-- GitHub Actions;
-- Flutter/Dart dependencies in `flutter/pubspec.yaml`.
+- GitHub Actions ;
+- dépendances Flutter/Dart dans `flutter/pubspec.yaml`.
 
 ## Notes
 
-The official aDRI IRN referential files should not be committed to the public OpenIRN repository. CI assumes tests use fixtures and generated/public-safe assets only.
-
-The first CI target is repository quality. Release builds and signed artifacts should be added in a later milestone.
+La CI ne remplace pas la relecture manuelle de `git status` avant publication. Elle sert de filet de sécurité pour les erreurs récurrentes : `.DS_Store`, swaps d’éditeur, `.tmp/`, fichiers de travail ou secrets.

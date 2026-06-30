@@ -1,13 +1,8 @@
 # GitHub Release workflow
 
-Patch 035 adds a release workflow for OpenIRN.
+Le workflow de release construit et publie les artefacts OpenIRN lorsqu’un tag `v*` est poussé ou lorsque le workflow est lancé manuellement depuis GitHub Actions.
 
-The workflow builds and publishes release artifacts when:
-
-- a tag matching `v*` is pushed, for example `v0.1.0`;
-- the workflow is launched manually from the GitHub Actions tab.
-
-## Produced artifacts
+## Artefacts produits
 
 - `openirn-android.apk`
 - `openirn-macos.zip`
@@ -15,41 +10,42 @@ The workflow builds and publishes release artifacts when:
 - `openirn-ios-no-codesign.zip`
 - `SHA256SUMS.txt`
 
-## Current distribution status
+## Statut de distribution
 
-These artifacts are useful for validation and early distribution, but they are not yet store-ready:
+Ces artefacts sont utiles pour validation et diffusion contrôlée, mais ils ne sont pas encore prêts pour les stores :
 
-- Android APK is not configured for Play Store signing.
-- macOS app is not signed or notarized.
-- Windows artifact is a ZIP, not an MSIX installer.
-- iOS build is generated with `--no-codesign`.
+- l’APK Android n’est pas configuré pour une signature Play Store ;
+- l’application macOS n’est pas signée/notarisée ;
+- l’artefact Windows est un ZIP, pas un installateur MSIX ;
+- le build iOS est généré avec `--no-codesign`.
 
-## Creating the first release
+## Créer une release
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.5.0
+git push origin v0.5.0
 ```
 
-GitHub Actions will build the artifacts and attach them to a GitHub release.
+GitHub Actions construit les artefacts et les attache à la release GitHub.
 
-## Manual release
+## Lancement manuel
 
-In GitHub:
+Dans GitHub :
 
-1. Go to **Actions**.
-2. Open **Release**.
-3. Click **Run workflow**.
-4. Enter a tag such as `v0.1.0`.
-5. Choose whether the release is a pre-release.
+1. ouvrir **Actions** ;
+2. ouvrir **Release** ;
+3. cliquer **Run workflow** ;
+4. saisir un tag, par exemple `v0.5.0` ;
+5. choisir si la release est une pré-release.
 
-## Security / licensing note
+## Sécurité / publication
 
-The release workflow must not package:
+Le workflow lance `tools/check_open_source_readiness.sh` avant construction.
 
-- the official aDRI IRN spreadsheet;
-- generated canonical referential JSON files;
-- private campaign exports;
-- internal enterprise data.
+Une release ne doit pas embarquer :
 
-The validation job runs `tools/check_open_source_readiness.sh` before building artifacts.
+- fichiers temporaires ou métadonnées OS ;
+- fichiers de travail du référentiel ;
+- exports de campagnes privées ;
+- données internes d’entreprise ;
+- secrets ou certificats.

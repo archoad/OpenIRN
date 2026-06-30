@@ -1,10 +1,10 @@
 # Publication GitHub — OpenIRN
 
-Cette étape prépare OpenIRN pour une publication open source propre.
+Cette page décrit les contrôles minimaux à effectuer avant de pousser une version publique d’OpenIRN.
 
 ## 1. Vérifier la racine du dépôt
 
-La racine recommandée est :
+La racine attendue reste :
 
 ```text
 OpenIRN/
@@ -23,7 +23,23 @@ OpenIRN/
 └── .gitignore
 ```
 
-## 2. Vérifier que les fichiers générés ne sont pas commités
+## 2. Nettoyer les artefacts locaux
+
+Avant publication, lancer :
+
+```bash
+chmod +x tools/apply_openirn_patch_138a_cleanup.sh
+./tools/apply_openirn_patch_138a_cleanup.sh
+```
+
+Ce script supprime notamment :
+
+- les métadonnées macOS ;
+- les swaps/sauvegardes d’éditeur ;
+- le répertoire `.tmp/` ;
+- les fichiers de travail issus d’imports locaux.
+
+## 3. Vérifier le contenu publiable
 
 ```bash
 chmod +x tools/check_open_source_readiness.sh
@@ -33,12 +49,13 @@ chmod +x tools/check_open_source_readiness.sh
 Le dépôt public ne doit pas contenir :
 
 - le fichier Excel officiel téléchargé ;
-- le bundle JSON généré à partir du référentiel officiel ;
-- l’Excel d’entreprise ;
+- les fichiers canoniques ou rapports générés localement ;
 - des exports JSON de campagnes réelles ;
-- des secrets.
+- des fichiers de travail d’entreprise ;
+- des secrets ;
+- des fichiers `.DS_Store`, `.swp`, `.swo`, `*~` ou `.tmp`.
 
-## 3. Vérifier Flutter
+## 4. Vérifier Flutter
 
 ```bash
 cd flutter
@@ -47,47 +64,24 @@ flutter test
 cd ..
 ```
 
-## 4. Initialiser Git
+## 5. Vérifier l’API serveur
 
 ```bash
-git init
-git add .
-git status
+cd server/openirn-api
+python3 -m py_compile app/main.py tools/backup_sqlite.py tools/restore_sqlite_backup.py
+cd ../..
 ```
 
-Relire très attentivement `git status` avant le premier commit.
-
-## 5. Premier commit
+## 6. Relire Git avant publication
 
 ```bash
-git commit -m "Initial OpenIRN prototype"
+git status --short
+git diff --stat
 ```
 
-## 6. Créer le dépôt GitHub
+Relire très attentivement les fichiers ajoutés ou supprimés avant le commit.
 
-Créer un dépôt nommé :
-
-```text
-OpenIRN
-```
-
-Description courte proposée :
-
-```text
-Application Flutter open source d’exploration et d’évaluation locale de l’Indice de Résilience Numérique.
-```
-
-## 7. Pousser vers GitHub
-
-```bash
-git branch -M main
-git remote add origin git@github.com:myshelldubois/OpenIRN.git
-git push -u origin main
-```
-
-Adapter l’URL au nom réel du compte ou de l’organisation GitHub.
-
-## 8. Points juridiques à confirmer
+## 7. Point juridique
 
 La licence MIT proposée concerne uniquement le code OpenIRN.
 
@@ -96,5 +90,6 @@ Le référentiel IRN officiel reste sous sa propre licence. Il faut conserver un
 - le code OpenIRN ;
 - les scripts d’import ;
 - les fichiers officiels téléchargés ;
-- les bundles générés localement ;
-- les données de campagne utilisateur.
+- les fichiers générés localement ;
+- les données de campagne utilisateur ;
+- les sauvegardes serveur.
