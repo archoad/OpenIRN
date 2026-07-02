@@ -3865,47 +3865,38 @@ async def official_referential_update(request: Request) -> dict[str, Any]:
 
 @app.get("/health")
 def health() -> dict[str, Any]:
+    """
+    Public, compact health check for monitoring.
+
+    The endpoint exposes stable product-level metadata and a coarse calculated
+    tenant count. It deliberately does not expose route inventory, database
+    paths, tenant names, users, campaigns, device identifiers or diagnostic
+    error details.
+    """
+    status = "ok"
+    tenant_number = 0
+
+    if not DB_PATH.exists():
+        status = "degraded"
+    else:
+        try:
+            db_uri = "file:" + urllib.parse.quote(str(DB_PATH), safe="/:") + "?mode=ro"
+            with sqlite3.connect(db_uri, uri=True) as con:
+                row = con.execute("SELECT COUNT(*) FROM tenants").fetchone()
+                tenant_number = int(row[0]) if row and row[0] is not None else 0
+        except sqlite3.Error:
+            status = "degraded"
+            tenant_number = 0
+
     return {
-        "status": "ok",
+        "status": status,
         "application": "OpenIRN API",
         "version": APP_VERSION,
         "storage": "sqlite",
-        "database": str(DB_PATH),
+        "tenantNumber": tenant_number,
         "authRequired": True,
         "authMode": "server_session_with_role_policy",
-        "endpoints": [
-            "/health",
-            "/auth/verify",
-            "/auth/sessions",
-            "/tenants",
-            "/security/audit",
-            "/users",
-            "/users/replace",
-            "/users/pin",
-            "/devices",
-            "/devices/enrollment",
-            "/devices/enrollment/consume",
-            "/devices/{device_id}/rename",
-            "/devices/{device_id}",
-            "/referential/official/status",
-            "/referential/official/current",
-            "/referential/official/history",
-            "/referential/official/update",
-            "/sync/push",
-            "/sync/status",
-            "/sync/pull",
-            "/sync/events",
-            "/campaigns",
-            "/campaigns/revisions",
-            "/campaigns/conflicts",
-            "/campaigns/revision",
-            "/campaigns/restore",
-            "/maintenance/status",
-            "/maintenance/backup",
-            "/maintenance/backups/{backup_name}/restore",
-            "/maintenance/backups/{backup_name}",
-        ],
-        "timestamp": _utc_now().isoformat(),
+        "serverTime": _utc_now().isoformat(),
     }
 
 
