@@ -3386,6 +3386,76 @@ async def tenant_create(request: Request) -> dict[str, Any]:
     }
 
 
+@app.patch("/tenants/{tenant_id}")
+async def tenant_update(tenant_id: str, request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Payload must be a JSON object")
+
+    target_tenant_id = _safe_segment(tenant_id, DEFAULT_TENANT_ID)
+    auth_context = _require_admin_authorization(request, target_tenant_id)
+    display_name = str(payload.get("displayName") or payload.get("name") or "").strip()
+    if not display_name:
+        raise HTTPException(status_code=400, detail="Le nom affiché de l’espace de travail est obligatoire")
+    if len(display_name) > 160:
+        raise HTTPException(status_code=400, detail="Le nom affiché ne doit pas dépasser 160 caractères")
+
+    now = _utc_now().isoformat()
+    actor_user_id = str(auth_context.get("userId") or "server").strip()[:120]
+    device_id = str(auth_context.get("deviceId") or _request_device_id(request, payload) or "").strip()[:160]
+
+    with _db() as con:
+        with con:
+            _ensure_tenant(con, DEFAULT_TENANT_ID)
+            row = con.execute(
+                "SELECT id, display_name FROM tenants WHERE id = ?",
+                (target_tenant_id,),
+            ).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Espace de travail introuvable")
+            previous_display_name = str(row["display_name"] or target_tenant_id)
+            con.execute(
+                """
+                UPDATE tenants
+                SET display_name = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (display_name, now, target_tenant_id),
+            )
+            _record_device_audit(
+                con,
+                target_tenant_id,
+                "tenant.renamed",
+                device_id=device_id,
+                payload={
+                    "actorUserId": actor_user_id,
+                    "previousDisplayName": previous_display_name,
+                    "displayName": display_name,
+                },
+            )
+            _sync_solution_administrators_to_all_tenants(con)
+            items = _list_tenants(con)
+
+    return {
+        "status": "accepted",
+        "type": "openirn.tenantUpdated",
+        "application": "OpenIRN API",
+        "version": APP_VERSION,
+        "tenantId": target_tenant_id,
+        "defaultTenantId": DEFAULT_TENANT_ID,
+        "solutionAdminTenantId": SOLUTION_ADMIN_TENANT_ID,
+        "solutionAdministrator": _is_solution_admin_context(auth_context),
+        "serverTime": _utc_now().isoformat(),
+        "tenant": next((item for item in items if item.get("tenantId") == target_tenant_id), None),
+        "tenants": items,
+        "message": "Nom de l’espace de travail mis à jour.",
+    }
+
+
 @app.get("/devices")
 def devices(
     request: Request,
@@ -4132,6 +4202,125 @@ async def auth_verify(request: Request) -> dict[str, Any]:
         "idleTimeoutMinutes": max(1, SESSION_IDLE_TIMEOUT_MINUTES),
     }
 
+
+
+@app.post("/auth/change-pin")
+async def auth_change_pin(request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Payload must be a JSON object")
+
+    auth_context = _request_auth_context(request)
+    if auth_context is None:
+        raise _authorization_unavailable_exception()
+    if str(auth_context.get("authMode") or "") != "session":
+        raise HTTPException(
+            status_code=403,
+            detail="Cette opération exige une session utilisateur active",
+        )
+
+    tenant_id = str(auth_context.get("tenantId") or "").strip()
+    user_id = str(auth_context.get("userId") or "").strip()
+    user_role = _role_normalize(auth_context.get("userRole"))
+    device_id = str(auth_context.get("deviceId") or _request_device_id(request, payload) or "").strip()[:160]
+    if not tenant_id or not user_id:
+        raise HTTPException(status_code=403, detail="Session utilisateur incomplète")
+    if user_role not in API_ROLE_READ:
+        raise HTTPException(status_code=403, detail="Votre profil ne permet pas de changer ce code")
+
+    requested_tenant_id = str(payload.get("tenantId") or tenant_id).strip()
+    if requested_tenant_id and _safe_segment(requested_tenant_id, tenant_id) != tenant_id:
+        raise HTTPException(
+            status_code=403,
+            detail="La session ne correspond pas à l’espace de travail demandé",
+        )
+
+    current_pin = str(payload.get("currentPin") or payload.get("oldPin") or "")
+    new_pin = str(payload.get("newPin") or payload.get("pin") or "").strip()
+    if not current_pin.strip():
+        raise HTTPException(status_code=400, detail="Code actuel manquant")
+    if len(new_pin) < 4 or len(new_pin) > 32:
+        raise HTTPException(status_code=400, detail="Le nouveau code doit contenir entre 4 et 32 caractères")
+
+    ip_address = _request_client_ip(request)
+    with _db() as con:
+        _ensure_tenant(con, tenant_id)
+        _enforce_auth_rate_limit(
+            con,
+            tenant_id,
+            device_id=device_id,
+            user_id=user_id,
+            ip_address=ip_address,
+        )
+        users = _load_central_users(con, tenant_id)
+        user = next((candidate for candidate in users if candidate.get("id") == user_id), None)
+        if user is None or user.get("active") is not True:
+            raise HTTPException(status_code=403, detail="Utilisateur inactif ou introuvable")
+        accepted, _requires_change = _verify_user_pin(con, tenant_id, user_id, current_pin)
+        if not accepted:
+            _record_auth_attempt(
+                con,
+                tenant_id,
+                device_id=device_id,
+                user_id=user_id,
+                ip_address=ip_address,
+                successful=False,
+                reason="invalid_current_pin",
+            )
+            _record_device_audit(
+                con,
+                tenant_id,
+                "user.pin_change_failed",
+                device_id=device_id,
+                payload={"userId": user_id, "reason": "invalid_current_pin", "ipAddress": ip_address},
+            )
+            con.commit()
+            raise HTTPException(status_code=403, detail="Le code actuel est incorrect")
+        con.commit()
+
+    protective_backup = _create_protective_backup(
+        tenant_id,
+        reason="pre_self_pin_change",
+        triggered_by_user_id=user_id,
+        context={"userId": user_id},
+    )
+
+    with _db() as con:
+        with con:
+            _ensure_tenant(con, tenant_id)
+            _set_user_pin(con, tenant_id, user_id, new_pin, requires_change=False)
+            _record_auth_attempt(
+                con,
+                tenant_id,
+                device_id=device_id,
+                user_id=user_id,
+                ip_address=ip_address,
+                successful=True,
+                reason="pin_changed",
+            )
+            _record_device_audit(
+                con,
+                tenant_id,
+                "user.pin_changed",
+                device_id=device_id,
+                payload={"userId": user_id, "ipAddress": ip_address},
+            )
+
+    return {
+        "status": "accepted",
+        "type": "openirn.selfPinUpdate",
+        "application": "OpenIRN API",
+        "version": APP_VERSION,
+        "tenantId": tenant_id,
+        "serverTime": _utc_now().isoformat(),
+        "userId": user_id,
+        "protectiveBackup": protective_backup,
+        "message": "Code d’accès mis à jour.",
+    }
 
 
 def _session_row_to_payload(row: sqlite3.Row, *, current_token_hash: str = '') -> dict[str, Any]:
