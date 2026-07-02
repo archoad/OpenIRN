@@ -13,37 +13,52 @@ paths:
   /health:
     get:
       security: []
-      summary: Vérifie la disponibilité de l'API OpenIRN.
+      summary: Vérifie l’état général du serveur OpenIRN avec une réponse publique sobre.
       responses:
         '200':
-          description: API disponible.
+          description: État général du serveur OpenIRN.
           content:
             application/json:
               schema:
                 type: object
+                required:
+                  - status
+                  - application
+                  - version
+                  - storage
+                  - tenantNumber
+                  - authRequired
+                  - authMode
+                  - serverTime
                 properties:
                   status:
                     type: string
+                    enum: [ok, degraded]
                     example: ok
                   application:
                     type: string
                     example: OpenIRN API
                   version:
                     type: string
-                    example: 0.4.0
+                    example: 0.10.0
+                  storage:
+                    type: string
+                    enum: [sqlite]
+                    example: sqlite
+                  tenantNumber:
+                    type: integer
+                    minimum: 0
+                    example: 3
                   authRequired:
                     type: boolean
                     example: true
                   authMode:
                     type: string
-                    example: bearer_token
-                  endpoints:
-                    type: array
-                    items:
-                      type: string
-                  timestamp:
+                    example: server_session_with_role_policy
+                  serverTime:
                     type: string
                     format: date-time
+                    example: '2026-07-02T18:00:00+00:00'
   /sync/push:
     post:
       summary: Envoie un snapshot local complet OpenIRN.
