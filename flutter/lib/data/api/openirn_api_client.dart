@@ -863,6 +863,126 @@ class OpenIrnApiClient {
     }
   }
 
+  Future<OpenIrnApiTenantsResult> updateTenant({
+    String? baseUrl,
+    required String tenantId,
+    required String displayName,
+    String apiToken = '',
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final uri = Uri.parse('$normalizedBaseUrl/tenants/$safeTenantId');
+
+    try {
+      final response = await _patchJson(uri, <String, dynamic>{
+        'displayName': displayName.trim(),
+      }, bearerToken: apiToken);
+      final decodedBody = _decodeJsonObject(response.body);
+      final rawTenants = decodedBody?['tenants'];
+      final tenants = rawTenants is List
+          ? rawTenants
+                .whereType<Map>()
+                .map(
+                  (item) =>
+                      TenantInfo.fromJson(Map<String, dynamic>.from(item)),
+                )
+                .where((tenant) => tenant.id.trim().isNotEmpty)
+                .toList(growable: false)
+          : const <TenantInfo>[];
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return OpenIrnApiTenantsResult(
+          status: OpenIrnApiTenantsStatus.available,
+          url: uri.toString(),
+          statusCode: response.statusCode,
+          title: 'Espace de travail mis à jour',
+          message:
+              decodedBody?['message']?.toString() ??
+              'Nom de l’espace de travail mis à jour.',
+          tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
+          defaultTenantId:
+              decodedBody?['defaultTenantId']?.toString() ?? 'default',
+          solutionAdministrator: decodedBody?['solutionAdministrator'] == true,
+          tenants: tenants,
+          responseBody: decodedBody,
+        );
+      }
+
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.rejected,
+        url: uri.toString(),
+        statusCode: response.statusCode,
+        title: 'Modification refusée',
+        message:
+            decodedBody?['detail']?.toString() ??
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        tenantId: safeTenantId,
+        defaultTenantId: 'default',
+        tenants: tenants,
+        responseBody: decodedBody,
+      );
+    } on TimeoutException {
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.unreachable,
+        url: uri.toString(),
+        statusCode: null,
+        title: 'Délai dépassé',
+        message: 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+        tenantId: safeTenantId,
+        defaultTenantId: 'default',
+        tenants: const <TenantInfo>[],
+      );
+    } on SocketException catch (error) {
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.unreachable,
+        url: uri.toString(),
+        statusCode: null,
+        title: 'Serveur injoignable',
+        message: error.message,
+        tenantId: safeTenantId,
+        defaultTenantId: 'default',
+        tenants: const <TenantInfo>[],
+      );
+    } on HandshakeException catch (error) {
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.unreachable,
+        url: uri.toString(),
+        statusCode: null,
+        title: 'Erreur TLS',
+        message: error.message,
+        tenantId: safeTenantId,
+        defaultTenantId: 'default',
+        tenants: const <TenantInfo>[],
+      );
+    } on FormatException catch (error) {
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.unreachable,
+        url: uri.toString(),
+        statusCode: null,
+        title: 'Adresse serveur invalide',
+        message: error.message,
+        tenantId: safeTenantId,
+        defaultTenantId: 'default',
+        tenants: const <TenantInfo>[],
+      );
+    } on HttpException catch (error) {
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.unreachable,
+        url: uri.toString(),
+        statusCode: null,
+        title: 'Erreur HTTP',
+        message: error.message,
+        tenantId: safeTenantId,
+        defaultTenantId: 'default',
+        tenants: const <TenantInfo>[],
+      );
+    }
+  }
+
   Future<OpenIrnApiPushResult> pushPayload({
     String? baseUrl,
     required Map<String, dynamic> payload,
@@ -1752,6 +1872,121 @@ class OpenIrnApiClient {
         message: error.message,
         tenantId: safeTenantId,
         userId: safeUserId,
+      );
+    }
+  }
+
+  Future<OpenIrnApiPinUpdateResult> changeOwnPin({
+    String? baseUrl,
+    required String currentPin,
+    required String newPin,
+    String apiToken = '',
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final pinUri = Uri.parse('$normalizedBaseUrl/auth/change-pin');
+    final activeUser = AppSessionManager.instance.activeUser;
+    final userId = activeUser?.id ?? '';
+    final tenantId = AppSessionManager.instance.tenantId;
+
+    try {
+      final response = await _postJson(pinUri, <String, dynamic>{
+        'currentPin': currentPin,
+        'newPin': newPin.trim(),
+      }, bearerToken: apiToken);
+      final decodedBody = _decodeJsonObject(response.body);
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return OpenIrnApiPinUpdateResult(
+          status: OpenIrnApiPinUpdateStatus.accepted,
+          url: pinUri.toString(),
+          statusCode: response.statusCode,
+          title: 'Code d’accès mis à jour',
+          message:
+              decodedBody?['message']?.toString() ??
+              'Votre code d’accès a été remplacé.',
+          tenantId: decodedBody?['tenantId']?.toString() ?? tenantId,
+          userId: decodedBody?['userId']?.toString() ?? userId,
+          responseBody: decodedBody,
+        );
+      }
+
+      if (<int>{400, 401, 403, 404, 429}.contains(response.statusCode)) {
+        return OpenIrnApiPinUpdateResult(
+          status: OpenIrnApiPinUpdateStatus.rejected,
+          url: pinUri.toString(),
+          statusCode: response.statusCode,
+          title: 'Modification refusée',
+          message:
+              decodedBody?['detail']?.toString() ??
+              'Le serveur a refusé la modification du code.',
+          tenantId: tenantId,
+          userId: userId,
+          responseBody: decodedBody,
+        );
+      }
+
+      return OpenIrnApiPinUpdateResult(
+        status: OpenIrnApiPinUpdateStatus.rejected,
+        url: pinUri.toString(),
+        statusCode: response.statusCode,
+        title: 'Modification refusée',
+        message:
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        tenantId: tenantId,
+        userId: userId,
+        responseBody: decodedBody,
+      );
+    } on TimeoutException {
+      return OpenIrnApiPinUpdateResult(
+        status: OpenIrnApiPinUpdateStatus.unreachable,
+        url: pinUri.toString(),
+        statusCode: null,
+        title: 'Délai dépassé',
+        message: 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+        tenantId: tenantId,
+        userId: userId,
+      );
+    } on SocketException catch (error) {
+      return OpenIrnApiPinUpdateResult(
+        status: OpenIrnApiPinUpdateStatus.unreachable,
+        url: pinUri.toString(),
+        statusCode: null,
+        title: 'Serveur injoignable',
+        message: error.message,
+        tenantId: tenantId,
+        userId: userId,
+      );
+    } on HandshakeException catch (error) {
+      return OpenIrnApiPinUpdateResult(
+        status: OpenIrnApiPinUpdateStatus.unreachable,
+        url: pinUri.toString(),
+        statusCode: null,
+        title: 'Erreur TLS',
+        message: error.message,
+        tenantId: tenantId,
+        userId: userId,
+      );
+    } on FormatException catch (error) {
+      return OpenIrnApiPinUpdateResult(
+        status: OpenIrnApiPinUpdateStatus.unreachable,
+        url: pinUri.toString(),
+        statusCode: null,
+        title: 'Adresse serveur invalide',
+        message: error.message,
+        tenantId: tenantId,
+        userId: userId,
+      );
+    } on HttpException catch (error) {
+      return OpenIrnApiPinUpdateResult(
+        status: OpenIrnApiPinUpdateStatus.unreachable,
+        url: pinUri.toString(),
+        statusCode: null,
+        title: 'Erreur HTTP',
+        message: error.message,
+        tenantId: tenantId,
+        userId: userId,
       );
     }
   }
@@ -3168,6 +3403,33 @@ class OpenIrnApiClient {
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
       request.headers.set(HttpHeaders.userAgentHeader, 'OpenIRN');
       _applyAuthorizationHeaders(request, bearerToken: bearerToken);
+      final response = await request.close().timeout(timeout);
+      final body = await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(timeout);
+      return _HttpResponse(statusCode: response.statusCode, body: body);
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<_HttpResponse> _patchJson(
+    Uri uri,
+    Map<String, dynamic> payload, {
+    String bearerToken = '',
+  }) async {
+    final client = HttpClient();
+    try {
+      final request = await client.openUrl('PATCH', uri).timeout(timeout);
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      request.headers.set(
+        HttpHeaders.contentTypeHeader,
+        'application/json; charset=utf-8',
+      );
+      request.headers.set(HttpHeaders.userAgentHeader, 'OpenIRN');
+      _applyAuthorizationHeaders(request, bearerToken: bearerToken);
+      request.add(utf8.encode(jsonEncode(payload)));
       final response = await request.close().timeout(timeout);
       final body = await response
           .transform(utf8.decoder)

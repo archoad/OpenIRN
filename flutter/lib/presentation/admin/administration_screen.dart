@@ -4,6 +4,7 @@ import '../../domain/models/app_user.dart';
 import '../../domain/models/irn_referential.dart';
 import '../../domain/services/access_policy_service.dart';
 import '../campaigns/campaign_management_screen.dart';
+import '../common/change_access_code_card.dart';
 import '../common/openirn_app_bar.dart';
 import '../users/user_list_screen.dart';
 import 'authorized_devices_screen.dart';
@@ -186,6 +187,12 @@ class AdministrationScreen extends StatelessWidget {
         ? activeUser.email
         : activeUser.id;
     final actions = <Widget>[
+      const ChangeAccessCodeCard(
+        title: 'Changement de code',
+        subtitle:
+            'Changer votre propre code d’accès en saisissant le code actuel puis deux fois le nouveau code.',
+        buttonLabel: 'Changer',
+      ),
       if (_accessPolicy.canManageCampaigns(activeUser))
         _AdministrationActionCard(
           icon: Icons.admin_panel_settings_outlined,
