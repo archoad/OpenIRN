@@ -64,3 +64,6 @@ openirn_*.json
 *.key
 *.p12
 *.mobileprovision
+# Obsolete local-first referential bundle (removed after server-only referential)
+flutter/assets/referentials/
+flutter/pubspec_fragment.yaml

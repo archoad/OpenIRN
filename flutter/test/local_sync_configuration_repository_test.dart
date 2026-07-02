@@ -18,7 +18,7 @@ void main() {
     });
 
     test(
-      'creates a local device id and fixed API URL when configuration is empty',
+      'creates a local device id and fixed API URL without selecting a tenant when configuration is empty',
       () async {
         const repository = LocalSyncConfigurationRepository();
 
@@ -26,7 +26,7 @@ void main() {
 
         expect(configuration.deviceId, startsWith('openirn-'));
         expect(configuration.apiBaseUrl, SyncConfiguration.fixedApiBaseUrl);
-        expect(configuration.tenantId, SyncConfiguration.defaultTenantId);
+        expect(configuration.tenantId, isEmpty);
         expect(configuration.apiToken, isEmpty);
         expect(configuration.enabled, isFalse);
         expect(configuration.isConfigured, isFalse);

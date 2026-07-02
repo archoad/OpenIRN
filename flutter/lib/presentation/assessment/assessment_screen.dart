@@ -130,8 +130,8 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
           ..addAll(criterionAnswers);
         _isLoadingAnswers = false;
         _localStatusMessage = criterionAnswers.isEmpty
-            ? 'Aucune évaluation enregistrée sur ce terminal.'
-            : 'Évaluation restaurée depuis ce terminal (${criterionAnswers.length} critère(s), $_justificationCount justification(s)).';
+            ? 'Aucune évaluation enregistrée.'
+            : 'Évaluation restaurée (${criterionAnswers.length} critère(s), $_justificationCount justification(s)).';
       });
     } catch (error) {
       if (!mounted) {
@@ -139,8 +139,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       }
       setState(() {
         _isLoadingAnswers = false;
-        _localStatusMessage =
-            'Impossible de restaurer l’évaluation depuis ce terminal : $error';
+        _localStatusMessage = 'Impossible de restaurer l’évaluation : $error';
       });
     }
   }
@@ -348,7 +347,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
 
   Future<void> _openAssignments() async {
     if (!_accessPolicy.canManageAssignments(widget.activeUser, _campaign)) {
-      _showForbidden('Ton rôle ne permet pas de modifier les affectations.');
+      _showForbidden('Votre rôle ne permet pas de modifier les affectations.');
       return;
     }
 
@@ -387,7 +386,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     setState(() {
       _upsertCriterionAnswer(updated);
       _isSavingAnswers = true;
-      _localStatusMessage = 'Sauvegarde de ce terminal en cours…';
+      _localStatusMessage = 'Sauvegarde en cours…';
     });
 
     final saved = await _saveOrRollback(previousAnswers);
@@ -481,7 +480,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
           ..clear()
           ..addAll(previousAnswers);
         _isSavingAnswers = false;
-        _localStatusMessage = 'Erreur de sauvegarde de ce terminal : $error';
+        _localStatusMessage = 'Erreur de sauvegarde : $error';
       });
       return false;
     }
@@ -641,7 +640,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     if (widget.activeUser.role == AppUserRole.evaluator) {
       final assignment = _assignmentsByCriterionId[criterion.id];
       if (assignment == null) {
-        return 'Critère non affecté à ton profil évaluateur.';
+        return 'Ce critère n’est pas affecté à votre profil évaluateur.';
       }
       if (assignment.userId != widget.activeUser.id) {
         return 'Critère affecté à un autre évaluateur.';
@@ -719,7 +718,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
 
   Future<void> _openExport() async {
     if (!_accessPolicy.canExportCampaign(widget.activeUser)) {
-      _showForbidden('Ton profil ne permet pas d’exporter cette campagne.');
+      _showForbidden('Votre profil ne permet pas d’exporter cette campagne.');
       return;
     }
     await Navigator.of(context).push(
@@ -752,7 +751,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   Future<void> _openActivityLog() async {
     if (!_accessPolicy.canViewCampaignActivityLog(widget.activeUser)) {
       _showForbidden(
-        'Ton profil ne permet pas de consulter le journal de campagne.',
+        'Votre profil ne permet pas de consulter le journal de campagne.',
       );
       return;
     }
@@ -965,7 +964,7 @@ class _NoAssignedCriteriaCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'Ton profil Évaluateur ne possède actuellement aucune affectation sur cette campagne.',
+                    'Votre profil Évaluateur ne possède actuellement aucune affectation sur cette campagne.',
                   ),
                 ],
               ),
@@ -1010,7 +1009,7 @@ class _CampaignContextCard extends StatelessWidget {
                 children: [
                   Text(campaign.name, style: theme.textTheme.titleMedium),
                   const SizedBox(height: 4),
-                  Text('Campagne · Référentiel ${referential.version}'),
+                  Text('Référentiel ${referential.version}'),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
@@ -1466,7 +1465,7 @@ class _ScoreCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final score = summary.officialScore;
+    final score = summary.openIrnRnrScore;
 
     return Card(
       child: Padding(
@@ -1480,19 +1479,16 @@ class _ScoreCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Score officiel R / NR',
-                        style: theme.textTheme.titleLarge,
-                      ),
+                      Text('Score IRN', style: theme.textTheme.titleLarge),
                       const SizedBox(height: 4),
                       const Text(
-                        'Calcul : R / (R + NR). Les critères non cotés sont exclus du score.',
+                        'Calcul non pondéré : R / (R + NR). Les critères non cotés sont exclus du score.',
                       ),
                     ],
                   ),
                 ),
                 Text(
-                  summary.formattedOfficialScore,
+                  summary.formattedOpenIrnRnrScore,
                   style: theme.textTheme.headlineMedium,
                 ),
               ],
@@ -1606,7 +1602,7 @@ class _PillarAssessmentCard extends StatelessWidget {
         title: Text('${pillar.code} — ${pillar.label}'),
         subtitle: Text(
           '${summary.answeredCriteria}/${summary.totalCriteria} coté(s) · '
-          '$justificationCount justification(s) · Score : ${summary.formattedOfficialScore}',
+          '$justificationCount justification(s) · Score : ${summary.formattedOpenIrnRnrScore}',
         ),
         children: [
           for (final criterion in criteria)
@@ -1850,7 +1846,7 @@ class _JustificationDialogState extends State<_JustificationDialog> {
             alignLabelWithHint: true,
             border: OutlineInputBorder(),
             hintText:
-                'Explique la réponse, cite une preuve, une hypothèse ou un point à vérifier.',
+                'Expliquez la réponse, citez une preuve, une hypothèse ou un point à vérifier.',
           ),
         ),
       ),

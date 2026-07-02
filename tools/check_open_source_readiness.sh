@@ -81,71 +81,32 @@ check_absent_find "secret potentiel" -type f \( \
   -name '*.mobileprovision' \
 \)
 
+# Since patch 123B / 138C, the Flutter application must not embed the
+# official referential. The active referential is installed, served and
+# historized by the API. Keep import and validation scripts, but reject the
+# old runtime bundle and its generator.
 if [[ -d "flutter/assets/referentials" ]]; then
-  echo
-  echo "[INFO] flutter/assets/referentials existe encore ; validation opportuniste du bundle éventuel."
-  python3 - <<'PY'
-import json
-from pathlib import Path
-import sys
+  fail "ancien bundle référentiel Flutter embarqué présent : flutter/assets/referentials"
+else
+  ok "ancien bundle référentiel Flutter embarqué absent"
+fi
 
-status = 0
+if [[ -f "flutter/pubspec_fragment.yaml" ]]; then
+  fail "fragment pubspec historique encore présent : flutter/pubspec_fragment.yaml"
+else
+  ok "fragment pubspec historique absent"
+fi
 
-def fail(message: str) -> None:
-    global status
-    print(f"[ERREUR] {message}")
-    status = 1
+if [[ -f "server/scripts/build_referential_bundle.py" ]]; then
+  fail "générateur historique de bundle Flutter encore présent : server/scripts/build_referential_bundle.py"
+else
+  ok "générateur historique de bundle Flutter absent"
+fi
 
-def ok(message: str) -> None:
-    print(f"[OK] {message}")
-
-referentials_dir = Path("flutter/assets/referentials")
-manifest_path = referentials_dir / "manifest.json"
-referential_path = referentials_dir / "adri_irn_v1_1.json"
-allowed = {manifest_path, referential_path}
-
-for json_file in sorted(referentials_dir.glob("*.json")):
-    if json_file not in allowed:
-        fail(f"bundle JSON inattendu : {json_file}")
-
-if manifest_path.exists() or referential_path.exists():
-    if not manifest_path.exists() or not referential_path.exists():
-        fail("bundle référentiel partiel dans flutter/assets/referentials")
-    else:
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            referential = json.loads(referential_path.read_text(encoding="utf-8"))
-        except Exception as exc:  # noqa: BLE001
-            fail(f"bundle référentiel illisible : {exc}")
-        else:
-            if manifest.get("activeReferentialId") == referential.get("id"):
-                ok("manifest cohérent avec le référentiel actif")
-            else:
-                fail("manifest incohérent avec le référentiel actif")
-
-            if len(referential.get("pillars") or []) == 8:
-                ok("référentiel : 8 piliers")
-            else:
-                fail("référentiel : nombre de piliers inattendu")
-
-            if len(referential.get("criteria") or []) == 30:
-                ok("référentiel : 30 critères")
-            else:
-                fail("référentiel : nombre de critères inattendu")
-
-            source = referential.get("source") or {}
-            if source.get("url") and source.get("license"):
-                ok("attribution du référentiel présente")
-            else:
-                fail("attribution du référentiel incomplète")
-else:
-    ok("aucun bundle référentiel Flutter embarqué à valider")
-
-sys.exit(status)
-PY
-  if [[ $? -ne 0 ]]; then
-    status=1
-  fi
+if [[ -f "flutter/pubspec.yaml" ]] && grep -Fq "assets/referentials" "flutter/pubspec.yaml"; then
+  fail "pubspec.yaml déclare encore assets/referentials"
+else
+  ok "pubspec.yaml ne déclare pas assets/referentials"
 fi
 
 echo

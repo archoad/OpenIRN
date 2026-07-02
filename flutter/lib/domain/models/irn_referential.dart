@@ -56,6 +56,7 @@ class IrnReferential {
   final String version;
   final DateTime? importedAt;
   final IrnSource source;
+  final IrnScoringMethod scoring;
   final List<IrnPillar> pillars;
   final List<IrnCriterion> criteria;
   final List<String> importWarnings;
@@ -66,6 +67,7 @@ class IrnReferential {
     required this.source,
     required this.pillars,
     required this.criteria,
+    this.scoring = const IrnScoringMethod.openIrnRnr(),
     this.importedAt,
     this.importWarnings = const [],
   });
@@ -88,6 +90,7 @@ class IrnReferential {
       version: _asString(json['version']),
       importedAt: _asDateTime(json['importedAt']),
       source: IrnSource.fromJson(_asMap(json['source'])),
+      scoring: IrnScoringMethod.fromJson(_asMap(json['scoring'])),
       pillars: List.unmodifiable(pillars),
       criteria: List.unmodifiable(criteria),
       importWarnings: List.unmodifiable(
@@ -103,6 +106,95 @@ class IrnReferential {
   String get sourceUrl => source.url;
 }
 
+class IrnScoringMethod {
+  final String method;
+  final String methodLabel;
+  final String methodStatus;
+  final String notAnsweredPolicy;
+  final String criteriaWeightPolicy;
+  final String globalAggregationPolicy;
+  final bool weightedOfficialMethodImplemented;
+  final String officialWeightedMethodStatus;
+  final String disclaimer;
+
+  const IrnScoringMethod({
+    required this.method,
+    required this.methodLabel,
+    required this.methodStatus,
+    required this.notAnsweredPolicy,
+    required this.criteriaWeightPolicy,
+    required this.globalAggregationPolicy,
+    required this.weightedOfficialMethodImplemented,
+    required this.officialWeightedMethodStatus,
+    required this.disclaimer,
+  });
+
+  const IrnScoringMethod.openIrnRnr()
+    : method = 'R / (R + NR) * 100',
+      methodLabel = 'Score IRN',
+      methodStatus = 'public_rnr_unweighted',
+      notAnsweredPolicy = 'excluded_from_score_included_in_completion',
+      criteriaWeightPolicy = 'uniform_per_answered_criterion',
+      globalAggregationPolicy = 'all_answered_criteria_same_weight',
+      weightedOfficialMethodImplemented = false,
+      officialWeightedMethodStatus =
+          'not_implemented_no_public_formula_available',
+      disclaimer =
+          'Les sources publiques IRN décrivent une cartographie pondérée, '
+          'mais ne publient pas de formule de pondération exploitable dans '
+          'OpenIRN. Le score affiché reste donc un score OpenIRN R/NR non pondéré.';
+
+  factory IrnScoringMethod.fromJson(Map<String, dynamic> json) {
+    const fallback = IrnScoringMethod.openIrnRnr();
+    return IrnScoringMethod(
+      method: _asString(json['method'], fallback: fallback.method),
+      methodLabel: _asString(
+        json['methodLabel'],
+        fallback: fallback.methodLabel,
+      ),
+      methodStatus: _asString(
+        json['methodStatus'],
+        fallback: fallback.methodStatus,
+      ),
+      notAnsweredPolicy: _asString(
+        json['notAnsweredPolicy'],
+        fallback: fallback.notAnsweredPolicy,
+      ),
+      criteriaWeightPolicy: _asString(
+        json['criteriaWeightPolicy'],
+        fallback: fallback.criteriaWeightPolicy,
+      ),
+      globalAggregationPolicy: _asString(
+        json['globalAggregationPolicy'],
+        fallback: fallback.globalAggregationPolicy,
+      ),
+      weightedOfficialMethodImplemented:
+          json['weightedOfficialMethodImplemented'] is bool
+          ? json['weightedOfficialMethodImplemented'] as bool
+          : fallback.weightedOfficialMethodImplemented,
+      officialWeightedMethodStatus: _asString(
+        json['officialWeightedMethodStatus'],
+        fallback: fallback.officialWeightedMethodStatus,
+      ),
+      disclaimer: _asString(json['disclaimer'], fallback: fallback.disclaimer),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'method': method,
+      'methodLabel': methodLabel,
+      'methodStatus': methodStatus,
+      'notAnsweredPolicy': notAnsweredPolicy,
+      'criteriaWeightPolicy': criteriaWeightPolicy,
+      'globalAggregationPolicy': globalAggregationPolicy,
+      'weightedOfficialMethodImplemented': weightedOfficialMethodImplemented,
+      'officialWeightedMethodStatus': officialWeightedMethodStatus,
+      'disclaimer': disclaimer,
+    };
+  }
+}
+
 class IrnSource {
   final String type;
   final String url;
@@ -110,6 +202,7 @@ class IrnSource {
   final String defaultBranch;
   final String filePath;
   final String? commitSha;
+  final String? blobId;
   final String? checksumSha256;
   final String license;
 
@@ -121,6 +214,7 @@ class IrnSource {
     required this.filePath,
     required this.license,
     this.commitSha,
+    this.blobId,
     this.checksumSha256,
   });
 
@@ -132,6 +226,7 @@ class IrnSource {
       defaultBranch: _asString(json['defaultBranch']),
       filePath: _asString(json['filePath']),
       commitSha: _asNullableString(json['commitSha']),
+      blobId: _asNullableString(json['blobId']),
       checksumSha256: _asNullableString(json['checksumSha256']),
       license: _asString(json['license'], fallback: 'Non renseignée'),
     );

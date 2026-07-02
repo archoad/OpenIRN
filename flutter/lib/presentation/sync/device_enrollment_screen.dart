@@ -11,7 +11,14 @@ import '../common/openirn_app_bar.dart';
 import '../common/responsive_autofocus.dart';
 
 class DeviceEnrollmentScreen extends StatefulWidget {
-  const DeviceEnrollmentScreen({super.key});
+  final String initialTenantId;
+  final bool showBackToSession;
+
+  const DeviceEnrollmentScreen({
+    this.initialTenantId = '',
+    this.showBackToSession = true,
+    super.key,
+  });
 
   @override
   State<DeviceEnrollmentScreen> createState() => _DeviceEnrollmentScreenState();
@@ -31,9 +38,8 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
   @override
   void initState() {
     super.initState();
-    _tenantIdController = TextEditingController(
-      text: SyncConfiguration.defaultTenantId,
-    );
+    final initialTenantId = widget.initialTenantId.trim();
+    _tenantIdController = TextEditingController(text: initialTenantId);
     _codeController = TextEditingController();
     _deviceNameController = TextEditingController(text: _defaultDeviceName());
   }
@@ -178,6 +184,32 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
     }
   }
 
+  Future<void> _returnToSessionOpening() async {
+    if (_working) {
+      return;
+    }
+
+    setState(() {
+      _working = true;
+      _connectionResult = null;
+      _enrollmentResult = null;
+    });
+
+    await _configurationRepository.clearTenantSelection();
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _working = false;
+    });
+
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop(false);
+    }
+  }
+
   Future<void> _openPastePayloadDialog() async {
     final controller = TextEditingController();
     final payload = await showDialog<String>(
@@ -260,7 +292,7 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Crée d’abord une invitation depuis un terminal déjà autorisé : Administration → Terminaux autorisés.',
+                          'Veuillez d’abord créer une invitation depuis un terminal déjà autorisé : Administration → Terminaux autorisés.',
                           style: theme.textTheme.bodyMedium,
                         ),
                         const SizedBox(height: 18),
@@ -308,7 +340,7 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
                                 .replaceAll(RegExp(r'[^a-zA-Z0-9]'), '')
                                 .trim();
                             if (normalized.length < 8) {
-                              return 'Saisis le code d’appairage complet.';
+                              return 'Veuillez saisir le code d’autorisation complet.';
                             }
                             return null;
                           },
@@ -325,13 +357,13 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
                               autocorrect: false,
                               enableSuggestions: false,
                               decoration: const InputDecoration(
-                                labelText: 'Tenant serveur',
+                                labelText: 'Espace de travail',
                                 border: OutlineInputBorder(),
                                 prefixIcon: Icon(Icons.account_tree_outlined),
                               ),
                               validator: (value) {
                                 if ((value ?? '').trim().isEmpty) {
-                                  return 'Le tenant serveur est obligatoire.';
+                                  return 'L’espace de travail est obligatoire.';
                                 }
                                 return null;
                               },
@@ -380,6 +412,13 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
                 ),
               ),
               const SizedBox(height: 12),
+              if (widget.showBackToSession) ...[
+                _BackToSessionOpeningCard(
+                  working: _working,
+                  onPressed: _returnToSessionOpening,
+                ),
+                const SizedBox(height: 12),
+              ],
               if (_connectionResult != null)
                 _ResultCard(
                   icon: _connectionResult!.isReachable
@@ -473,6 +512,55 @@ class _IntroColumn extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+class _BackToSessionOpeningCard extends StatelessWidget {
+  final bool working;
+  final Future<void> Function() onPressed;
+
+  const _BackToSessionOpeningCard({
+    required this.working,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.login_outlined),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Retour au choix de l’espace de travail',
+                    style: theme.textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Abandonner l’autorisation de ce terminal et revenir au choix de l’espace de travail.',
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            OutlinedButton.icon(
+              onPressed: working ? null : onPressed,
+              icon: const Icon(Icons.arrow_back_outlined),
+              label: const Text('Retour'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

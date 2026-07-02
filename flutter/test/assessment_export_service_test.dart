@@ -21,6 +21,8 @@ void main() {
           defaultBranch: 'main',
           filePath: 'Questionnaire.xlsx',
           license: 'CC BY-NC-ND 4.0',
+          commitSha: 'commit123',
+          blobId: 'blob456',
           checksumSha256: 'abc123',
         ),
         pillars: [
@@ -108,13 +110,14 @@ void main() {
         exportedAt: DateTime.utc(2026, 6, 22, 12),
       );
 
-      expect(payload['schemaVersion'], 6);
+      expect(payload['schemaVersion'], 7);
       expect(payload['collaboration'], isA<Map<String, dynamic>>());
       expect(payload['type'], 'openirn.localAssessmentExport');
-      expect(
-        (payload['referential'] as Map<String, dynamic>)['checksumSha256'],
-        'abc123',
-      );
+      final referentialMetadata =
+          payload['referential'] as Map<String, dynamic>;
+      expect(referentialMetadata['checksumSha256'], 'abc123');
+      expect(referentialMetadata['sourceCommitSha'], 'commit123');
+      expect(referentialMetadata['sourceBlobId'], 'blob456');
 
       final campaign = payload['campaign'] as Map<String, dynamic>;
       expect(campaign['status'], 'ready_for_review');
@@ -126,7 +129,10 @@ void main() {
       expect(projectDirector['email'], 'alice.martin@example.test');
 
       final scoring = payload['scoring'] as Map<String, dynamic>;
+      expect(scoring['methodStatus'], 'public_rnr_unweighted');
+      expect(scoring['weightedOfficialMethodImplemented'], isFalse);
       final global = scoring['global'] as Map<String, dynamic>;
+      expect(global['openIrnRnrScore'], 50.0);
       expect(global['officialScore'], 50.0);
       expect(global['completionRate'], 1.0);
 

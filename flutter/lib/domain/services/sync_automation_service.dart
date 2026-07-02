@@ -135,8 +135,9 @@ class SyncAutomationService {
     if (latest == null || latest.serverSyncId.trim().isEmpty) {
       return const SyncAutomationResult(
         outcome: SyncAutomationOutcome.upToDate,
-        title: 'Aucun snapshot distant',
-        message: 'Le serveur ne contient encore aucun snapshot exploitable.',
+        title: 'Aucune sauvegarde de synchronisation distante',
+        message:
+            'Le serveur ne contient encore aucune donnée de synchronisation exploitable.',
       );
     }
 
@@ -156,7 +157,8 @@ class SyncAutomationService {
       return SyncAutomationResult(
         outcome: SyncAutomationOutcome.upToDate,
         title: 'Données de ce terminal à jour',
-        message: 'Le dernier snapshot serveur est déjà connu sur ce terminal.',
+        message:
+            'Les dernières données serveur sont déjà connues sur ce terminal.',
         serverSyncId: latestServerSyncId,
         campaignCount: latest.campaignCount,
       );
@@ -250,7 +252,7 @@ class SyncAutomationService {
       outcome: SyncAutomationOutcome.upToDate,
       title: 'Mode serveur uniquement',
       message:
-          'Les données métier sont lues et écrites directement via l’API OpenIRN.',
+          'Les données métier sont lues et écrites directement sur le serveur OpenIRN.',
     );
   }
 
@@ -264,15 +266,15 @@ class SyncAutomationService {
       await _appendLog(
         configuration: configuration,
         type: SyncLogEventType.importFailed,
-        title: 'Snapshot serveur inutilisable',
-        message: 'Le snapshot distant ne contient pas de payload importable.',
+        title: 'Données serveur inutilisables',
+        message: 'Les données serveur ne contiennent aucun contenu importable.',
         serverSyncId: snapshot.serverSyncId,
         sourceDeviceId: snapshot.deviceId,
       );
       return const SyncAutomationResult(
         outcome: SyncAutomationOutcome.failed,
-        title: 'Snapshot serveur inutilisable',
-        message: 'Le snapshot distant ne contient pas de payload importable.',
+        title: 'Données serveur inutilisables',
+        message: 'Les données serveur ne contiennent aucun contenu importable.',
       );
     }
 
@@ -308,14 +310,14 @@ class SyncAutomationService {
       await _appendLog(
         configuration: configuration,
         type: SyncLogEventType.importFailed,
-        title: 'Snapshot serveur refusé',
+        title: 'Données serveur refusées',
         message: error.message,
         serverSyncId: snapshot.serverSyncId,
         sourceDeviceId: snapshot.deviceId,
       );
       return SyncAutomationResult(
         outcome: SyncAutomationOutcome.failed,
-        title: 'Snapshot serveur refusé',
+        title: 'Données serveur refusées',
         message: error.message,
         serverSyncId: snapshot.serverSyncId,
       );

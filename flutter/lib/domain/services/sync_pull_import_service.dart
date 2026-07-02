@@ -25,15 +25,15 @@ class SyncPullImportService {
     if (type != 'openirn.syncPush') {
       throw SyncPullImportException(
         type.isEmpty
-            ? 'Le snapshot distant ne contient pas de type OpenIRN valide.'
-            : 'Type de snapshot distant non supporté : $type.',
+            ? 'Les données serveur ne sont pas dans un format OpenIRN valide.'
+            : 'Format de données serveur non pris en charge : $type.',
       );
     }
 
     final schemaVersion = _asInt(payload['schemaVersion']);
     if (schemaVersion == null || schemaVersion < 1) {
       throw const SyncPullImportException(
-        'Le snapshot distant ne contient pas de schemaVersion valide.',
+        'Les données serveur ne contiennent pas de version de format valide.',
       );
     }
 
@@ -42,7 +42,7 @@ class SyncPullImportService {
     if (exportedReferentialId.isNotEmpty &&
         exportedReferentialId != referential.id) {
       throw SyncPullImportException(
-        'Le snapshot distant cible le référentiel $exportedReferentialId, alors que le référentiel chargé est ${referential.id}.',
+        'Les données serveur concernent le référentiel $exportedReferentialId, alors que le référentiel chargé est ${referential.id}.',
       );
     }
 
@@ -66,7 +66,7 @@ class SyncPullImportService {
     final rawCampaigns = payload['campaigns'];
     if (rawCampaigns is! List) {
       throw const SyncPullImportException(
-        'Le snapshot distant ne contient pas de liste campaigns valide.',
+        'Les données serveur ne contiennent pas de liste de campagnes valide.',
       );
     }
 
@@ -147,7 +147,7 @@ class SyncPullImportService {
 
     if (importedCampaigns.isEmpty && mode != SyncPullImportMode.replaceLocal) {
       throw const SyncPullImportException(
-        'Aucune campagne exploitable trouvée dans le snapshot distant.',
+        'Aucune campagne exploitable trouvée dans les données serveur.',
       );
     }
 
@@ -163,12 +163,12 @@ class SyncPullImportService {
   List<AppUser> _parseUsers(Object? rawUsers, List<String> warnings) {
     if (rawUsers == null) {
       warnings.add(
-        'Le snapshot distant ne contient pas de liste users. Les affectations peuvent être incomplètes.',
+        'Les données serveur ne contiennent pas de liste d’utilisateurs. Les affectations peuvent être incomplètes.',
       );
       return const <AppUser>[];
     }
     if (rawUsers is! List) {
-      warnings.add('La liste users du snapshot distant est invalide.');
+      warnings.add('La liste des utilisateurs reçue du serveur est invalide.');
       return const <AppUser>[];
     }
 
@@ -215,7 +215,7 @@ class SyncPullImportService {
         ? serverSyncId.substring(0, 12)
         : serverSyncId;
     final importDescription =
-        'Importée depuis le snapshot serveur ${serverSyncId.isEmpty ? 'inconnu' : serverSyncId}'
+        'Importée depuis les données serveur ${serverSyncId.isEmpty ? 'inconnues' : serverSyncId}'
         '${sourceDeviceId.isEmpty ? '' : ' émis par $sourceDeviceId'}.';
 
     return LocalCampaign(
@@ -330,7 +330,7 @@ class SyncPullImportService {
       }
       if (!userIds.contains(userId)) {
         warnings.add(
-          'L’affectation distante du critère $criterionId vers $userId a été ignorée car l’utilisateur est absent du snapshot.',
+          'L’affectation distante du critère $criterionId vers $userId a été ignorée car l’utilisateur est absent des données serveur.',
         );
         continue;
       }
@@ -364,7 +364,7 @@ class SyncPullImportService {
         type: LocalActivityType.campaignCreated,
         title: 'Campagne importée depuis le serveur',
         description:
-            'Snapshot $serverSyncId${sourceDeviceId.isEmpty ? '' : ' depuis $sourceDeviceId'}.',
+            'Données serveur $serverSyncId${sourceDeviceId.isEmpty ? '' : ' depuis $sourceDeviceId'}.',
         now: importedAt,
       ),
     ];

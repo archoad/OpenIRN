@@ -21,6 +21,7 @@ enum OpenIrnPermission {
   resetCampaignAnswers,
   openAdministration,
   manageUsers,
+  manageTenants,
   manageAuthorizedDevices,
   viewSecurityAudit,
   manageServerSessions,
@@ -51,6 +52,7 @@ class AccessPolicyService {
       OpenIrnPermission.resetCampaignAnswers,
       OpenIrnPermission.openAdministration,
       OpenIrnPermission.manageUsers,
+      OpenIrnPermission.manageTenants,
       OpenIrnPermission.manageAuthorizedDevices,
       OpenIrnPermission.viewSecurityAudit,
       OpenIrnPermission.manageServerSessions,
@@ -121,6 +123,10 @@ class AccessPolicyService {
 
   bool canManageUsers(AppUser user) {
     return can(user, OpenIrnPermission.manageUsers);
+  }
+
+  bool canManageTenants(AppUser user) {
+    return can(user, OpenIrnPermission.manageTenants);
   }
 
   bool canManageAuthorizedDevices(AppUser user) {

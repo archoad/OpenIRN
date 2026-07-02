@@ -60,7 +60,7 @@ class AssessmentExportService {
     );
 
     return <String, dynamic>{
-      'schemaVersion': 6,
+      'schemaVersion': 7,
       'type': 'openirn.localAssessmentExport',
       'application': 'OpenIRN',
       'exportedAt': exportedAtUtc.toIso8601String(),
@@ -90,11 +90,12 @@ class AssessmentExportService {
         'license': referential.license,
         'sourceUrl': referential.sourceUrl,
         'sourceFilePath': referential.source.filePath,
+        'sourceCommitSha': referential.source.commitSha,
+        'sourceBlobId': referential.source.blobId,
         'checksumSha256': referential.checksumSha256,
       },
       'scoring': <String, dynamic>{
-        'method': 'R / (R + NR) * 100',
-        'notAnsweredPolicy': 'excluded_from_score_included_in_completion',
+        ...referential.scoring.toJson(),
         'global': _summaryToJson(globalSummary),
         'byPillar': <Map<String, dynamic>>[
           for (final entry in pillarSummaries.entries)
@@ -164,6 +165,9 @@ class AssessmentExportService {
       'nonResilientCriteria': summary.nonResilientCriteria,
       'notAnsweredCriteria': summary.notAnsweredCriteria,
       'completionRate': _round(summary.completionRate),
+      'openIrnRnrScore': summary.openIrnRnrScore == null
+          ? null
+          : _round(summary.openIrnRnrScore!),
       'officialScore': summary.officialScore == null
           ? null
           : _round(summary.officialScore!),

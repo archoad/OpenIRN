@@ -33,11 +33,16 @@ BACKUP_PROTECTIVE_MIN_INTERVAL_MINUTES = int(os.environ.get("OPENIRN_API_BACKUP_
 BACKUP_SIGNATURE_SECRET = os.environ.get("OPENIRN_API_BACKUP_SIGNATURE_SECRET", "").strip()
 SCHEMA_PATH = Path(os.environ.get("OPENIRN_API_SCHEMA", str(Path(__file__).resolve().parents[1] / "sql" / "schema.sql")))
 TENANT_RE = re.compile(r"[^a-zA-Z0-9_.-]+")
+DEFAULT_TENANT_ID = "default"
+SOLUTION_ADMIN_TENANT_ID = (
+    TENANT_RE.sub("_", os.environ.get("OPENIRN_SOLUTION_ADMIN_TENANT_ID", "archoad").strip())[:80]
+    or "archoad"
+)
 PIN_DEFAULT = os.environ.get("OPENIRN_DEFAULT_USER_PIN", "0000")
 PIN_ITERATIONS = int(os.environ.get("OPENIRN_PIN_ITERATIONS", "200000"))
 OFFICIAL_ADRI_GITLAB_API = os.environ.get("OPENIRN_ADRI_GITLAB_API", "https://gitlab.com/api/v4").rstrip("/")
 OFFICIAL_ADRI_PROJECT_PATH = os.environ.get("OPENIRN_ADRI_PROJECT_PATH", "digitalresilienceinitiative/adri-irn")
-OFFICIAL_ADRI_TREE_PATH = os.environ.get("OPENIRN_ADRI_TREE_PATH", "Référentiel d'évaluation IRN (FR)")
+OFFICIAL_ADRI_TREE_PATH = os.environ.get("OPENIRN_ADRI_TREE_PATH", "Grille d'évaluation IRN (FR)/xlsx")
 OFFICIAL_ADRI_DEFAULT_BRANCH = os.environ.get("OPENIRN_ADRI_DEFAULT_BRANCH", "main")
 OFFICIAL_ADRI_SOURCE_URL = os.environ.get("OPENIRN_ADRI_SOURCE_URL", "https://gitlab.com/digitalresilienceinitiative/adri-irn")
 OFFICIAL_ADRI_LICENSE = os.environ.get("OPENIRN_ADRI_LICENSE", "CC BY-NC-ND 4.0")
@@ -392,14 +397,30 @@ def _request_auth_context(request: Request) -> dict[str, Any] | None:
     return _device_token_auth_context(provided_token)
 
 
+def _is_solution_admin_context(context: dict[str, Any] | None) -> bool:
+    if context is None:
+        return False
+    if str(context.get("authMode") or "") == "server_bearer":
+        return True
+    return (
+        str(context.get("authMode") or "") == "session"
+        and str(context.get("tenantId") or "") == SOLUTION_ADMIN_TENANT_ID
+        and _role_normalize(context.get("userRole")) == "administrator"
+    )
+
+
+def _request_has_solution_admin_authorization(request: Request) -> bool:
+    return _is_solution_admin_context(_request_auth_context(request))
+
+
 def _request_has_api_authorization(request: Request) -> bool:
     return _request_auth_context(request) is not None
 
 
 def _authorization_unavailable_exception() -> HTTPException:
     if not _configured_api_token():
-        return HTTPException(status_code=503, detail="OpenIRN API token is not configured on the server")
-    return HTTPException(status_code=403, detail="Invalid API token or expired session")
+        return HTTPException(status_code=503, detail="Le jeton API OpenIRN n’est pas configuré sur le serveur")
+    return HTTPException(status_code=403, detail="Session expirée ou jeton API invalide")
 
 
 def _require_role_authorization(
@@ -420,15 +441,17 @@ def _require_role_authorization(
     if auth_mode == "legacy_device_token":
         raise HTTPException(
             status_code=403,
-            detail="Legacy device tokens are not authorized for mutating or administration endpoints",
+            detail="Ce terminal n’est pas autorisé pour modifier les données ou administrer OpenIRN",
         )
-
-    if tenant_id and str(context.get("tenantId") or "") != tenant_id:
-        raise HTTPException(status_code=403, detail="Session tenant mismatch")
 
     role = _role_normalize(context.get("userRole"))
     if role not in allowed_roles:
         raise HTTPException(status_code=403, detail=detail)
+
+    if tenant_id and str(context.get("tenantId") or "") != tenant_id:
+        if _is_solution_admin_context(context):
+            return context
+        raise HTTPException(status_code=403, detail="La session ne correspond pas à l’espace de travail demandé")
 
     return context
 
@@ -468,7 +491,9 @@ def _require_device_or_authorized_read(request: Request, tenant_id: str) -> dict
             return context
         if not tenant_id or str(context.get("tenantId") or "") == tenant_id:
             return context
-        raise HTTPException(status_code=403, detail="Authorization tenant mismatch")
+        if _is_solution_admin_context(context):
+            return context
+        raise HTTPException(status_code=403, detail="L’autorisation ne correspond pas à l’espace de travail demandé")
     _require_active_device(request, tenant_id)
     return None
 
@@ -724,6 +749,9 @@ def _apply_schema() -> None:
         raise RuntimeError(f"OpenIRN SQLite schema not found: {SCHEMA_PATH}")
     with _db() as con:
         con.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        _migrate_tenants_schema(con)
+        _ensure_tenant(con, DEFAULT_TENANT_ID)
+        _sync_solution_administrators_to_all_tenants(con)
         _backfill_official_referential_history(con)
         con.commit()
 
@@ -733,16 +761,337 @@ def _startup() -> None:
     _apply_schema()
 
 
-def _ensure_tenant(con: sqlite3.Connection, tenant_id: str) -> None:
+
+def _table_columns(con: sqlite3.Connection, table_name: str) -> set[str]:
+    rows = con.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {str(row[1]) for row in rows}
+
+
+def _migrate_tenants_schema(con: sqlite3.Connection) -> None:
+    columns = _table_columns(con, "tenants")
+    if "display_name" not in columns:
+        con.execute("ALTER TABLE tenants ADD COLUMN display_name TEXT NOT NULL DEFAULT ''")
+    if "description" not in columns:
+        con.execute("ALTER TABLE tenants ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+    if "permanent" not in columns:
+        con.execute("ALTER TABLE tenants ADD COLUMN permanent INTEGER NOT NULL DEFAULT 0")
+
+
+def _tenant_payload_from_row(con: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
+    tenant_id = str(row["id"] or "")
+    display_name = str(_row_value(row, "display_name", "") or "").strip()
+    user_count = int(
+        con.execute("SELECT COUNT(*) FROM users WHERE tenant_id = ?", (tenant_id,)).fetchone()[0]
+    )
+    active_user_count = int(
+        con.execute(
+            "SELECT COUNT(*) FROM users WHERE tenant_id = ? AND active = 1",
+            (tenant_id,),
+        ).fetchone()[0]
+    )
+    campaign_count = int(
+        con.execute(
+            "SELECT COUNT(*) FROM campaign_states WHERE tenant_id = ?",
+            (tenant_id,),
+        ).fetchone()[0]
+    )
+    pilot_count = int(
+        con.execute(
+            """
+            SELECT COUNT(*) FROM users
+            WHERE tenant_id = ? AND active = 1 AND role = 'campaign_manager'
+            """,
+            (tenant_id,),
+        ).fetchone()[0]
+    )
+    admin_count = int(
+        con.execute(
+            """
+            SELECT COUNT(*) FROM users
+            WHERE tenant_id = ? AND active = 1 AND role = 'administrator'
+            """,
+            (tenant_id,),
+        ).fetchone()[0]
+    )
+    return {
+        "tenantId": tenant_id,
+        "id": tenant_id,
+        "displayName": display_name or tenant_id,
+        "description": str(_row_value(row, "description", "") or ""),
+        "permanent": bool(int(_row_value(row, "permanent", 0) or 0)) or tenant_id == DEFAULT_TENANT_ID,
+        "isDefault": tenant_id == DEFAULT_TENANT_ID,
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+        "userCount": user_count,
+        "activeUserCount": active_user_count,
+        "pilotCount": pilot_count,
+        "administratorCount": admin_count,
+        "campaignCount": campaign_count,
+    }
+
+
+def _list_tenants(con: sqlite3.Connection) -> list[dict[str, Any]]:
+    _ensure_tenant(con, DEFAULT_TENANT_ID)
+    rows = con.execute(
+        """
+        SELECT id, created_at, updated_at, display_name, description, permanent
+        FROM tenants
+        ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, id ASC
+        """,
+        (DEFAULT_TENANT_ID,),
+    ).fetchall()
+    return [_tenant_payload_from_row(con, row) for row in rows]
+
+
+def _safe_tenant_id_for_creation(value: Any) -> str:
+    tenant_id = _safe_segment(value, "").strip("._-")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="Missing tenantId")
+    if tenant_id != str(value or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="tenantId can only contain letters, digits, underscore, dot and dash",
+        )
+    if len(tenant_id) > 80:
+        raise HTTPException(status_code=400, detail="tenantId is too long")
+    return tenant_id
+
+
+
+def _copy_user_to_tenant(
+    con: sqlite3.Connection,
+    *,
+    source_tenant_id: str,
+    target_tenant_id: str,
+    user_id: str,
+) -> None:
+    if not user_id:
+        return
+    source_user = con.execute(
+        """
+        SELECT user_id, first_name, last_name, email, role, active,
+               created_at, updated_at, payload_json
+        FROM users
+        WHERE tenant_id = ? AND user_id = ? AND active = 1
+        """,
+        (source_tenant_id, user_id),
+    ).fetchone()
+    if source_user is None:
+        return
+    now = _utc_now().isoformat()
+    payload = _parse_json(source_user["payload_json"], {})
+    if not isinstance(payload, dict):
+        payload = {}
+    payload.update(
+        {
+            "id": source_user["user_id"],
+            "firstName": source_user["first_name"],
+            "lastName": source_user["last_name"],
+            "email": source_user["email"],
+            "role": source_user["role"],
+            "active": bool(source_user["active"]),
+            "createdAt": source_user["created_at"],
+            "updatedAt": now,
+        }
+    )
+    con.execute(
+        """
+        INSERT INTO users(
+            tenant_id, user_id, first_name, last_name, email, role,
+            active, created_at, updated_at, payload_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(tenant_id, user_id) DO NOTHING
+        """,
+        (
+            target_tenant_id,
+            source_user["user_id"],
+            source_user["first_name"],
+            source_user["last_name"],
+            source_user["email"],
+            source_user["role"],
+            int(source_user["active"] or 0),
+            source_user["created_at"],
+            now,
+            _canonical_json(payload),
+        ),
+    )
+    credential = con.execute(
+        """
+        SELECT algorithm, iterations, salt, pin_hash, requires_change, updated_at
+        FROM user_credentials
+        WHERE tenant_id = ? AND user_id = ?
+        """,
+        (source_tenant_id, user_id),
+    ).fetchone()
+    if credential is not None:
+        con.execute(
+            """
+            INSERT INTO user_credentials(
+                tenant_id, user_id, algorithm, iterations, salt, pin_hash,
+                requires_change, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(tenant_id, user_id) DO NOTHING
+            """,
+            (
+                target_tenant_id,
+                user_id,
+                credential["algorithm"],
+                credential["iterations"],
+                credential["salt"],
+                credential["pin_hash"],
+                credential["requires_change"],
+                credential["updated_at"],
+            ),
+        )
+
+
+def _ensure_device_access_for_tenant(
+    con: sqlite3.Connection,
+    *,
+    source_tenant_id: str,
+    target_tenant_id: str,
+    device_id: str,
+    actor_user_id: str,
+) -> None:
+    if not device_id:
+        return
+    existing = con.execute(
+        """
+        SELECT name, platform
+        FROM authorized_devices
+        WHERE tenant_id = ? AND device_id = ? AND status = 'active' AND revoked_at IS NULL
+        """,
+        (target_tenant_id, device_id),
+    ).fetchone()
+    if existing is not None:
+        return
+
+    source = con.execute(
+        """
+        SELECT name, platform
+        FROM authorized_devices
+        WHERE tenant_id = ? AND device_id = ? AND status = 'active' AND revoked_at IS NULL
+        """,
+        (source_tenant_id, device_id),
+    ).fetchone()
     now = _utc_now().isoformat()
     con.execute(
         """
-        INSERT INTO tenants(id, created_at, updated_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at
+        INSERT INTO authorized_devices(
+            tenant_id, device_id, name, platform, token_hash, status,
+            created_at, last_seen_at, revoked_at, invited_by_user_id, enrollment_id
+        ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, NULL, ?, ?)
+        ON CONFLICT(tenant_id, device_id) DO UPDATE SET
+            status = 'active',
+            revoked_at = NULL,
+            last_seen_at = excluded.last_seen_at
         """,
-        (tenant_id, now, now),
+        (
+            target_tenant_id,
+            device_id,
+            str(source["name"] if source else "Terminal OpenIRN")[:120],
+            str(source["platform"] if source else "")[:80],
+            _secret_hash(f"tenant-device:{target_tenant_id}:{device_id}:{uuid.uuid4().hex}"),
+            now,
+            now,
+            actor_user_id,
+            "tenant-bootstrap",
+        ),
     )
+    _record_device_audit(
+        con,
+        target_tenant_id,
+        "tenant.device_authorized",
+        device_id=device_id,
+        payload={"sourceTenantId": source_tenant_id, "actorUserId": actor_user_id},
+    )
+
+def _ensure_tenant(con: sqlite3.Connection, tenant_id: str) -> None:
+    now = _utc_now().isoformat()
+    safe_tenant_id = _safe_segment(tenant_id, DEFAULT_TENANT_ID)
+    permanent = 1 if safe_tenant_id == DEFAULT_TENANT_ID else 0
+    con.execute(
+        """
+        INSERT INTO tenants(id, created_at, updated_at, display_name, description, permanent)
+        VALUES (?, ?, ?, ?, '', ?)
+        ON CONFLICT(id) DO UPDATE SET
+            updated_at = CASE WHEN tenants.updated_at = '' THEN excluded.updated_at ELSE tenants.updated_at END,
+            permanent = CASE WHEN tenants.id = ? THEN 1 ELSE tenants.permanent END
+        """,
+        (safe_tenant_id, now, now, safe_tenant_id, permanent, DEFAULT_TENANT_ID),
+    )
+
+
+
+def _sync_solution_administrators_to_all_tenants(con: sqlite3.Connection) -> None:
+    """Replicate solution administrators from the solution tenant to tenants.
+
+    This is a bootstrap convenience, not a data merge between tenants: only
+    active administrator identities, their PIN credentials and active terminals
+    from the solution tenant are copied. Campaigns and ordinary users remain
+    tenant-local. Cross-tenant API authorization still relies on the original
+    solution-tenant session token.
+    """
+    source_tenant_id = SOLUTION_ADMIN_TENANT_ID
+    if not source_tenant_id:
+        return
+
+    source_exists = con.execute(
+        "SELECT 1 FROM tenants WHERE id = ?",
+        (source_tenant_id,),
+    ).fetchone()
+    if source_exists is None:
+        return
+
+    administrators = con.execute(
+        """
+        SELECT user_id
+        FROM users
+        WHERE tenant_id = ? AND active = 1 AND role = 'administrator'
+        ORDER BY user_id ASC
+        """,
+        (source_tenant_id,),
+    ).fetchall()
+    if not administrators:
+        return
+
+    tenants = con.execute(
+        "SELECT id FROM tenants WHERE id <> ? ORDER BY id ASC",
+        (source_tenant_id,),
+    ).fetchall()
+    if not tenants:
+        return
+
+    active_devices = con.execute(
+        """
+        SELECT device_id
+        FROM authorized_devices
+        WHERE tenant_id = ? AND status = 'active' AND revoked_at IS NULL
+        ORDER BY device_id ASC
+        """,
+        (source_tenant_id,),
+    ).fetchall()
+    actor_user_id = str(administrators[0]["user_id"] or "solution-admin")
+
+    for tenant_row in tenants:
+        target_tenant_id = str(tenant_row["id"] or "").strip()
+        if not target_tenant_id:
+            continue
+        for administrator in administrators:
+            _copy_user_to_tenant(
+                con,
+                source_tenant_id=source_tenant_id,
+                target_tenant_id=target_tenant_id,
+                user_id=str(administrator["user_id"] or ""),
+            )
+        for device in active_devices:
+            _ensure_device_access_for_tenant(
+                con,
+                source_tenant_id=source_tenant_id,
+                target_tenant_id=target_tenant_id,
+                device_id=str(device["device_id"] or ""),
+                actor_user_id=actor_user_id,
+            )
 
 
 def _device_from_row(row: sqlite3.Row) -> dict[str, Any]:
@@ -867,8 +1216,8 @@ ADRI_DEFAULT_PILLAR_LABELS = {
     "RES-4": "Résilience opérationnelle",
     "RES-5": "Résilience Supply-Chain",
     "RES-6": "Résilience Technologique",
-    "RES-7": "Sécurité & Résilience",
-    "RES-8": "Résilience Environnementale et énergétique",
+    "RES-7": "Résilience Sécurité",
+    "RES-8": "Résilience Environnementale",
 }
 
 ADRI_EXPECTED_HEADERS = {
@@ -880,6 +1229,22 @@ ADRI_EXPECTED_HEADERS = {
     "Portée du critère": "sourceScope",
     "Références réglementaires (TBD)": "regulatoryReferences",
     "Recommandations": "recommendations",
+}
+
+OPENIRN_RNR_SCORING_METADATA = {
+    "method": "R / (R + NR) * 100",
+    "methodLabel": "Score OpenIRN R/NR",
+    "methodStatus": "public_rnr_unweighted",
+    "notAnsweredPolicy": "excluded_from_score_included_in_completion",
+    "criteriaWeightPolicy": "uniform_per_answered_criterion",
+    "globalAggregationPolicy": "all_answered_criteria_same_weight",
+    "weightedOfficialMethodImplemented": False,
+    "officialWeightedMethodStatus": "not_implemented_no_public_formula_available",
+    "disclaimer": (
+        "Les sources publiques IRN décrivent une cartographie pondérée et une évaluation "
+        "multicritères, mais ne publient pas de formule de pondération exploitable dans "
+        "OpenIRN. Le score affiché reste donc un score OpenIRN R/NR non pondéré."
+    ),
 }
 
 
@@ -1054,11 +1419,12 @@ def _adri_parse_workbook(raw_xlsx: bytes, *, version: str, remote: dict[str, Any
             "projectPath": OFFICIAL_ADRI_PROJECT_PATH,
             "defaultBranch": remote.get("defaultBranch") or OFFICIAL_ADRI_DEFAULT_BRANCH,
             "filePath": remote.get("filePath") or "",
-            "commitSha": remote.get("blobId") or "",
+            "commitSha": remote.get("commitSha") or "",
             "blobId": remote.get("blobId") or "",
             "checksumSha256": hashlib.sha256(raw_xlsx).hexdigest(),
             "license": OFFICIAL_ADRI_LICENSE,
         },
+        "scoring": dict(OPENIRN_RNR_SCORING_METADATA),
         "pillars": pillars,
         "criteria": criteria,
         "importWarnings": [
@@ -1108,6 +1474,8 @@ def _adri_validation_report(referential: dict[str, Any]) -> dict[str, Any]:
             "version": referential.get("version"),
             "pillars": len(pillars),
             "criteria": len(criteria),
+            "scoringMethodStatus": OPENIRN_RNR_SCORING_METADATA["methodStatus"],
+            "weightedOfficialMethodImplemented": OPENIRN_RNR_SCORING_METADATA["weightedOfficialMethodImplemented"],
         },
     }
 
@@ -1171,6 +1539,25 @@ def _gitlab_repository_tree(
     return [item for item in tree if isinstance(item, dict)]
 
 
+def _gitlab_latest_commit_for_file(project_id: str, file_path: str, ref: str) -> str:
+    if not file_path:
+        return ""
+    try:
+        commits = _gitlab_request_json(
+            f"/projects/{project_id}/repository/commits",
+            {"ref_name": ref, "path": file_path, "per_page": "1"},
+        )
+    except HTTPException:
+        # Commit SHA is an audit enrichment only. The blob id remains the
+        # stable content marker used for update detection.
+        return ""
+    if isinstance(commits, list) and commits:
+        first = commits[0]
+        if isinstance(first, dict):
+            return str(first.get("id") or first.get("short_id") or "")
+    return ""
+
+
 def _official_remote_latest() -> dict[str, Any]:
     project_id = _gitlab_quote(OFFICIAL_ADRI_PROJECT_PATH)
     project = _gitlab_request_json(f"/projects/{project_id}")
@@ -1178,8 +1565,9 @@ def _official_remote_latest() -> dict[str, Any]:
 
     candidate_tree_paths = [
         OFFICIAL_ADRI_TREE_PATH,
-        "Référentiel d'évaluation IRN (FR)",
         "Grille d'évaluation IRN (FR)/xlsx",
+        "Grille d'évaluation IRN (FR)",
+        "Référentiel d'évaluation IRN (FR)",
         "",
     ]
 
@@ -1214,11 +1602,13 @@ def _official_remote_latest() -> dict[str, Any]:
                 continue
             version = _adri_version_from_filename(name)
             file_path = str(item.get("path") or "")
+            commit_sha = _gitlab_latest_commit_for_file(project_id, file_path, default_branch)
             candidates.append({
                 "version": version,
                 "fileName": name,
                 "filePath": file_path,
                 "blobId": str(item.get("id") or ""),
+                "commitSha": commit_sha,
                 "defaultBranch": default_branch,
                 "projectPath": OFFICIAL_ADRI_PROJECT_PATH,
                 "sourceUrl": OFFICIAL_ADRI_SOURCE_URL,
@@ -1235,7 +1625,7 @@ def _official_remote_latest() -> dict[str, Any]:
                 detail = (
                     "Le chemin GitLab configuré pour le référentiel aDRI est introuvable. "
                     "Le dépôt officiel utilise maintenant le dossier "
-                    "Référentiel d'évaluation IRN (FR)/V1. "
+                    "Grille d'évaluation IRN (FR)/xlsx. "
                     "Vérifiez OPENIRN_ADRI_TREE_PATH si cette variable est définie."
                 )
                 raise HTTPException(status_code=404, detail=detail) from last_error
@@ -1259,6 +1649,7 @@ def _download_official_adri_xlsx(remote: dict[str, Any]) -> bytes:
     return raw
 
 
+
 def _row_value(row: sqlite3.Row, key: str, fallback: Any = "") -> Any:
     return row[key] if key in row.keys() else fallback
 
@@ -1276,9 +1667,18 @@ def _official_referential_summary_from_row(row: sqlite3.Row | None) -> dict[str,
     if row is None:
         return None
     report = _parse_json(row["validation_report_json"], {})
+    payload = _parse_json(_row_value(row, "payload_json", "{}"), {})
+    source_metadata = payload.get("source") if isinstance(payload, dict) else {}
+    if not isinstance(source_metadata, dict):
+        source_metadata = {}
+    scoring_metadata = payload.get("scoring") if isinstance(payload, dict) else {}
+    if not isinstance(scoring_metadata, dict):
+        scoring_metadata = dict(OPENIRN_RNR_SCORING_METADATA)
     source_url = row["source_url"]
     default_branch = row["default_branch"]
     file_path = row["file_path"]
+    source_blob_id = str(source_metadata.get("blobId") or row["source_blob_id"] or "")
+    source_commit_sha = str(source_metadata.get("commitSha") or "")
     return {
         "historyId": _row_value(row, "history_id", ""),
         "referentialId": row["referential_id"],
@@ -1288,7 +1688,8 @@ def _official_referential_summary_from_row(row: sqlite3.Row | None) -> dict[str,
         "projectPath": row["project_path"],
         "defaultBranch": default_branch,
         "filePath": file_path,
-        "sourceBlobId": row["source_blob_id"],
+        "sourceBlobId": source_blob_id,
+        "sourceCommitSha": source_commit_sha,
         "sourceSha256": row["source_sha256"],
         "canonicalSha256": row["canonical_sha256"],
         "downloadedAt": row["downloaded_at"],
@@ -1297,12 +1698,50 @@ def _official_referential_summary_from_row(row: sqlite3.Row | None) -> dict[str,
         "criterionCount": row["criterion_count"],
         "triggeredByUserId": _row_value(row, "triggered_by_user_id", ""),
         "validationStatus": report.get("status") if isinstance(report, dict) else "unknown",
+        "scoringMethod": scoring_metadata,
         "webUrl": _official_referential_web_url(source_url, default_branch, file_path),
     }
 
 
+def _load_global_official_referential(
+    con: sqlite3.Connection,
+    *,
+    preferred_tenant_id: str = "",
+) -> sqlite3.Row | None:
+    """Return the active official referential shared by the OpenIRN instance.
+
+    Users, campaigns, sessions and devices remain tenant-scoped, but the
+    official aDRI/IRN referential is an instance-level resource.  Older
+    versions of OpenIRN stored it with a tenant_id; this helper keeps backwards
+    compatibility by selecting the best active row across tenants.
+    """
+    preferred = _safe_segment(preferred_tenant_id, "")
+    rows = con.execute(
+        """
+        SELECT tenant_id, referential_id, version, active, source_url, project_path,
+               default_branch, file_path, source_blob_id, source_sha256,
+               canonical_sha256, downloaded_at, imported_at, pillar_count,
+               criterion_count, import_warnings_json, validation_report_json, payload_json
+        FROM official_referentials
+        WHERE active = 1
+        ORDER BY
+            CASE
+                WHEN tenant_id = ? THEN 0
+                WHEN tenant_id = ? THEN 1
+                WHEN tenant_id = ? THEN 2
+                ELSE 3
+            END,
+            imported_at DESC
+        LIMIT 1
+        """,
+        (preferred, SOLUTION_ADMIN_TENANT_ID, DEFAULT_TENANT_ID),
+    ).fetchone()
+    return rows
+
+
 def _load_current_official_referential(con: sqlite3.Connection, tenant_id: str) -> sqlite3.Row | None:
-    return con.execute(
+    requested_tenant_id = _safe_segment(tenant_id, DEFAULT_TENANT_ID)
+    local = con.execute(
         """
         SELECT tenant_id, referential_id, version, active, source_url, project_path,
                default_branch, file_path, source_blob_id, source_sha256,
@@ -1313,8 +1752,14 @@ def _load_current_official_referential(con: sqlite3.Connection, tenant_id: str) 
         ORDER BY imported_at DESC
         LIMIT 1
         """,
-        (tenant_id,),
+        (requested_tenant_id,),
     ).fetchone()
+    if local is not None:
+        return local
+    return _load_global_official_referential(
+        con,
+        preferred_tenant_id=requested_tenant_id,
+    )
 
 
 def _official_referential_history_id(referential_id: str, canonical_sha256: str, imported_at: str) -> str:
@@ -1394,6 +1839,150 @@ def _backfill_official_referential_history(con: sqlite3.Connection) -> None:
             ),
         )
 
+
+
+def _seed_official_referential_from_default(
+    con: sqlite3.Connection,
+    tenant_id: str,
+    *,
+    source_tenant_id: str = DEFAULT_TENANT_ID,
+) -> bool:
+    """Seed a tenant with the default official referential when none is active.
+
+    Tenants remain isolated: this only creates tenant-local copies of the
+    official referential metadata/payload. Campaigns, users, sessions and device
+    authorizations are never copied by this helper.
+    """
+    target_tenant_id = _safe_segment(tenant_id, DEFAULT_TENANT_ID)
+    if target_tenant_id == source_tenant_id:
+        return False
+
+    existing = con.execute(
+        """
+        SELECT 1
+        FROM official_referentials
+        WHERE tenant_id = ? AND active = 1
+        LIMIT 1
+        """,
+        (target_tenant_id,),
+    ).fetchone()
+    if existing is not None:
+        return False
+
+    source = con.execute(
+        """
+        SELECT tenant_id, referential_id, version, active, source_url, project_path,
+               default_branch, file_path, source_blob_id, source_sha256,
+               canonical_sha256, downloaded_at, imported_at, pillar_count,
+               criterion_count, import_warnings_json, validation_report_json, payload_json
+        FROM official_referentials
+        WHERE tenant_id = ? AND active = 1
+        ORDER BY imported_at DESC
+        LIMIT 1
+        """,
+        (source_tenant_id,),
+    ).fetchone()
+    if source is None:
+        return False
+
+    _ensure_tenant(con, target_tenant_id)
+    con.execute(
+        """
+        INSERT INTO official_referentials(
+            tenant_id, referential_id, version, active, source_url, project_path,
+            default_branch, file_path, source_blob_id, source_sha256,
+            canonical_sha256, downloaded_at, imported_at, pillar_count,
+            criterion_count, import_warnings_json, validation_report_json, payload_json
+        ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(tenant_id, referential_id) DO UPDATE SET
+            active = 1,
+            version = excluded.version,
+            source_url = excluded.source_url,
+            project_path = excluded.project_path,
+            default_branch = excluded.default_branch,
+            file_path = excluded.file_path,
+            source_blob_id = excluded.source_blob_id,
+            source_sha256 = excluded.source_sha256,
+            canonical_sha256 = excluded.canonical_sha256,
+            downloaded_at = excluded.downloaded_at,
+            imported_at = excluded.imported_at,
+            pillar_count = excluded.pillar_count,
+            criterion_count = excluded.criterion_count,
+            import_warnings_json = excluded.import_warnings_json,
+            validation_report_json = excluded.validation_report_json,
+            payload_json = excluded.payload_json
+        """,
+        (
+            target_tenant_id,
+            source["referential_id"],
+            source["version"],
+            source["source_url"],
+            source["project_path"],
+            source["default_branch"],
+            source["file_path"],
+            source["source_blob_id"],
+            source["source_sha256"],
+            source["canonical_sha256"],
+            source["downloaded_at"],
+            source["imported_at"],
+            source["pillar_count"],
+            source["criterion_count"],
+            source["import_warnings_json"],
+            source["validation_report_json"],
+            source["payload_json"],
+        ),
+    )
+
+    _backfill_official_referential_history(con)
+    source_history_rows = con.execute(
+        """
+        SELECT history_id, referential_id, version, active, source_url, project_path,
+               default_branch, file_path, source_blob_id, source_sha256,
+               canonical_sha256, downloaded_at, imported_at, pillar_count,
+               criterion_count, triggered_by_user_id, import_warnings_json,
+               validation_report_json, payload_json
+        FROM official_referential_history
+        WHERE tenant_id = ?
+        ORDER BY imported_at ASC, history_id ASC
+        """,
+        (source_tenant_id,),
+    ).fetchall()
+    for row in source_history_rows:
+        con.execute(
+            """
+            INSERT OR IGNORE INTO official_referential_history(
+                tenant_id, history_id, referential_id, version, active,
+                source_url, project_path, default_branch, file_path,
+                source_blob_id, source_sha256, canonical_sha256,
+                downloaded_at, imported_at, pillar_count, criterion_count,
+                triggered_by_user_id, import_warnings_json,
+                validation_report_json, payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                target_tenant_id,
+                row["history_id"],
+                row["referential_id"],
+                row["version"],
+                row["active"],
+                row["source_url"],
+                row["project_path"],
+                row["default_branch"],
+                row["file_path"],
+                row["source_blob_id"],
+                row["source_sha256"],
+                row["canonical_sha256"],
+                row["downloaded_at"],
+                row["imported_at"],
+                row["pillar_count"],
+                row["criterion_count"],
+                row["triggered_by_user_id"],
+                row["import_warnings_json"],
+                row["validation_report_json"],
+                row["payload_json"],
+            ),
+        )
+    return True
 
 def _list_official_referential_history(
     con: sqlite3.Connection,
@@ -1743,7 +2332,7 @@ def _merge_central_users(con: sqlite3.Connection, tenant_id: str, raw_users: Any
 def _set_user_pin(con: sqlite3.Connection, tenant_id: str, user_id: str, pin: str, *, requires_change: bool) -> None:
     cleaned_pin = str(pin or "").strip()
     if len(cleaned_pin) < 4 or len(cleaned_pin) > 32:
-        raise HTTPException(status_code=400, detail="PIN must contain between 4 and 32 characters")
+        raise HTTPException(status_code=400, detail="Le code personnel doit contenir entre 4 et 32 caractères")
 
     user_exists = con.execute(
         "SELECT 1 FROM users WHERE tenant_id = ? AND user_id = ?",
@@ -2657,6 +3246,146 @@ def _maintenance_status(limit: int = 10, tenant_id: str = "default") -> dict[str
     }
 
 
+
+@app.get("/tenants")
+def tenants(
+    request: Request,
+    tenantId: str = Query(default=DEFAULT_TENANT_ID, min_length=1, max_length=80),
+) -> dict[str, Any]:
+    requester_tenant_id = _safe_segment(tenantId, DEFAULT_TENANT_ID)
+    # Tenant discovery is intentionally public: the Flutter client must be able
+    # to start without a selected tenant or session, then let the user choose
+    # the workspace before checking terminal enrollment.
+    with _db() as con:
+        _ensure_tenant(con, requester_tenant_id)
+        _sync_solution_administrators_to_all_tenants(con)
+        items = _list_tenants(con)
+        con.commit()
+    solution_administrator = _request_has_solution_admin_authorization(request)
+    return {
+        "status": "ok",
+        "type": "openirn.tenants",
+        "application": "OpenIRN API",
+        "version": APP_VERSION,
+        "tenantId": requester_tenant_id,
+        "defaultTenantId": DEFAULT_TENANT_ID,
+        "solutionAdminTenantId": SOLUTION_ADMIN_TENANT_ID,
+        "solutionAdministrator": solution_administrator,
+        "tenantCount": len(items),
+        "tenants": items,
+        "serverTime": _utc_now().isoformat(),
+    }
+
+
+@app.post("/tenants")
+async def tenant_create(request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Payload must be a JSON object")
+
+    requester_tenant_id = _safe_segment(payload.get("requesterTenantId") or payload.get("adminTenantId") or payload.get("sourceTenantId"), DEFAULT_TENANT_ID)
+    auth_context = _require_admin_authorization(request, requester_tenant_id)
+    tenant_id = _safe_tenant_id_for_creation(payload.get("tenantId"))
+    if tenant_id == DEFAULT_TENANT_ID:
+        raise HTTPException(status_code=409, detail="L’espace par défaut est permanent et existe déjà")
+
+    display_name = str(payload.get("displayName") or payload.get("name") or tenant_id).strip()[:160]
+    description = str(payload.get("description") or "").strip()[:500]
+    pilot_payload = payload.get("pilot")
+    if not isinstance(pilot_payload, dict):
+        raise HTTPException(status_code=400, detail="Missing pilot user")
+    pilot_email = str(pilot_payload.get("email") or "").strip().lower()
+    pilot_first_name = str(pilot_payload.get("firstName") or "").strip()
+    pilot_last_name = str(pilot_payload.get("lastName") or "").strip()
+    pilot_pin = str(pilot_payload.get("pin") or payload.get("pilotPin") or "").strip()
+    if not pilot_email:
+        raise HTTPException(status_code=400, detail="Pilot email is required")
+    if len(pilot_pin) < 4 or len(pilot_pin) > 32:
+        raise HTTPException(status_code=400, detail="Pilot Le code personnel doit contenir entre 4 et 32 caractères")
+
+    now = _utc_now().isoformat()
+    pilot_user = {
+        "id": str(pilot_payload.get("id") or f"pilot-{uuid.uuid4().hex[:12]}").strip()[:120],
+        "firstName": pilot_first_name,
+        "lastName": pilot_last_name,
+        "email": pilot_email,
+        "role": "campaign_manager",
+        "active": True,
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    device_id = str(auth_context.get("deviceId") or _request_device_id(request, payload) or "").strip()[:160]
+    actor_user_id = str(auth_context.get("userId") or "server").strip()[:120]
+
+    with _db() as con:
+        with con:
+            _ensure_tenant(con, DEFAULT_TENANT_ID)
+            existing = con.execute("SELECT 1 FROM tenants WHERE id = ?", (tenant_id,)).fetchone()
+            if existing is not None:
+                raise HTTPException(status_code=409, detail="Cet espace de travail existe déjà")
+            con.execute(
+                """
+                INSERT INTO tenants(id, created_at, updated_at, display_name, description, permanent)
+                VALUES (?, ?, ?, ?, ?, 0)
+                """,
+                (tenant_id, now, now, display_name or tenant_id, description),
+            )
+            _copy_user_to_tenant(
+                con,
+                source_tenant_id=requester_tenant_id,
+                target_tenant_id=tenant_id,
+                user_id=actor_user_id,
+            )
+            _save_user(con, tenant_id, pilot_user)
+            _set_user_pin(con, tenant_id, pilot_user["id"], pilot_pin, requires_change=False)
+            _ensure_device_access_for_tenant(
+                con,
+                source_tenant_id=requester_tenant_id,
+                target_tenant_id=tenant_id,
+                device_id=device_id,
+                actor_user_id=actor_user_id,
+            )
+            _seed_official_referential_from_default(
+                con,
+                tenant_id,
+                source_tenant_id=requester_tenant_id,
+            )
+            _record_device_audit(
+                con,
+                requester_tenant_id,
+                "tenant.created",
+                device_id=device_id,
+                payload={
+                    "tenantId": tenant_id,
+                    "displayName": display_name or tenant_id,
+                    "pilotUserId": pilot_user["id"],
+                    "actorUserId": actor_user_id,
+                },
+            )
+            _sync_solution_administrators_to_all_tenants(con)
+            items = _list_tenants(con)
+
+    return {
+        "status": "created",
+        "type": "openirn.tenantCreated",
+        "application": "OpenIRN API",
+        "version": APP_VERSION,
+        "tenantId": tenant_id,
+        "requesterTenantId": requester_tenant_id,
+        "defaultTenantId": DEFAULT_TENANT_ID,
+        "solutionAdminTenantId": SOLUTION_ADMIN_TENANT_ID,
+        "solutionAdministrator": _is_solution_admin_context(auth_context),
+        "serverTime": _utc_now().isoformat(),
+        "tenant": next((item for item in items if item.get("tenantId") == tenant_id), None),
+        "pilot": {key: value for key, value in pilot_user.items() if key != "pin"},
+        "tenants": items,
+        "message": "Espace de travail créé avec un Pilote IRN initial.",
+    }
+
+
 @app.get("/devices")
 def devices(
     request: Request,
@@ -2933,6 +3662,7 @@ def official_referential_status(
     remote = _official_remote_latest()
     with _db() as con:
         _ensure_tenant(con, tenant_id)
+        _seed_official_referential_from_default(con, tenant_id)
         current_row = _load_current_official_referential(con, tenant_id)
         current = _official_referential_summary_from_row(current_row)
         con.commit()
@@ -2947,6 +3677,8 @@ def official_referential_status(
         "application": "OpenIRN API",
         "version": APP_VERSION,
         "tenantId": tenant_id,
+        "referentialTenantId": str(current_row["tenant_id"] or "") if current_row is not None else tenant_id,
+        "sharedAcrossTenants": bool(current_row is not None and str(current_row["tenant_id"] or "") != tenant_id),
         "serverTime": _utc_now().isoformat(),
         "source": {
             "provider": "gitlab",
@@ -2954,6 +3686,7 @@ def official_referential_status(
             "treePath": OFFICIAL_ADRI_TREE_PATH,
             "sourceUrl": OFFICIAL_ADRI_SOURCE_URL,
         },
+        "scoringMethod": dict(OPENIRN_RNR_SCORING_METADATA),
         "current": current,
         "remote": remote,
         "updateAvailable": update_available,
@@ -2971,19 +3704,24 @@ def official_referential_current(
     with _db() as con:
         current_row = _load_current_official_referential(con, tenant_id)
         if current_row is None:
-            raise HTTPException(status_code=404, detail="Aucun référentiel officiel n'est installé sur le serveur")
+            raise HTTPException(status_code=404, detail="Aucun référentiel officiel n'est installé sur l'instance OpenIRN")
         payload = _parse_json(current_row["payload_json"], {})
     if not isinstance(payload, dict):
         raise HTTPException(status_code=500, detail="Référentiel officiel serveur invalide")
+    summary = _official_referential_summary_from_row(current_row)
+    source_tenant_id = str(current_row["tenant_id"] or "") if current_row is not None else tenant_id
     return {
         "status": "ok",
         "type": "openirn.officialReferentialCurrent",
         "application": "OpenIRN API",
         "version": APP_VERSION,
         "tenantId": tenant_id,
+        "referentialTenantId": source_tenant_id,
+        "sharedAcrossTenants": source_tenant_id != tenant_id,
         "serverTime": _utc_now().isoformat(),
         "referential": payload,
-        "summary": _official_referential_summary_from_row(current_row),
+        "scoringMethod": payload.get("scoring") if isinstance(payload.get("scoring"), dict) else dict(OPENIRN_RNR_SCORING_METADATA),
+        "summary": summary,
     }
 
 
@@ -2997,6 +3735,7 @@ def official_referential_history(
     _require_admin_authorization(request, tenant_id)
     with _db() as con:
         _ensure_tenant(con, tenant_id)
+        _seed_official_referential_from_default(con, tenant_id)
         history = _list_official_referential_history(con, tenant_id, limit=limit)
         con.commit()
     return {
@@ -3032,6 +3771,7 @@ async def official_referential_update(request: Request) -> dict[str, Any]:
     remote = _official_remote_latest()
     with _db() as con:
         _ensure_tenant(con, tenant_id)
+        _seed_official_referential_from_default(con, tenant_id)
         current_row = _load_current_official_referential(con, tenant_id)
         current = _official_referential_summary_from_row(current_row)
         con.commit()
@@ -3063,6 +3803,7 @@ async def official_referential_update(request: Request) -> dict[str, Any]:
             "currentVersion": current.get("version") if isinstance(current, dict) else None,
             "remoteVersion": remote.get("version"),
             "remoteBlobId": remote.get("blobId"),
+            "remoteCommitSha": remote.get("commitSha"),
         },
     )
 
@@ -3097,7 +3838,9 @@ async def official_referential_update(request: Request) -> dict[str, Any]:
                         "referentialId": stored["referentialId"],
                         "version": stored["version"],
                         "sourceBlobId": remote.get("blobId") or "",
+                        "sourceCommitSha": remote.get("commitSha") or "",
                         "criterionCount": stored["criterionCount"],
+                        "scoringMethodStatus": OPENIRN_RNR_SCORING_METADATA["methodStatus"],
                     }),
                 ),
             )
@@ -3134,6 +3877,7 @@ def health() -> dict[str, Any]:
             "/health",
             "/auth/verify",
             "/auth/sessions",
+            "/tenants",
             "/security/audit",
             "/users",
             "/users/replace",
@@ -3283,7 +4027,7 @@ async def auth_verify(request: Request) -> dict[str, Any]:
     if not user_id:
         raise HTTPException(status_code=400, detail="Missing userId")
     if not pin.strip():
-        raise HTTPException(status_code=400, detail="Missing PIN")
+        raise HTTPException(status_code=400, detail="Code personnel manquant")
 
     with _db() as con:
         _ensure_tenant(con, tenant_id)
@@ -3547,14 +4291,24 @@ def revoke_current_auth_session(
         _ensure_tenant(con, tenant_id)
         row = con.execute(
             """
-            SELECT session_id, device_id, user_id, revoked_at
+            SELECT tenant_id, session_id, device_id, user_id, revoked_at
             FROM api_sessions
             WHERE tenant_id = ? AND token_hash = ?
             """,
             (tenant_id, token_hash),
         ).fetchone()
         if row is None:
+            row = con.execute(
+                """
+                SELECT tenant_id, session_id, device_id, user_id, revoked_at
+                FROM api_sessions
+                WHERE token_hash = ?
+                """,
+                (token_hash,),
+            ).fetchone()
+        if row is None:
             raise HTTPException(status_code=404, detail="Session inconnue")
+        session_tenant_id = str(row["tenant_id"] or tenant_id)
         if row["revoked_at"] is None:
             con.execute(
                 """
@@ -3562,14 +4316,18 @@ def revoke_current_auth_session(
                 SET revoked_at = ?
                 WHERE tenant_id = ? AND session_id = ?
                 """,
-                (now.isoformat(), tenant_id, row["session_id"]),
+                (now.isoformat(), session_tenant_id, row["session_id"]),
             )
             _record_device_audit(
                 con,
-                tenant_id,
+                session_tenant_id,
                 "session.locked",
                 device_id=row["device_id"],
-                payload={"sessionId": row["session_id"], "userId": row["user_id"]},
+                payload={
+                    "sessionId": row["session_id"],
+                    "userId": row["user_id"],
+                    "requestedTenantId": tenant_id,
+                },
             )
             con.commit()
 
@@ -3578,7 +4336,8 @@ def revoke_current_auth_session(
         "type": "openirn.currentApiSessionRevoked",
         "application": "OpenIRN API",
         "version": APP_VERSION,
-        "tenantId": tenant_id,
+        "tenantId": session_tenant_id,
+        "requestedTenantId": tenant_id,
         "serverTime": _utc_now().isoformat(),
         "sessionId": row["session_id"],
         "message": "Session courante verrouillée.",

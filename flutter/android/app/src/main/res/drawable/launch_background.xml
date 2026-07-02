@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Splash background used by Android LaunchTheme while the Flutter engine
+    starts. This file is intentionally simple and must remain present because
+    android:windowBackground references @drawable/launch_background.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@android:color/white" />
+</layer-list>

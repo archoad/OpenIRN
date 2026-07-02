@@ -56,7 +56,7 @@ class _OfficialReferentialScreenState extends State<OfficialReferentialScreen> {
         status: OfficialReferentialApiStatus.unreachable,
         url: configuration.apiBaseUrl,
         statusCode: null,
-        title: 'API non configurée',
+        title: 'Serveur non configuré',
         message:
             'La synchronisation serveur n’est pas configurée sur ce terminal.',
         tenantId: configuration.tenantId,
@@ -315,7 +315,7 @@ class _StatusCard extends StatelessWidget {
                     spacing: 8,
                     runSpacing: 8,
                     children: [
-                      Chip(label: Text('Tenant ${result.tenantId}')),
+                      Chip(label: Text('Espace ${result.tenantId}')),
                       Chip(
                         label: Text(data.configuration.authorizationModeLabel),
                       ),
@@ -369,8 +369,15 @@ class _SummaryCard extends StatelessWidget {
                 ),
               if (item.validationStatus.isNotEmpty)
                 _InfoLine(label: 'Validation', value: item.validationStatus),
+              if (item.shortCommitSha.isNotEmpty)
+                _InfoLine(label: 'Commit GitLab', value: item.shortCommitSha),
               if (item.shortBlobId.isNotEmpty)
                 _InfoLine(label: 'Blob GitLab', value: item.shortBlobId),
+              if (item.scoringMethodStatus.isNotEmpty)
+                _InfoLine(
+                  label: 'Méthode score',
+                  value: _scoringMethodLabel(item),
+                ),
               if (item.sourceSha256.isNotEmpty)
                 _InfoLine(label: 'SHA-256 source', value: item.sourceSha256),
               if (item.importedAt != null)
@@ -490,8 +497,12 @@ class _HistoryEntry extends StatelessWidget {
           spacing: 10,
           runSpacing: 4,
           children: [
+            if (summary.shortCommitSha.isNotEmpty)
+              SelectableText('Commit ${summary.shortCommitSha}'),
             if (summary.shortBlobId.isNotEmpty)
               SelectableText('Blob ${summary.shortBlobId}'),
+            if (summary.scoringMethodStatus.isNotEmpty)
+              SelectableText('Score ${_scoringMethodLabel(summary)}'),
             if (summary.shortSourceSha256.isNotEmpty)
               SelectableText('Source ${summary.shortSourceSha256}'),
             if (summary.shortCanonicalSha256.isNotEmpty)
@@ -596,6 +607,16 @@ class _InfoLine extends StatelessWidget {
       ),
     );
   }
+}
+
+String _scoringMethodLabel(OfficialReferentialSummary summary) {
+  final status = summary.scoringMethodStatus;
+  if (status == 'public_rnr_unweighted') {
+    return summary.weightedOfficialMethodImplemented
+        ? 'IRN pondéré'
+        : 'OpenIRN R/NR non pondéré';
+  }
+  return status.isEmpty ? 'Non renseignée' : status;
 }
 
 String _formatDateTime(DateTime value) {

@@ -39,7 +39,7 @@ enum SyncLogEventType {
       case SyncLogEventType.pullFailed:
         return 'Pull en échec';
       case SyncLogEventType.importSucceeded:
-        return 'Snapshot importé';
+        return 'Données serveur importées';
       case SyncLogEventType.importFailed:
         return 'Import en échec';
     }

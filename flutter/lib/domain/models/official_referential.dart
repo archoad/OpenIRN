@@ -8,6 +8,7 @@ class OfficialReferentialSummary {
   final String defaultBranch;
   final String filePath;
   final String sourceBlobId;
+  final String sourceCommitSha;
   final String sourceSha256;
   final String canonicalSha256;
   final DateTime? downloadedAt;
@@ -17,6 +18,7 @@ class OfficialReferentialSummary {
   final String validationStatus;
   final String webUrl;
   final String triggeredByUserId;
+  final Map<String, dynamic> scoringMethod;
 
   const OfficialReferentialSummary({
     required this.historyId,
@@ -28,6 +30,7 @@ class OfficialReferentialSummary {
     required this.defaultBranch,
     required this.filePath,
     required this.sourceBlobId,
+    required this.sourceCommitSha,
     required this.sourceSha256,
     required this.canonicalSha256,
     required this.downloadedAt,
@@ -37,14 +40,12 @@ class OfficialReferentialSummary {
     required this.validationStatus,
     required this.webUrl,
     required this.triggeredByUserId,
+    this.scoringMethod = const <String, dynamic>{},
   });
 
   factory OfficialReferentialSummary.fromJson(Map<String, dynamic> json) {
     final sourceBlobId =
-        json['sourceBlobId']?.toString() ??
-        json['blobId']?.toString() ??
-        json['commitSha']?.toString() ??
-        '';
+        json['sourceBlobId']?.toString() ?? json['blobId']?.toString() ?? '';
     return OfficialReferentialSummary(
       historyId: json['historyId']?.toString() ?? '',
       referentialId:
@@ -56,6 +57,10 @@ class OfficialReferentialSummary {
       defaultBranch: json['defaultBranch']?.toString() ?? '',
       filePath: json['filePath']?.toString() ?? '',
       sourceBlobId: sourceBlobId,
+      sourceCommitSha:
+          json['sourceCommitSha']?.toString() ??
+          json['commitSha']?.toString() ??
+          '',
       sourceSha256: json['sourceSha256']?.toString() ?? '',
       canonicalSha256: json['canonicalSha256']?.toString() ?? '',
       downloadedAt: DateTime.tryParse(
@@ -69,6 +74,7 @@ class OfficialReferentialSummary {
       validationStatus: json['validationStatus']?.toString() ?? '',
       webUrl: json['webUrl']?.toString() ?? '',
       triggeredByUserId: json['triggeredByUserId']?.toString() ?? '',
+      scoringMethod: _mapFromJson(json['scoringMethod']),
     );
   }
 
@@ -80,6 +86,24 @@ class OfficialReferentialSummary {
       return raw;
     }
     return raw.substring(0, 12);
+  }
+
+  String get shortCommitSha {
+    final raw = sourceCommitSha.trim();
+    if (raw.length <= 12) {
+      return raw;
+    }
+    return raw.substring(0, 12);
+  }
+
+  String get scoringMethodStatus {
+    return scoringMethod['methodStatus']?.toString() ?? '';
+  }
+
+  bool get weightedOfficialMethodImplemented {
+    return scoringMethod['weightedOfficialMethodImplemented'] is bool
+        ? scoringMethod['weightedOfficialMethodImplemented'] as bool
+        : false;
   }
 
   String get shortSourceSha256 {
@@ -96,6 +120,18 @@ class OfficialReferentialSummary {
       return raw;
     }
     return raw.substring(0, 16);
+  }
+
+  static Map<String, dynamic> _mapFromJson(Object? value) {
+    if (value is Map<String, dynamic>) {
+      return Map<String, dynamic>.unmodifiable(value);
+    }
+    if (value is Map) {
+      return Map<String, dynamic>.unmodifiable(
+        value.map((key, value) => MapEntry(key.toString(), value)),
+      );
+    }
+    return const <String, dynamic>{};
   }
 
   static int _intFromJson(Object? value) {

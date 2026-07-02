@@ -65,12 +65,17 @@ class IrnScoreSummary {
     required this.notAnsweredCriteria,
   });
 
-  double? get officialScore {
+  double? get openIrnRnrScore {
     if (answeredCriteria == 0) {
       return null;
     }
     return resilientCriteria * 100 / answeredCriteria;
   }
+
+  /// Backward-compatible alias kept for existing UI/tests/exports.
+  /// Prefer [openIrnRnrScore] in new code to avoid implying that OpenIRN
+  /// implements an unpublished official weighting formula.
+  double? get officialScore => openIrnRnrScore;
 
   double get completionRate {
     if (totalCriteria == 0) {
@@ -79,11 +84,14 @@ class IrnScoreSummary {
     return answeredCriteria / totalCriteria;
   }
 
-  String get formattedOfficialScore {
-    final score = officialScore;
+  String get formattedOpenIrnRnrScore {
+    final score = openIrnRnrScore;
     if (score == null) {
       return 'N/A';
     }
     return '${score.toStringAsFixed(1)} %';
   }
+
+  /// Backward-compatible alias. Prefer [formattedOpenIrnRnrScore].
+  String get formattedOfficialScore => formattedOpenIrnRnrScore;
 }

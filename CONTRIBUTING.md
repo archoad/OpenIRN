@@ -1,6 +1,6 @@
 # Contribuer à OpenIRN
 
-Merci de ton intérêt pour OpenIRN.
+Merci de votre intérêt pour OpenIRN.
 
 ## Principes du projet
 
@@ -8,8 +8,8 @@ OpenIRN suit quelques principes simples :
 
 - séparer strictement le code applicatif du référentiel IRN officiel ;
 - garder le modèle de données auditable ;
-- privilégier une architecture local-first ;
-- écrire des tests pour le scoring, l’import/export et les workflows ;
+- privilégier une architecture frontend-backend ;
+- écrire des tests ;
 - éviter d’introduire trop tôt des dépendances lourdes.
 
 ## Préparer l’environnement

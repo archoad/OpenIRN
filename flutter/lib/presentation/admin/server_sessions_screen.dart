@@ -50,7 +50,7 @@ class _ServerSessionsScreenState extends State<ServerSessionsScreen> {
         configuration: configuration,
         sessions: const <ApiSessionInfo>[],
         serverAvailable: false,
-        title: 'API non configurée',
+        title: 'Serveur non configuré',
         message:
             'La synchronisation serveur n’est pas configurée sur ce terminal.',
       );
@@ -278,7 +278,7 @@ class _HeaderCard extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 state.serverAvailable
-                    ? '$activeCount active(s), $expiredCount expirée(s), $revokedCount révoquée(s) — tenant ${state.configuration.tenantId}'
+                    ? '$activeCount active(s), $expiredCount expirée(s), $revokedCount révoquée(s) — espace ${state.configuration.tenantId}'
                     : state.message,
               ),
             ],

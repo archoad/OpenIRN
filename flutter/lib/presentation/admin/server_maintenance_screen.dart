@@ -114,7 +114,7 @@ class _ServerMaintenanceScreenState extends State<ServerMaintenanceScreen> {
           maxWidth: 620,
           child: Text(
             'OpenIRN va demander au serveur de créer une sauvegarde SQLite cohérente. '
-            'L’API reste disponible pendant l’opération.',
+            'Le serveur reste disponible pendant l’opération.',
           ),
         ),
         actions: [
@@ -557,18 +557,18 @@ class _ServerConfigurationCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             _InfoRow(
-              label: 'API',
+              label: 'Serveur',
               value:
                   configuration?.apiBaseUrl ??
                   SyncConfiguration.fixedApiBaseUrl,
             ),
             _InfoRow(
-              label: 'Tenant',
+              label: 'Espace de travail',
               value:
                   configuration?.tenantId ?? SyncConfiguration.defaultTenantId,
             ),
             _InfoRow(
-              label: 'Token',
+              label: 'Clé d’accès',
               value: configuration?.hasApiToken == true
                   ? configuration!.maskedApiToken
                   : 'Non configuré',
@@ -677,7 +677,7 @@ class _BackupCard extends StatelessWidget {
               label: 'Signature',
               value: backup.security.signatureSecretConfigured
                   ? 'HMAC active'
-                  : 'Secret non configuré',
+                  : 'Clé non configurée',
             ),
             if (backup.security.unsignedVisibleBackups > 0)
               _InfoRow(
@@ -1141,7 +1141,7 @@ String _signatureLabel(String status) {
     case 'invalid':
       return 'Signature invalide';
     case 'unverified_no_secret':
-      return 'Secret absent';
+      return 'Clé absente';
     case 'unsigned':
       return 'Non signée';
     default:
