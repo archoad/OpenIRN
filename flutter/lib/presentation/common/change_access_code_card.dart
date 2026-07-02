@@ -43,7 +43,8 @@ class _ChangeAccessCodeCardState extends State<ChangeAccessCodeCard> {
     final form = await showDialog<_AccessCodeChangeFormResult>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => _AccessCodeChangeDialog(userLabel: activeUser.displayName),
+      builder: (_) =>
+          _AccessCodeChangeDialog(userLabel: activeUser.displayName),
     );
     if (form == null || !mounted) {
       return;
@@ -73,9 +74,9 @@ class _ChangeAccessCodeCardState extends State<ChangeAccessCodeCard> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -129,11 +130,7 @@ class _ChangeAccessCodeCardState extends State<ChangeAccessCodeCard> {
         child: isNarrow
             ? Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  content,
-                  const SizedBox(height: 14),
-                  button,
-                ],
+                children: [content, const SizedBox(height: 14), button],
               )
             : Row(
                 children: [

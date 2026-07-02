@@ -32,7 +32,8 @@ class LocalPdfFileService {
     final path = _ensurePdfExtension(location.path);
     debugPrint('[OpenIRN] Saving PDF export to $path');
 
-    if (!kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
+    if (!kIsWeb &&
+        (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
       await File(path).writeAsBytes(bytes, flush: true);
     } else {
       final file = XFile.fromData(
@@ -46,10 +47,7 @@ class LocalPdfFileService {
     return path;
   }
 
-  String buildExportFileName({
-    required String campaignName,
-    DateTime? now,
-  }) {
+  String buildExportFileName({required String campaignName, DateTime? now}) {
     final timestamp = _compactTimestamp((now ?? DateTime.now()).toLocal());
     final safeCampaignName = _safeFilePart(campaignName, fallback: 'campagne');
     return 'openirn_${safeCampaignName}_synthese_irn_$timestamp.pdf';

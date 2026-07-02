@@ -2,7 +2,7 @@ name: openirn
 description: OpenIRN - application open source d’exploration et d’évaluation de l’Indice de Résilience Numérique.
 publish_to: 'none'
 
-version: 1.1.0+11
+version: 1.2.0+12
 
 environment:
   sdk: '>=3.10.0 <4.0.0'
