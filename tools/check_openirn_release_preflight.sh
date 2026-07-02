@@ -36,7 +36,7 @@ Usage: tools/check_openirn_release_preflight.sh [options]
 
 Options:
   --tag vX.Y.Z          Vérifie que le tag correspond à la version Flutter publique.
-  --require-secrets    Échoue si les variables d'environnement Android/Windows sont absentes.
+  --require-secrets    Échoue si les secrets Android/Windows sont absents localement ou dans GitHub.
   --with-apple         Vérifie aussi les prérequis macOS/iOS Apple, optionnels pour l'instant.
   --strict             Transforme certains avertissements en erreurs.
   -h, --help           Affiche cette aide.
@@ -97,14 +97,41 @@ forbidden_grep() {
   if [[ -f "$path" ]] && grep -Eq "$pattern" "$path"; then fail "$label détecté dans $path"; else ok "$label absent"; fi
 }
 
+GITHUB_SECRET_NAMES_CACHE=""
+GITHUB_SECRET_NAMES_LOADED=false
+
+load_github_secret_names() {
+  if [[ "$GITHUB_SECRET_NAMES_LOADED" == true ]]; then
+    return 0
+  fi
+  GITHUB_SECRET_NAMES_LOADED=true
+
+  if ! command -v gh >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # En local, `gh secret list` permet de vérifier que les secrets existent dans
+  # GitHub sans jamais lire leur valeur. En GitHub Actions, les secrets attendus
+  # sont normalement injectés comme variables d'environnement par le workflow.
+  GITHUB_SECRET_NAMES_CACHE="$(gh secret list --json name --jq '.[].name' 2>/dev/null || true)"
+}
+
+github_secret_exists() {
+  local name="$1"
+  load_github_secret_names
+  [[ -n "$GITHUB_SECRET_NAMES_CACHE" ]] && grep -Fxq "$name" <<<"$GITHUB_SECRET_NAMES_CACHE"
+}
+
 check_secret() {
   local name="$1"
   local required="$2"
   if [[ -n "${!name:-}" ]]; then
     ok "secret/env ${name} disponible"
+  elif github_secret_exists "$name"; then
+    ok "secret GitHub ${name} configuré"
   else
     if [[ "$REQUIRE_SECRETS" == true && "$required" == true ]]; then
-      fail "secret/env ${name} manquant"
+      fail "secret/env GitHub ${name} manquant"
     else
       warn "secret/env ${name} non présent dans l'environnement courant"
     fi
