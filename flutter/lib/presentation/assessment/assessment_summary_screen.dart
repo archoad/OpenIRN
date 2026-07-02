@@ -218,9 +218,9 @@ class _AssessmentSummaryScreenState extends State<AssessmentSummaryScreen> {
       }
 
       if (path == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Export PDF annulé.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Export PDF annulé.')));
         return;
       }
 
@@ -297,9 +297,9 @@ class _AssessmentSummaryScreenState extends State<AssessmentSummaryScreen> {
       }
 
       if (path == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Export PNG annulé.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Export PNG annulé.')));
         return;
       }
 

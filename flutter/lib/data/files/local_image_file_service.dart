@@ -32,14 +32,11 @@ class LocalImageFileService {
     final path = _ensurePngExtension(location.path);
     debugPrint('[OpenIRN] Saving PNG export to $path');
 
-    if (!kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
+    if (!kIsWeb &&
+        (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
       await File(path).writeAsBytes(bytes, flush: true);
     } else {
-      final file = XFile.fromData(
-        bytes,
-        name: fileName,
-        mimeType: 'image/png',
-      );
+      final file = XFile.fromData(bytes, name: fileName, mimeType: 'image/png');
       await file.saveTo(path);
     }
 

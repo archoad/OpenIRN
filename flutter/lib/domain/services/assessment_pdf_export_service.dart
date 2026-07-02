@@ -85,7 +85,10 @@ class AssessmentPdfExportService {
             pw.Text(_clean(campaign.description), style: _bodyStyle),
           ],
           pw.SizedBox(height: 10),
-          _keyValue('Referentiel', '${referential.id} - ${referential.version}'),
+          _keyValue(
+            'Referentiel',
+            '${referential.id} - ${referential.version}',
+          ),
           _keyValue('Statut campagne', campaign.status.label),
           _keyValue('Genere le', '${generatedAtUtc.toIso8601String()} UTC'),
         ],
@@ -111,7 +114,10 @@ class AssessmentPdfExportService {
                 '${(summary.completionRate * 100).toStringAsFixed(0)} %',
               ),
               pw.SizedBox(width: 8),
-              _metricBox('Criteres cotes', '${summary.answeredCriteria}/${summary.totalCriteria}'),
+              _metricBox(
+                'Criteres cotes',
+                '${summary.answeredCriteria}/${summary.totalCriteria}',
+              ),
             ],
           ),
           pw.SizedBox(height: 8),
@@ -145,7 +151,15 @@ class AssessmentPdfExportService {
         .toList(growable: false);
 
     return _table(
-      headers: const ['Code', 'Pilier', 'Score', 'R', 'NR', 'Cotes', 'Completude'],
+      headers: const [
+        'Code',
+        'Pilier',
+        'Score',
+        'R',
+        'NR',
+        'Cotes',
+        'Completude',
+      ],
       rows: rows,
       columnWidths: const <int, pw.TableColumnWidth>{
         0: pw.FixedColumnWidth(52),
@@ -293,7 +307,10 @@ class AssessmentPdfExportService {
           ),
           if (referential.scoring.disclaimer.trim().isNotEmpty) ...[
             pw.SizedBox(height: 4),
-            pw.Text(_clean(referential.scoring.disclaimer), style: _smallTextStyle),
+            pw.Text(
+              _clean(referential.scoring.disclaimer),
+              style: _smallTextStyle,
+            ),
           ],
         ],
       ),
@@ -312,7 +329,10 @@ class AssessmentPdfExportService {
         child: pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            pw.Text(_clean(label), style: _smallTextStyle.copyWith(color: _mutedColor)),
+            pw.Text(
+              _clean(label),
+              style: _smallTextStyle.copyWith(color: _mutedColor),
+            ),
             pw.SizedBox(height: 4),
             pw.Text(_clean(value), style: _metricStyle),
           ],
@@ -344,12 +364,12 @@ class AssessmentPdfExportService {
       children: [
         pw.TableRow(
           decoration: pw.BoxDecoration(color: _headerColor),
-          children: headers.map((header) => _tableCell(header, header: true)).toList(),
+          children: headers
+              .map((header) => _tableCell(header, header: true))
+              .toList(),
         ),
         for (final row in rows)
-          pw.TableRow(
-            children: row.map((cell) => _tableCell(cell)).toList(),
-          ),
+          pw.TableRow(children: row.map((cell) => _tableCell(cell)).toList()),
       ],
     );
   }
@@ -370,7 +390,10 @@ class AssessmentPdfExportService {
       child: pw.Row(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.SizedBox(width: 92, child: pw.Text(_clean(key), style: _labelStyle)),
+          pw.SizedBox(
+            width: 92,
+            child: pw.Text(_clean(key), style: _labelStyle),
+          ),
           pw.Expanded(child: pw.Text(_clean(value), style: _bodyStyle)),
         ],
       ),
@@ -422,10 +445,7 @@ final _panelDecoration = pw.BoxDecoration(
   borderRadius: pw.BorderRadius.circular(10),
 );
 
-final _titleStyle = pw.TextStyle(
-  fontSize: 22,
-  fontWeight: pw.FontWeight.bold,
-);
+final _titleStyle = pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold);
 final _subtitleStyle = pw.TextStyle(
   fontSize: 13,
   fontWeight: pw.FontWeight.bold,
@@ -434,14 +454,8 @@ final _sectionStyle = pw.TextStyle(
   fontSize: 14,
   fontWeight: pw.FontWeight.bold,
 );
-final _metricStyle = pw.TextStyle(
-  fontSize: 18,
-  fontWeight: pw.FontWeight.bold,
-);
-final _labelStyle = pw.TextStyle(
-  fontSize: 9,
-  fontWeight: pw.FontWeight.bold,
-);
+final _metricStyle = pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold);
+final _labelStyle = pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold);
 const _bodyStyle = pw.TextStyle(fontSize: 10);
 const _smallTextStyle = pw.TextStyle(fontSize: 8.5);
 final _tableHeaderStyle = pw.TextStyle(

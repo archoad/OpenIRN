@@ -485,9 +485,7 @@ class _TenantRenameDialogState extends State<_TenantRenameDialog> {
       return;
     }
     Navigator.of(context).pop(
-      _TenantRenameFormResult(
-        displayName: _displayNameController.text.trim(),
-      ),
+      _TenantRenameFormResult(displayName: _displayNameController.text.trim()),
     );
   }
 
