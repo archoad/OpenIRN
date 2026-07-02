@@ -232,7 +232,7 @@ class AppSyncCoordinator extends ChangeNotifier with WidgetsBindingObserver {
         AppSyncState.localOnly,
         title: 'Mode hors ligne uniquement',
         message:
-            'La synchronisation de fond attend une configuration API complète.',
+            'La synchronisation de fond attend une configuration serveur complète.',
       );
       return;
     }

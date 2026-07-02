@@ -1,3 +1,5 @@
+> **Note v0.5.0 / patch 138C** : ce document décrit l’ancienne application référentiel locale. Le chargement `assets/referentials` est retiré ; l’application utilise désormais le référentiel officiel exposé par l’API.
+
 # Lot 004 — Première application Flutter référentiel
 
 ## Objectif

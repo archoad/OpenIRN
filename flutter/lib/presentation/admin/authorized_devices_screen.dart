@@ -53,7 +53,7 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
         configuration: configuration,
         devices: const <AuthorizedDevice>[],
         serverAvailable: false,
-        title: 'API non configurée',
+        title: 'Serveur non configuré',
         message:
             'La synchronisation serveur n’est pas configurée sur ce terminal. Impossible de gérer les terminaux autorisés.',
       );
@@ -227,7 +227,7 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Terminal courant révoqué. Réappaire ce terminal pour resynchroniser.',
+            'Terminal courant révoqué. Veuillez autoriser de nouveau ce terminal pour resynchroniser.',
           ),
         ),
       );
@@ -322,7 +322,7 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
                         icon: Icons.devices_other_outlined,
                         title: 'Aucun terminal enregistré',
                         message:
-                            'Crée une invitation pour autoriser le premier terminal avec un jeton individuel.',
+                            'Créez une invitation pour autoriser le premier terminal avec un code individuel.',
                       )
                     else
                       for (final device in state.devices) ...[
@@ -380,7 +380,7 @@ class _HeaderCard extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 state.serverAvailable
-                    ? '$activeCount actif(s), $revokedCount révoqué(s) — tenant ${state.configuration.tenantId}'
+                    ? '$activeCount actif(s), $revokedCount révoqué(s) — espace ${state.configuration.tenantId}'
                     : state.message,
               ),
             ],
@@ -717,7 +717,7 @@ class _EnrollmentCodeDialog extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Sur le nouveau terminal, ouvre OpenIRN puis choisis « Autoriser ce terminal ». Saisis ensuite le code ci-dessous.',
+              'Sur le nouveau terminal, ouvrez OpenIRN puis choisissez « Autoriser ce terminal ». Saisissez ensuite le code ci-dessous.',
             ),
             const SizedBox(height: 16),
             Center(

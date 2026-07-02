@@ -118,7 +118,7 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
 
   Future<void> _openCampaign(LocalCampaign campaign) async {
     if (!_accessPolicy.canReadCampaign(widget.activeUser)) {
-      _showForbidden('Ton profil ne permet pas d’ouvrir les campagnes.');
+      _showForbidden('Votre profil ne permet pas d’ouvrir les campagnes.');
       return;
     }
 
@@ -229,24 +229,6 @@ class _HeaderCard extends StatelessWidget {
                     'Référentiel : ${referential.id} · ${referential.version}',
                   ),
                   const SizedBox(height: 8),
-                  const Text(
-                    'Une campagne regroupe une saisie R / NR, sa synthèse, son contrôle qualité, '
-                    'son export JSON et maintenant un statut de workflow.',
-                  ),
-                  const SizedBox(height: 10),
-                  const Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      Chip(
-                        avatar: Icon(Icons.login_outlined, size: 18),
-                        label: Text(
-                          'Authentification à l’ouverture de la campagne',
-                        ),
-                      ),
-                      Chip(label: Text('Aucune session active sur cette page')),
-                    ],
-                  ),
                 ],
               ),
             ),
@@ -317,16 +299,16 @@ class _CampaignCard extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  summary.formattedOfficialScore,
+                  summary.formattedOpenIrnRnrScore,
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
               ],
             ),
             const SizedBox(height: 14),
             LinearProgressIndicator(
-              value: summary.officialScore == null
+              value: summary.openIrnRnrScore == null
                   ? 0
-                  : summary.officialScore! / 100,
+                  : summary.openIrnRnrScore! / 100,
             ),
             const SizedBox(height: 14),
             Wrap(

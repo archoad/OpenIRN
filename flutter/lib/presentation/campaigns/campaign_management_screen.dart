@@ -537,7 +537,7 @@ class _EmptyState extends StatelessWidget {
             SizedBox(height: 12),
             Text('Aucune campagne.'),
             SizedBox(height: 6),
-            Text('Crée une première campagne depuis le bouton ci-dessus.'),
+            Text('Créez une première campagne depuis le bouton ci-dessus.'),
           ],
         ),
       ),

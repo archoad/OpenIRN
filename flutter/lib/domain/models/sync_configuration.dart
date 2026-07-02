@@ -1,6 +1,6 @@
 class SyncConfiguration {
   static const fixedApiBaseUrl = 'https://www.archoad.io/api';
-  static const defaultTenantId = 'archoad';
+  static const defaultTenantId = 'default';
 
   final String apiBaseUrl;
   final String tenantId;
@@ -18,10 +18,14 @@ class SyncConfiguration {
     required this.updatedAt,
   });
 
-  factory SyncConfiguration.empty({String deviceId = '', DateTime? now}) {
+  factory SyncConfiguration.empty({
+    String tenantId = '',
+    String deviceId = '',
+    DateTime? now,
+  }) {
     return SyncConfiguration(
       apiBaseUrl: fixedApiBaseUrl,
-      tenantId: defaultTenantId,
+      tenantId: tenantId.trim(),
       deviceId: deviceId,
       enabled: false,
       apiToken: '',
@@ -41,7 +45,12 @@ class SyncConfiguration {
   bool get usesLegacyBearerToken =>
       hasApiToken && !usesDeviceToken && !usesSessionToken;
 
+  bool get hasSelectedTenant => enabled && hasTenantId;
+
   String get authorizationModeLabel {
+    if (!hasSelectedTenant) {
+      return 'Aucun espace de travail sélectionné';
+    }
     if (!isConfigured) {
       return 'Terminal non autorisé';
     }
@@ -58,11 +67,14 @@ class SyncConfiguration {
   }
 
   String get authorizationModeDescription {
+    if (!hasSelectedTenant) {
+      return 'Veuillez choisir un espace de travail avant d’ouvrir une session OpenIRN.';
+    }
     if (!isConfigured) {
       return 'Ce terminal doit être autorisé avec un code d’appairage.';
     }
     if (!hasApiToken) {
-      return 'Aucun secret n’est stocké localement. Déverrouille OpenIRN avec ton profil et ton code personnel pour ouvrir une session courte.';
+      return 'Aucune session n’est ouverte. Veuillez déverrouiller OpenIRN avec votre profil et votre code personnel.';
     }
     if (usesSessionToken) {
       return 'La session serveur est conservée uniquement en mémoire et sera perdue à la fermeture de l’application.';
@@ -108,9 +120,7 @@ class SyncConfiguration {
   factory SyncConfiguration.fromJson(Map<String, dynamic> json) {
     return SyncConfiguration(
       apiBaseUrl: fixedApiBaseUrl,
-      tenantId: json['tenantId']?.toString().trim().isNotEmpty == true
-          ? json['tenantId'].toString().trim()
-          : defaultTenantId,
+      tenantId: json['tenantId']?.toString().trim() ?? '',
       deviceId: json['deviceId']?.toString().trim() ?? '',
       enabled: json['enabled'] is bool ? json['enabled'] as bool : false,
       apiToken: json['apiToken']?.toString().trim() ?? '',

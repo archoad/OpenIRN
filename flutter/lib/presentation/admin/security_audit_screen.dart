@@ -49,7 +49,7 @@ class _SecurityAuditScreenState extends State<SecurityAuditScreen> {
         configuration: configuration,
         events: const <SecurityAuditEvent>[],
         serverAvailable: false,
-        title: 'API non configurée',
+        title: 'Serveur non configuré',
         message:
             'La synchronisation serveur n’est pas configurée sur ce terminal.',
       );
@@ -217,7 +217,7 @@ class _HeaderCard extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 state.serverAvailable
-                    ? '${state.events.length} événement(s) — $authCount authentification(s), $deviceCount terminal(aux), $failureCount échec(s) — tenant ${state.configuration.tenantId}'
+                    ? '${state.events.length} événement(s) — $authCount authentification(s), $deviceCount terminal(aux), $failureCount échec(s) — espace ${state.configuration.tenantId}'
                     : state.message,
               ),
             ],

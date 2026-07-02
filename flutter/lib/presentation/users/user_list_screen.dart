@@ -56,7 +56,7 @@ class _UserListScreenState extends State<UserListScreen> {
         serverAvailable: false,
         sourceLabel: 'Terminal non autorisé',
         sourceMessage:
-            'Autorise ce terminal avant d’accéder à la base utilisateurs serveur.',
+            'Veuillez autoriser ce terminal avant d’accéder à la liste des utilisateurs.',
       );
     }
 
@@ -103,7 +103,7 @@ class _UserListScreenState extends State<UserListScreen> {
         .loadConfiguration();
     if (!configuration.isConfigured) {
       throw const _UserSyncException(
-        'Synchronisation impossible : la configuration API est incomplète.',
+        'Synchronisation impossible : la configuration serveur est incomplète.',
       );
     }
 
@@ -144,7 +144,7 @@ class _UserListScreenState extends State<UserListScreen> {
           .loadConfiguration();
       if (!configuration.isConfigured) {
         throw const _UserSyncException(
-          'Synchronisation impossible : la configuration API est incomplète.',
+          'Synchronisation impossible : la configuration serveur est incomplète.',
         );
       }
 
@@ -268,7 +268,7 @@ class _UserListScreenState extends State<UserListScreen> {
 
       if (!updatedExistingUser) {
         throw const _UserSyncException(
-          'Utilisateur introuvable dans la base centrale. Actualise la page puis réessaie.',
+          'Utilisateur introuvable. Veuillez actualiser la page puis réessayer.',
         );
       }
 
@@ -294,7 +294,7 @@ class _UserListScreenState extends State<UserListScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Modification impossible : base centrale indisponible ou synchronisation API non configurée.',
+            'Modification impossible : la liste des utilisateurs est indisponible ou la synchronisation serveur n’est pas configurée.',
           ),
         ),
       );
@@ -363,7 +363,7 @@ class _UserListScreenState extends State<UserListScreen> {
           .toList(growable: false);
       if (updatedUsers.length == state.users.length) {
         throw const _UserSyncException(
-          'Utilisateur introuvable dans la base centrale. Actualise la page puis réessaie.',
+          'Utilisateur introuvable. Veuillez actualiser la page puis réessayer.',
         );
       }
 

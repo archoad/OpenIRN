@@ -4,6 +4,8 @@ import '../models/irn_referential.dart';
 class OfficialRnrScoringService {
   const OfficialRnrScoringService();
 
+  static const methodMetadata = IrnScoringMethod.openIrnRnr();
+
   IrnScoreSummary computeSummary(
     IrnReferential referential,
     Map<String, IrnAnswer> answers,

@@ -9,6 +9,7 @@ import '../../domain/models/irn_referential.dart';
 import '../../domain/models/official_referential.dart';
 import '../../domain/models/security_audit_event.dart';
 import '../../domain/models/sync_configuration.dart';
+import '../../domain/models/tenant_info.dart';
 import '../../domain/services/app_session_manager.dart';
 
 enum OpenIrnApiReachability { ready, reachable, unreachable }
@@ -474,6 +475,36 @@ class OpenIrnApiPullResult {
   bool get hasSnapshots => snapshots.isNotEmpty;
 }
 
+enum OpenIrnApiTenantsStatus { available, rejected, unreachable }
+
+class OpenIrnApiTenantsResult {
+  final OpenIrnApiTenantsStatus status;
+  final String url;
+  final int? statusCode;
+  final String title;
+  final String message;
+  final String tenantId;
+  final String defaultTenantId;
+  final bool solutionAdministrator;
+  final List<TenantInfo> tenants;
+  final Map<String, dynamic>? responseBody;
+
+  const OpenIrnApiTenantsResult({
+    required this.status,
+    required this.url,
+    required this.statusCode,
+    required this.title,
+    required this.message,
+    required this.tenantId,
+    required this.defaultTenantId,
+    this.solutionAdministrator = false,
+    required this.tenants,
+    this.responseBody,
+  });
+
+  bool get isAvailable => status == OpenIrnApiTenantsStatus.available;
+}
+
 class OpenIrnApiClient {
   final Duration timeout;
 
@@ -495,8 +526,8 @@ class OpenIrnApiClient {
           reachability: OpenIrnApiReachability.ready,
           url: healthUri.toString(),
           statusCode: healthStatus,
-          title: 'API OpenIRN disponible',
-          message: 'Le endpoint /health répond correctement.',
+          title: 'Serveur OpenIRN disponible',
+          message: 'Le serveur OpenIRN répond correctement.',
           responseBody: decodedBody,
         );
       }
@@ -508,7 +539,7 @@ class OpenIrnApiClient {
           statusCode: healthStatus,
           title: 'Serveur joignable',
           message:
-              'Le serveur répond, mais le endpoint /health est protégé. C’est acceptable pour cette étape.',
+              'Le serveur répond. Certains contrôles techniques sont protégés, ce qui est normal.',
           responseBody: decodedBody,
         );
       }
@@ -520,9 +551,9 @@ class OpenIrnApiClient {
             reachability: OpenIrnApiReachability.reachable,
             url: healthUri.toString(),
             statusCode: healthStatus,
-            title: 'Serveur joignable, endpoint OpenIRN absent',
+            title: 'Serveur joignable, contrôle OpenIRN absent',
             message:
-                'Le serveur répond, mais /health n’existe pas encore. Il faudra l’ajouter côté API serveur.',
+                'Le serveur répond, mais le contrôle de disponibilité OpenIRN n’est pas encore configuré.',
             responseBody: decodedBody,
           );
         }
@@ -534,7 +565,7 @@ class OpenIrnApiClient {
         statusCode: healthStatus,
         title: 'Serveur joignable',
         message:
-            'Le serveur a répondu avec le statut HTTP $healthStatus. Le endpoint /health devra être normalisé côté API.',
+            'Le serveur a répondu avec le statut HTTP $healthStatus. Le contrôle de disponibilité devra être harmonisé.',
         responseBody: decodedBody,
       );
     } on TimeoutException {
@@ -566,7 +597,7 @@ class OpenIrnApiClient {
         reachability: OpenIrnApiReachability.unreachable,
         url: healthUri.toString(),
         statusCode: null,
-        title: 'URL API invalide',
+        title: 'Adresse serveur invalide',
         message: error.message,
       );
     } on HttpException catch (error) {
@@ -576,6 +607,258 @@ class OpenIrnApiClient {
         statusCode: null,
         title: 'Erreur HTTP',
         message: error.message,
+      );
+    }
+  }
+
+  Future<OpenIrnApiTenantsResult> loadTenants({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final uri = Uri.parse(
+      '$normalizedBaseUrl/tenants',
+    ).replace(queryParameters: <String, String>{'tenantId': safeTenantId});
+
+    try {
+      final response = await _get(uri, bearerToken: apiToken);
+      final decodedBody = _decodeJsonObject(response.body);
+      final rawTenants = decodedBody?['tenants'];
+      final tenants = rawTenants is List
+          ? rawTenants
+                .whereType<Map>()
+                .map(
+                  (item) =>
+                      TenantInfo.fromJson(Map<String, dynamic>.from(item)),
+                )
+                .where((tenant) => tenant.id.trim().isNotEmpty)
+                .toList(growable: false)
+          : const <TenantInfo>[];
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return OpenIrnApiTenantsResult(
+          status: OpenIrnApiTenantsStatus.available,
+          url: uri.toString(),
+          statusCode: response.statusCode,
+          title: 'Espaces de travail récupérés',
+          message: '${tenants.length} espace(s) de travail disponible(s).',
+          tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
+          defaultTenantId:
+              decodedBody?['defaultTenantId']?.toString() ?? 'default',
+          solutionAdministrator: decodedBody?['solutionAdministrator'] == true,
+          tenants: tenants,
+          responseBody: decodedBody,
+        );
+      }
+
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.rejected,
+        url: uri.toString(),
+        statusCode: response.statusCode,
+        title: 'Espaces de travail refusés',
+        message:
+            decodedBody?['detail']?.toString() ??
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        tenantId: safeTenantId,
+        defaultTenantId: 'default',
+        tenants: const <TenantInfo>[],
+        responseBody: decodedBody,
+      );
+    } on TimeoutException {
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.unreachable,
+        url: uri.toString(),
+        statusCode: null,
+        title: 'Délai dépassé',
+        message: 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+        tenantId: safeTenantId,
+        defaultTenantId: 'default',
+        tenants: const <TenantInfo>[],
+      );
+    } on SocketException catch (error) {
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.unreachable,
+        url: uri.toString(),
+        statusCode: null,
+        title: 'Serveur injoignable',
+        message: error.message,
+        tenantId: safeTenantId,
+        defaultTenantId: 'default',
+        tenants: const <TenantInfo>[],
+      );
+    } on HandshakeException catch (error) {
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.unreachable,
+        url: uri.toString(),
+        statusCode: null,
+        title: 'Erreur TLS',
+        message: error.message,
+        tenantId: safeTenantId,
+        defaultTenantId: 'default',
+        tenants: const <TenantInfo>[],
+      );
+    } on FormatException catch (error) {
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.unreachable,
+        url: uri.toString(),
+        statusCode: null,
+        title: 'Adresse serveur invalide',
+        message: error.message,
+        tenantId: safeTenantId,
+        defaultTenantId: 'default',
+        tenants: const <TenantInfo>[],
+      );
+    } on HttpException catch (error) {
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.unreachable,
+        url: uri.toString(),
+        statusCode: null,
+        title: 'Erreur HTTP',
+        message: error.message,
+        tenantId: safeTenantId,
+        defaultTenantId: 'default',
+        tenants: const <TenantInfo>[],
+      );
+    }
+  }
+
+  Future<OpenIrnApiTenantsResult> createTenant({
+    String? baseUrl,
+    required String requesterTenantId,
+    required String tenantId,
+    required String displayName,
+    required String description,
+    required String pilotFirstName,
+    required String pilotLastName,
+    required String pilotEmail,
+    required String pilotPin,
+    String apiToken = '',
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeRequesterTenantId = requesterTenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : requesterTenantId.trim();
+    final uri = Uri.parse('$normalizedBaseUrl/tenants');
+
+    try {
+      final response = await _postJson(uri, <String, dynamic>{
+        'requesterTenantId': safeRequesterTenantId,
+        'tenantId': tenantId.trim(),
+        'displayName': displayName.trim(),
+        'description': description.trim(),
+        'pilot': <String, dynamic>{
+          'firstName': pilotFirstName.trim(),
+          'lastName': pilotLastName.trim(),
+          'email': pilotEmail.trim().toLowerCase(),
+          'pin': pilotPin.trim(),
+        },
+      }, bearerToken: apiToken);
+      final decodedBody = _decodeJsonObject(response.body);
+      final rawTenants = decodedBody?['tenants'];
+      final tenants = rawTenants is List
+          ? rawTenants
+                .whereType<Map>()
+                .map(
+                  (item) =>
+                      TenantInfo.fromJson(Map<String, dynamic>.from(item)),
+                )
+                .where((tenant) => tenant.id.trim().isNotEmpty)
+                .toList(growable: false)
+          : const <TenantInfo>[];
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return OpenIrnApiTenantsResult(
+          status: OpenIrnApiTenantsStatus.available,
+          url: uri.toString(),
+          statusCode: response.statusCode,
+          title: 'Espace de travail créé',
+          message:
+              decodedBody?['message']?.toString() ??
+              'Espace de travail créé avec un Pilote IRN initial.',
+          tenantId: decodedBody?['tenantId']?.toString() ?? tenantId.trim(),
+          defaultTenantId:
+              decodedBody?['defaultTenantId']?.toString() ?? 'default',
+          solutionAdministrator: decodedBody?['solutionAdministrator'] == true,
+          tenants: tenants,
+          responseBody: decodedBody,
+        );
+      }
+
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.rejected,
+        url: uri.toString(),
+        statusCode: response.statusCode,
+        title: 'Création refusée',
+        message:
+            decodedBody?['detail']?.toString() ??
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        tenantId: tenantId.trim(),
+        defaultTenantId: 'default',
+        tenants: tenants,
+        responseBody: decodedBody,
+      );
+    } on TimeoutException {
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.unreachable,
+        url: uri.toString(),
+        statusCode: null,
+        title: 'Délai dépassé',
+        message: 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+        tenantId: tenantId.trim(),
+        defaultTenantId: 'default',
+        tenants: const <TenantInfo>[],
+      );
+    } on SocketException catch (error) {
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.unreachable,
+        url: uri.toString(),
+        statusCode: null,
+        title: 'Serveur injoignable',
+        message: error.message,
+        tenantId: tenantId.trim(),
+        defaultTenantId: 'default',
+        tenants: const <TenantInfo>[],
+      );
+    } on HandshakeException catch (error) {
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.unreachable,
+        url: uri.toString(),
+        statusCode: null,
+        title: 'Erreur TLS',
+        message: error.message,
+        tenantId: tenantId.trim(),
+        defaultTenantId: 'default',
+        tenants: const <TenantInfo>[],
+      );
+    } on FormatException catch (error) {
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.unreachable,
+        url: uri.toString(),
+        statusCode: null,
+        title: 'Adresse serveur invalide',
+        message: error.message,
+        tenantId: tenantId.trim(),
+        defaultTenantId: 'default',
+        tenants: const <TenantInfo>[],
+      );
+    } on HttpException catch (error) {
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.unreachable,
+        url: uri.toString(),
+        statusCode: null,
+        title: 'Erreur HTTP',
+        message: error.message,
+        tenantId: tenantId.trim(),
+        defaultTenantId: 'default',
+        tenants: const <TenantInfo>[],
       );
     }
   }
@@ -615,7 +898,7 @@ class OpenIrnApiClient {
           statusCode: response.statusCode,
           title: 'Authentification refusée',
           message:
-              'Le serveur a refusé le token API. Vérifie le token configuré dans OpenIRN et côté serveur.',
+              'Le serveur a refusé la clé d’accès. Veuillez vérifier la configuration OpenIRN et serveur.',
           responseBody: decodedBody,
         );
       }
@@ -658,7 +941,7 @@ class OpenIrnApiClient {
         status: OpenIrnApiPushStatus.unreachable,
         url: pushUri.toString(),
         statusCode: null,
-        title: 'URL API invalide',
+        title: 'Adresse serveur invalide',
         message: error.message,
       );
     } on HttpException catch (error) {
@@ -706,8 +989,8 @@ class OpenIrnApiClient {
           statusCode: response.statusCode,
           title: 'Statut serveur récupéré',
           message: snapshotCount == 0
-              ? 'Le serveur est joignable mais aucun snapshot n’est encore disponible pour ce tenant.'
-              : 'Le serveur contient $snapshotCount snapshot(s) pour ce tenant.',
+              ? 'Le serveur est joignable mais aucune sauvegarde de synchronisation n’est encore disponible pour cet espace.'
+              : 'Le serveur contient $snapshotCount sauvegarde(s) de synchronisation pour cet espace.',
           responseBody: decodedBody,
           tenantId: tenant,
           serverTime: DateTime.tryParse(
@@ -729,7 +1012,7 @@ class OpenIrnApiClient {
           statusCode: response.statusCode,
           title: 'Authentification refusée',
           message:
-              'Le serveur a refusé le token API. Vérifie le token configuré dans OpenIRN et côté serveur.',
+              'Le serveur a refusé la clé d’accès. Veuillez vérifier la configuration OpenIRN et serveur.',
           responseBody: decodedBody,
           tenantId: tenantId,
           snapshotCount: 0,
@@ -792,7 +1075,7 @@ class OpenIrnApiClient {
         status: OpenIrnApiStatusState.unreachable,
         url: statusUri.toString(),
         statusCode: null,
-        title: 'URL API invalide',
+        title: 'Adresse serveur invalide',
         message: error.message,
         tenantId: tenantId,
         snapshotCount: 0,
@@ -854,9 +1137,9 @@ class OpenIrnApiClient {
             status: OpenIrnApiPullStatus.empty,
             url: pullUri.toString(),
             statusCode: response.statusCode,
-            title: 'Aucun snapshot distant',
+            title: 'Aucune sauvegarde de synchronisation distante',
             message:
-                'Le serveur est joignable mais ne contient encore aucun snapshot pour ce tenant.',
+                'Le serveur est joignable mais ne contient encore aucune sauvegarde de synchronisation pour cet espace.',
             responseBody: decodedBody,
             snapshots: snapshots,
           );
@@ -865,9 +1148,9 @@ class OpenIrnApiClient {
           status: OpenIrnApiPullStatus.available,
           url: pullUri.toString(),
           statusCode: response.statusCode,
-          title: 'Snapshots distants récupérés',
+          title: 'Sauvegardes de synchronisation récupérées',
           message:
-              '${snapshots.length} snapshot(s) disponible(s) côté serveur.',
+              '${snapshots.length} sauvegarde(s) de synchronisation disponible(s) côté serveur.',
           responseBody: decodedBody,
           snapshots: snapshots,
         );
@@ -880,7 +1163,7 @@ class OpenIrnApiClient {
           statusCode: response.statusCode,
           title: 'Authentification refusée',
           message:
-              'Le serveur a refusé le token API. Vérifie le token configuré dans OpenIRN et côté serveur.',
+              'Le serveur a refusé la clé d’accès. Veuillez vérifier la configuration OpenIRN et serveur.',
           responseBody: decodedBody,
           snapshots: const <OpenIrnApiPullSnapshot>[],
         );
@@ -928,7 +1211,7 @@ class OpenIrnApiClient {
         status: OpenIrnApiPullStatus.unreachable,
         url: pullUri.toString(),
         statusCode: null,
-        title: 'URL API invalide',
+        title: 'Adresse serveur invalide',
         message: error.message,
         snapshots: const <OpenIrnApiPullSnapshot>[],
       );
@@ -979,9 +1262,9 @@ class OpenIrnApiClient {
             status: OpenIrnApiUsersStatus.empty,
             url: usersUri.toString(),
             statusCode: response.statusCode,
-            title: 'Aucun utilisateur central',
+            title: 'Aucun utilisateur disponible',
             message:
-                'Le serveur est joignable, mais la base utilisateurs centrale est vide pour ce tenant.',
+                'Le serveur est joignable, mais aucun utilisateur n’est disponible dans cet espace de travail.',
             tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
             users: users,
             responseBody: decodedBody,
@@ -991,9 +1274,8 @@ class OpenIrnApiClient {
           status: OpenIrnApiUsersStatus.available,
           url: usersUri.toString(),
           statusCode: response.statusCode,
-          title: 'Utilisateurs centraux récupérés',
-          message:
-              '${users.length} utilisateur(s) disponible(s) dans la base centrale.',
+          title: 'Utilisateurs récupérés',
+          message: '${users.length} utilisateur(s) disponible(s).',
           tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
           users: users,
           responseBody: decodedBody,
@@ -1007,7 +1289,7 @@ class OpenIrnApiClient {
           statusCode: response.statusCode,
           title: 'Authentification refusée',
           message:
-              'Le serveur a refusé le token API lors du chargement de la base utilisateurs centrale.',
+              'Le serveur a refusé la clé d’accès lors du chargement des utilisateurs.',
           tenantId: safeTenantId,
           users: const <AppUser>[],
           responseBody: decodedBody,
@@ -1060,7 +1342,7 @@ class OpenIrnApiClient {
         status: OpenIrnApiUsersStatus.unreachable,
         url: usersUri.toString(),
         statusCode: null,
-        title: 'URL API invalide',
+        title: 'Adresse serveur invalide',
         message: error.message,
         tenantId: safeTenantId,
         users: const <AppUser>[],
@@ -1186,7 +1468,7 @@ class OpenIrnApiClient {
         status: OpenIrnApiUsersStatus.unreachable,
         url: replaceUri.toString(),
         statusCode: null,
-        title: 'URL API invalide',
+        title: 'Adresse serveur invalide',
         message: error.message,
         tenantId: safeTenantId,
         users: const <AppUser>[],
@@ -1338,7 +1620,7 @@ class OpenIrnApiClient {
         status: OpenIrnApiAuthStatus.unreachable,
         url: authUri.toString(),
         statusCode: null,
-        title: 'URL API invalide',
+        title: 'Adresse serveur invalide',
         message: error.message,
         tenantId: safeTenantId,
         userId: safeUserId,
@@ -1456,7 +1738,7 @@ class OpenIrnApiClient {
         status: OpenIrnApiPinUpdateStatus.unreachable,
         url: pinUri.toString(),
         statusCode: null,
-        title: 'URL API invalide',
+        title: 'Adresse serveur invalide',
         message: error.message,
         tenantId: safeTenantId,
         userId: safeUserId,
@@ -1571,7 +1853,7 @@ class OpenIrnApiClient {
         status: OpenIrnApiDevicesStatus.unreachable,
         url: sessionsUri.toString(),
         statusCode: null,
-        title: 'URL API invalide',
+        title: 'Adresse serveur invalide',
         message: error.message,
         tenantId: safeTenantId,
         sessions: const <ApiSessionInfo>[],
@@ -1689,7 +1971,7 @@ class OpenIrnApiClient {
         status: OpenIrnApiDevicesStatus.unreachable,
         url: auditUri.toString(),
         statusCode: null,
-        title: 'URL API invalide',
+        title: 'Adresse serveur invalide',
         message: error.message,
         tenantId: safeTenantId,
         events: const <SecurityAuditEvent>[],
@@ -1785,7 +2067,7 @@ class OpenIrnApiClient {
         status: OpenIrnApiDevicesStatus.unreachable,
         url: revokeUri.toString(),
         statusCode: null,
-        title: 'URL API invalide',
+        title: 'Adresse serveur invalide',
         message: error.message,
         tenantId: safeTenantId,
         sessions: const <ApiSessionInfo>[],
@@ -1881,7 +2163,7 @@ class OpenIrnApiClient {
         status: OpenIrnApiDevicesStatus.unreachable,
         url: revokeUri.toString(),
         statusCode: null,
-        title: 'URL API invalide',
+        title: 'Adresse serveur invalide',
         message: error.message,
         tenantId: safeTenantId,
         sessions: const <ApiSessionInfo>[],
@@ -1950,7 +2232,7 @@ class OpenIrnApiClient {
           statusCode: response.statusCode,
           title: 'Authentification refusée',
           message:
-              'Le serveur a refusé le token API lors du chargement des terminaux autorisés.',
+              'Le serveur a refusé la clé d’accès lors du chargement des terminaux autorisés.',
           tenantId: safeTenantId,
           devices: const <AuthorizedDevice>[],
           responseBody: decodedBody,
@@ -2003,7 +2285,7 @@ class OpenIrnApiClient {
         status: OpenIrnApiDevicesStatus.unreachable,
         url: devicesUri.toString(),
         statusCode: null,
-        title: 'URL API invalide',
+        title: 'Adresse serveur invalide',
         message: error.message,
         tenantId: safeTenantId,
         devices: const <AuthorizedDevice>[],
@@ -2133,7 +2415,7 @@ class OpenIrnApiClient {
         status: OpenIrnApiEnrollmentStatus.unreachable,
         url: enrollmentUri.toString(),
         statusCode: null,
-        title: 'URL API invalide',
+        title: 'Adresse serveur invalide',
         message: error.message,
         tenantId: safeTenantId,
         enrollmentId: '',
@@ -2198,7 +2480,7 @@ class OpenIrnApiClient {
           statusCode: response.statusCode,
           title: 'Terminal autorisé',
           message:
-              'Ce terminal est autorisé. Aucun secret n’est stocké localement.',
+              'Ce terminal est autorisé. Aucune clé sensible n’est stockée localement.',
           tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
           enrollmentId: device?.enrollmentId ?? '',
           code: '',
@@ -2279,7 +2561,7 @@ class OpenIrnApiClient {
         status: OpenIrnApiEnrollmentStatus.unreachable,
         url: consumeUri.toString(),
         statusCode: null,
-        title: 'URL API invalide',
+        title: 'Adresse serveur invalide',
         message: error.message,
         tenantId: safeTenantId,
         enrollmentId: '',
@@ -2359,7 +2641,7 @@ class OpenIrnApiClient {
       return _devicesNetworkError(
         renameUri,
         safeTenantId,
-        'URL API invalide',
+        'Adresse serveur invalide',
         error.message,
       );
     } on HttpException catch (error) {
@@ -2422,7 +2704,7 @@ class OpenIrnApiClient {
       return _devicesNetworkError(
         revokeUri,
         safeTenantId,
-        'URL API invalide',
+        'Adresse serveur invalide',
         error.message,
       );
     } on HttpException catch (error) {
@@ -2569,7 +2851,7 @@ class OpenIrnApiClient {
       return _officialReferentialNetworkError(
         uri,
         safeTenantId,
-        'URL API invalide',
+        'Adresse serveur invalide',
         error.message,
       );
     } on HttpException catch (error) {
@@ -2660,7 +2942,7 @@ class OpenIrnApiClient {
       return _currentReferentialNetworkError(
         uri,
         safeTenantId,
-        'URL API invalide',
+        'Adresse serveur invalide',
         error.message,
       );
     } on HttpException catch (error) {
@@ -2728,7 +3010,7 @@ class OpenIrnApiClient {
       return _officialReferentialHistoryNetworkError(
         uri,
         safeTenantId,
-        'URL API invalide',
+        'Adresse serveur invalide',
         error.message,
       );
     } on HttpException catch (error) {
@@ -2800,7 +3082,7 @@ class OpenIrnApiClient {
       return _officialReferentialNetworkError(
         uri,
         safeTenantId,
-        'URL API invalide',
+        'Adresse serveur invalide',
         error.message,
       );
     } on HttpException catch (error) {
@@ -2825,7 +3107,7 @@ class OpenIrnApiClient {
         statusCode: response.statusCode,
         title: 'Serveur joignable',
         message:
-            'Le serveur a répondu sur l’URL API de base avec le statut HTTP ${response.statusCode}.',
+            'Le serveur a répondu à l’adresse configurée avec le statut HTTP ${response.statusCode}.',
         responseBody: _decodeJsonObject(response.body),
       );
     } catch (_) {
@@ -2834,7 +3116,7 @@ class OpenIrnApiClient {
         url: baseUri.toString(),
         statusCode: null,
         title: 'Serveur injoignable',
-        message: 'Impossible de joindre l’URL API de base.',
+        message: 'Impossible de joindre l’adresse serveur configurée.',
       );
     }
   }
@@ -3115,7 +3397,7 @@ class OpenIrnApiClient {
       statusCode: response.statusCode,
       title: 'Historique référentiel chargé',
       message: history.isEmpty
-          ? 'Aucune installation du référentiel officiel n’est historisée pour ce tenant.'
+          ? 'Aucune installation du référentiel officiel n’est historisée pour cet espace.'
           : '${history.length} installation(s) historisée(s) côté serveur.',
       tenantId: decodedBody?['tenantId']?.toString() ?? tenantId,
       history: history,

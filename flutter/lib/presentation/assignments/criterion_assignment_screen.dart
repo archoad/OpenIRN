@@ -330,7 +330,7 @@ class _AssignmentHeaderCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             const Text(
-              'Affecte chaque critère à un utilisateur de secours disposant du profil Évaluateur. Les droits serveur et la connexion réelle seront ajoutés dans l’étape API.',
+              'Affectez chaque critère à un utilisateur de secours disposant du profil Évaluateur. Les droits serveur et la connexion réelle seront gérés par OpenIRN.',
             ),
             const SizedBox(height: 12),
             Wrap(

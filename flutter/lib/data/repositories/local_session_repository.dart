@@ -16,7 +16,7 @@ class LocalSessionRepository {
     }
 
     throw const LocalSessionRepositoryException(
-      'Aucune session utilisateur serveur active. Authentifie-toi avec ton profil et ton code personnel.',
+      'Aucune session utilisateur active. Veuillez vous authentifier avec votre profil et votre code personnel.',
     );
   }
 

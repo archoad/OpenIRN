@@ -5,6 +5,7 @@ import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/irn_referential.dart';
 import '../../domain/models/sync_configuration.dart';
+import '../../domain/models/tenant_info.dart';
 import '../../domain/repositories/irn_referential_repository.dart';
 import '../../domain/services/app_session_manager.dart';
 import '../../domain/services/app_sync_coordinator.dart';
@@ -36,12 +37,27 @@ class _ReferentialOverviewScreenState extends State<ReferentialOverviewScreen> {
   @override
   void initState() {
     super.initState();
+    AppSessionManager.instance.clearSession();
     _bootstrapFuture = _loadBootstrap();
   }
 
-  Future<_ReferentialBootstrap> _loadBootstrap() async {
-    final configuration = await _syncConfigurationRepository
-        .loadConfiguration();
+  Future<_ReferentialBootstrap> _loadBootstrap({
+    bool resetTenantSelection = false,
+  }) async {
+    final configuration = resetTenantSelection
+        ? await _syncConfigurationRepository.clearTenantSelection()
+        : await _syncConfigurationRepository.loadConfiguration();
+
+    if (!configuration.hasSelectedTenant) {
+      AppSyncCoordinator.instance.stop();
+      return _ReferentialBootstrap(
+        referential: _emptyServerReferential(),
+        configuration: configuration,
+        referentialError: null,
+        requiresTenantSelection: true,
+        requiresDeviceEnrollment: false,
+      );
+    }
 
     if (!configuration.isConfigured) {
       AppSyncCoordinator.instance.stop();
@@ -49,6 +65,7 @@ class _ReferentialOverviewScreenState extends State<ReferentialOverviewScreen> {
         referential: _emptyServerReferential(),
         configuration: configuration,
         referentialError: null,
+        requiresTenantSelection: false,
         requiresDeviceEnrollment: true,
       );
     }
@@ -60,6 +77,7 @@ class _ReferentialOverviewScreenState extends State<ReferentialOverviewScreen> {
         referential: referential,
         configuration: configuration,
         referentialError: null,
+        requiresTenantSelection: false,
         requiresDeviceEnrollment: false,
       );
     } catch (error) {
@@ -69,6 +87,7 @@ class _ReferentialOverviewScreenState extends State<ReferentialOverviewScreen> {
         referential: _emptyServerReferential(),
         configuration: configuration,
         referentialError: errorMessage,
+        requiresTenantSelection: false,
         requiresDeviceEnrollment: _isDeviceEnrollmentRequiredError(
           errorMessage,
         ),
@@ -136,6 +155,7 @@ class _ReferentialOverviewScreenState extends State<ReferentialOverviewScreen> {
             referential: bootstrap.referential,
             initialConfiguration: bootstrap.configuration,
             referentialError: bootstrap.referentialError,
+            requiresTenantSelection: bootstrap.requiresTenantSelection,
             requiresDeviceEnrollment: bootstrap.requiresDeviceEnrollment,
             onConfigurationChanged: _reloadBootstrap,
           );
@@ -149,12 +169,14 @@ class _ReferentialBootstrap {
   final IrnReferential referential;
   final SyncConfiguration configuration;
   final String? referentialError;
+  final bool requiresTenantSelection;
   final bool requiresDeviceEnrollment;
 
   const _ReferentialBootstrap({
     required this.referential,
     required this.configuration,
     required this.referentialError,
+    required this.requiresTenantSelection,
     required this.requiresDeviceEnrollment,
   });
 
@@ -213,6 +235,7 @@ class _HomeContent extends StatefulWidget {
   final IrnReferential referential;
   final SyncConfiguration initialConfiguration;
   final String? referentialError;
+  final bool requiresTenantSelection;
   final bool requiresDeviceEnrollment;
   final VoidCallback onConfigurationChanged;
 
@@ -220,6 +243,7 @@ class _HomeContent extends StatefulWidget {
     required this.referential,
     required this.initialConfiguration,
     required this.referentialError,
+    required this.requiresTenantSelection,
     required this.requiresDeviceEnrollment,
     required this.onConfigurationChanged,
   });
@@ -280,6 +304,7 @@ class _HomeContentState extends State<_HomeContent> {
             widget.initialConfiguration.enabled ||
         oldWidget.initialConfiguration.tenantId !=
             widget.initialConfiguration.tenantId ||
+        oldWidget.requiresTenantSelection != widget.requiresTenantSelection ||
         oldWidget.requiresDeviceEnrollment != widget.requiresDeviceEnrollment) {
       _syncConfigurationFuture = Future<SyncConfiguration>.value(
         widget.initialConfiguration,
@@ -288,19 +313,97 @@ class _HomeContentState extends State<_HomeContent> {
   }
 
   Future<void> _openDeviceEnrollment() async {
+    final configuration = await _syncConfigurationRepository
+        .loadConfiguration();
+    if (!mounted) {
+      return;
+    }
     final enrolled = await Navigator.of(context).push<bool>(
-      MaterialPageRoute<bool>(builder: (_) => const DeviceEnrollmentScreen()),
+      MaterialPageRoute<bool>(
+        builder: (_) =>
+            DeviceEnrollmentScreen(initialTenantId: configuration.tenantId),
+      ),
     );
     if (!mounted) {
       return;
     }
-    if (enrolled == true) {
+    if (enrolled == true || enrolled == false) {
       widget.onConfigurationChanged();
       setState(() {
         _syncConfigurationFuture = _syncConfigurationRepository
             .loadConfiguration();
       });
     }
+  }
+
+  Future<void> _chooseTenant() async {
+    final configuration = await _syncConfigurationRepository
+        .loadConfiguration();
+    final result = await _apiClient.loadTenants(
+      baseUrl: SyncConfiguration.fixedApiBaseUrl,
+      tenantId: SyncConfiguration.defaultTenantId,
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    if (!result.isAvailable || result.tenants.isEmpty) {
+      _showForbidden('${result.title} — ${result.message}');
+      return;
+    }
+
+    final selected = await showDialog<TenantInfo>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _TenantSelectionDialog(
+        tenants: result.tenants,
+        selectedTenantId: configuration.tenantId,
+      ),
+    );
+
+    if (selected == null || !mounted) {
+      return;
+    }
+
+    final updated = await _syncConfigurationRepository.saveConfiguration(
+      configuration.copyWith(
+        tenantId: selected.id,
+        enabled: true,
+        apiToken: '',
+      ),
+    );
+
+    AppSessionManager.instance.clearSession(
+      reason: 'Espace de travail ${selected.displayName} sélectionné.',
+    );
+    AppSyncCoordinator.instance.stop();
+
+    if (!mounted) {
+      return;
+    }
+
+    widget.onConfigurationChanged();
+    setState(() {
+      _syncConfigurationFuture = Future<SyncConfiguration>.value(updated);
+    });
+  }
+
+  Future<void> _returnToTenantSelection() async {
+    final updated = await _syncConfigurationRepository.clearTenantSelection();
+    AppSessionManager.instance.clearSession(
+      reason: 'Retour au choix de l’espace de travail.',
+    );
+    AppSyncCoordinator.instance.stop();
+
+    if (!mounted) {
+      return;
+    }
+
+    widget.onConfigurationChanged();
+    setState(() {
+      _syncConfigurationFuture = Future<SyncConfiguration>.value(updated);
+    });
   }
 
   void _showForbidden(String message) {
@@ -320,24 +423,24 @@ class _HomeContentState extends State<_HomeContent> {
     }
     if (widget.requiresDeviceEnrollment || !configuration.isConfigured) {
       _showForbidden(
-        'Autorise ce terminal avant d’ouvrir une campagne d’évaluation.',
+        'Veuillez autoriser ce terminal avant d’ouvrir une campagne d’évaluation.',
       );
       return;
     }
     final activeUser = AppSessionManager.instance.activeUser;
     if (!AppSessionManager.instance.hasActiveSession || activeUser == null) {
       _showForbidden(
-        'Déverrouille OpenIRN avec ton profil et ton code personnel avant d’ouvrir une campagne.',
+        'Veuillez déverrouiller OpenIRN avec votre profil et votre code personnel avant d’ouvrir une campagne.',
       );
       return;
     }
     if (!_accessPolicy.can(activeUser, OpenIrnPermission.viewCampaignList)) {
-      _showForbidden('Ton profil ne permet pas d’ouvrir les campagnes.');
+      _showForbidden('Votre profil ne permet pas d’ouvrir les campagnes.');
       return;
     }
     if (!_hasServerReferential) {
       _showForbidden(
-        'Installe ou recharge le référentiel officiel aDRI depuis l’administration avant d’ouvrir une campagne.',
+        'Veuillez installer ou recharger le référentiel officiel aDRI depuis l’administration avant d’ouvrir une campagne.',
       );
       return;
     }
@@ -356,7 +459,7 @@ class _HomeContentState extends State<_HomeContent> {
     final activeUser = AppSessionManager.instance.activeUser;
     if (!AppSessionManager.instance.hasActiveSession || activeUser == null) {
       _showForbidden(
-        'Déverrouille OpenIRN avec ton profil et ton code personnel avant d’ouvrir le référentiel.',
+        'Veuillez déverrouiller OpenIRN avec votre profil et votre code personnel avant d’ouvrir le référentiel.',
       );
       return;
     }
@@ -364,7 +467,7 @@ class _HomeContentState extends State<_HomeContent> {
       activeUser,
       OpenIrnPermission.viewReferentialCatalog,
     )) {
-      _showForbidden('Ton profil ne permet pas de consulter le référentiel.');
+      _showForbidden('Votre profil ne permet pas de consulter le référentiel.');
       return;
     }
     if (!_hasServerReferential) {
@@ -393,7 +496,7 @@ class _HomeContentState extends State<_HomeContent> {
     }
     if (widget.requiresDeviceEnrollment || !configuration.isConfigured) {
       _showForbidden(
-        'Autorise ce terminal avant d’ouvrir la console d’administration.',
+        'Veuillez autoriser ce terminal avant d’ouvrir l’administration.',
       );
       return;
     }
@@ -401,7 +504,7 @@ class _HomeContentState extends State<_HomeContent> {
     final activeUser = AppSessionManager.instance.activeUser;
     if (!AppSessionManager.instance.hasActiveSession || activeUser == null) {
       _showForbidden(
-        'Déverrouille OpenIRN avec ton profil et ton code personnel avant d’ouvrir l’administration.',
+        'Veuillez déverrouiller OpenIRN avec votre profil et votre code personnel avant d’ouvrir l’administration.',
       );
       return;
     }
@@ -430,7 +533,27 @@ class _HomeContentState extends State<_HomeContent> {
   }
 
   Future<void> _unlockSession() async {
-    final authenticationData = await _loadAuthenticatableUsers();
+    final selectedConfiguration = await _syncConfigurationRepository
+        .loadConfiguration();
+    if (!mounted) {
+      return;
+    }
+    if (!selectedConfiguration.hasSelectedTenant) {
+      _showForbidden(
+        'Veuillez d’abord choisir un espace de travail avant d’ouvrir une session.',
+      );
+      return;
+    }
+    if (!selectedConfiguration.isConfigured) {
+      _showForbidden(
+        'Veuillez autoriser ce terminal dans cet espace de travail avant d’ouvrir une session.',
+      );
+      return;
+    }
+
+    final authenticationData = await _loadAuthenticatableUsers(
+      configuration: selectedConfiguration,
+    );
     if (!mounted) {
       return;
     }
@@ -446,7 +569,9 @@ class _HomeContentState extends State<_HomeContent> {
         .toList(growable: false);
 
     if (activeUsers.isEmpty) {
-      _showForbidden('Aucun profil utilisateur actif n’est disponible.');
+      _showForbidden(
+        'Aucun profil utilisateur actif n’est disponible pour cet espace de travail.',
+      );
       return;
     }
 
@@ -456,7 +581,7 @@ class _HomeContentState extends State<_HomeContent> {
       builder: (_) => _AdministrationAuthenticationDialog(
         title: 'Déverrouiller OpenIRN',
         intro:
-            'Sélectionne ton profil puis saisis ton code personnel pour ouvrir une session serveur courte.',
+            'Veuillez choisir votre profil dans l’espace de travail ${authenticationData.tenantId}, puis saisir votre code personnel.',
         users: activeUsers,
         source: authenticationData.source,
         message: authenticationData.message,
@@ -557,7 +682,7 @@ class _HomeContentState extends State<_HomeContent> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Code initial accepté. Pense à définir un code personnel côté administration API.',
+            'Code initial accepté. Pensez à définir un code personnel dans l’administration.',
           ),
         ),
       );
@@ -566,15 +691,25 @@ class _HomeContentState extends State<_HomeContent> {
     return true;
   }
 
-  Future<_AdministrationAuthenticationData> _loadAuthenticatableUsers() async {
-    final configuration = await _syncConfigurationRepository
-        .loadConfiguration();
+  Future<_AdministrationAuthenticationData> _loadAuthenticatableUsers({
+    SyncConfiguration? configuration,
+  }) async {
+    configuration ??= await _syncConfigurationRepository.loadConfiguration();
+
+    if (widget.requiresTenantSelection) {
+      return const _AdministrationAuthenticationData(
+        source: _AdministrationAuthenticationSource.localOnly,
+        message:
+            'Veuillez d’abord choisir un espace de travail avant d’ouvrir une session OpenIRN.',
+        users: <AppUser>[],
+      );
+    }
 
     if (widget.requiresDeviceEnrollment || !configuration.isConfigured) {
       return const _AdministrationAuthenticationData(
         source: _AdministrationAuthenticationSource.localOnly,
         message:
-            'Terminal non autorisé : appaire ce terminal avant d’accéder aux fonctions protégées.',
+            'Terminal non autorisé : veuillez autoriser ce terminal avant d’accéder aux fonctions protégées.',
         users: <AppUser>[],
       );
     }
@@ -590,7 +725,7 @@ class _HomeContentState extends State<_HomeContent> {
         return _AdministrationAuthenticationData(
           source: _AdministrationAuthenticationSource.server,
           message:
-              '${centralUsers.message} Sélectionne ton identité puis saisis ton code personnel.',
+              '${centralUsers.message} Veuillez sélectionner votre identité puis saisir votre code personnel.',
           users: centralUsers.users,
           apiBaseUrl: configuration.apiBaseUrl,
           tenantId: configuration.tenantId,
@@ -601,7 +736,7 @@ class _HomeContentState extends State<_HomeContent> {
       return _AdministrationAuthenticationData(
         source: _AdministrationAuthenticationSource.localFallback,
         message:
-            '${centralUsers.title} — authentification serveur indisponible. Réessaie lorsque le serveur OpenIRN répond.',
+            '${centralUsers.title} — authentification indisponible. Veuillez réessayer lorsque le serveur OpenIRN répond.',
         users: const <AppUser>[],
       );
     }
@@ -609,7 +744,7 @@ class _HomeContentState extends State<_HomeContent> {
     return const _AdministrationAuthenticationData(
       source: _AdministrationAuthenticationSource.localOnly,
       message:
-          'Terminal non autorisé : appaire ce terminal avant d’accéder aux fonctions protégées.',
+          'Terminal non autorisé : veuillez autoriser ce terminal avant d’accéder aux fonctions protégées.',
       users: <AppUser>[],
     );
   }
@@ -628,28 +763,59 @@ class _HomeContentState extends State<_HomeContent> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                if (widget.requiresDeviceEnrollment || !isConfigured)
+                if (widget.requiresTenantSelection ||
+                    configuration?.hasSelectedTenant != true)
+                  _HomeActionCard(
+                    icon: Icons.account_tree_outlined,
+                    title: 'Choisir un espace de travail',
+                    subtitle:
+                        'Sélectionner l’espace de travail OpenIRN avant de choisir un utilisateur ou d’autoriser ce terminal.',
+                    buttonLabel: 'Choisir',
+                    onPressed: _chooseTenant,
+                  )
+                else if (widget.requiresDeviceEnrollment || !isConfigured) ...[
                   _HomeActionCard(
                     icon: Icons.phonelink_lock_outlined,
                     title: 'Autoriser ce terminal',
                     subtitle:
-                        'Appairer ce poste avec le serveur OpenIRN avant d’accéder aux campagnes et à l’administration.',
+                        'Autoriser ce poste dans l’espace de travail ${configuration?.tenantId ?? ''} avant d’accéder aux campagnes et à l’administration.',
                     buttonLabel: 'Appairer',
                     onPressed: _openDeviceEnrollment,
-                  )
-                else if (!AppSessionManager.instance.hasActiveSession ||
-                    AppSessionManager.instance.activeUser == null)
+                  ),
+                  const SizedBox(height: 12),
+                  _HomeActionCard(
+                    icon: Icons.arrow_back_outlined,
+                    title: 'Retour au choix de l’espace de travail',
+                    subtitle:
+                        'Changer d’espace de travail sans autoriser ce terminal dans l’espace actuellement sélectionné.',
+                    buttonLabel: 'Retour',
+                    onPressed: _returnToTenantSelection,
+                  ),
+                ] else if (!AppSessionManager.instance.hasActiveSession ||
+                    AppSessionManager.instance.activeUser == null) ...[
                   _HomeActionCard(
                     icon: Icons.lock_open_outlined,
                     title: 'Déverrouiller OpenIRN',
                     subtitle:
-                        'Ouvrir une session serveur courte avec ton profil et ton code personnel.',
+                        'Ouvrir une session avec votre profil et votre code personnel.',
                     buttonLabel: 'Déverrouiller',
                     onPressed: _unlockSession,
-                  )
-                else ...[
+                  ),
+                  const SizedBox(height: 12),
+                  _HomeActionCard(
+                    icon: Icons.swap_horiz_outlined,
+                    title: 'Changer d’espace de travail',
+                    subtitle:
+                        'Revenir au choix de l’espace de travail OpenIRN avant d’ouvrir une session.',
+                    buttonLabel: 'Changer',
+                    onPressed: _chooseTenant,
+                  ),
+                ] else ...[
                   _SessionStatusCard(
                     user: AppSessionManager.instance.activeUser!,
+                    tenantId: configuration?.tenantId.trim().isNotEmpty == true
+                        ? configuration!.tenantId
+                        : AppSessionManager.instance.tenantId,
                     expiresAt: AppSessionManager.instance.expiresAt,
                     idleExpiresAt: AppSessionManager.instance.idleExpiresAt,
                     onLock: _lockSession,
@@ -666,7 +832,7 @@ class _HomeContentState extends State<_HomeContent> {
                     _HomeActionCard(
                       icon: Icons.fact_check_outlined,
                       title: 'Evaluation Indice de Résilience Numérique',
-                      subtitle: "Créer ou ouvrir une campagne d'évaluation",
+                      subtitle: "Ouvrir une campagne d'évaluation",
                       buttonLabel: 'Ouvrir',
                       onPressed: _openCampaigns,
                     ),
@@ -687,8 +853,7 @@ class _HomeContentState extends State<_HomeContent> {
                     _HomeActionCard(
                       icon: Icons.admin_panel_settings_outlined,
                       title: 'Administration',
-                      subtitle:
-                          'Accéder aux opérations autorisées par ton profil.',
+                      subtitle: 'Accéder aux opérations d\'administration.',
                       buttonLabel: 'Administrer',
                       onPressed: _openAdministration,
                     ),
@@ -704,12 +869,14 @@ class _HomeContentState extends State<_HomeContent> {
 
 class _SessionStatusCard extends StatelessWidget {
   final AppUser user;
+  final String tenantId;
   final DateTime? expiresAt;
   final DateTime? idleExpiresAt;
   final Future<void> Function() onLock;
 
   const _SessionStatusCard({
     required this.user,
+    required this.tenantId,
     required this.expiresAt,
     required this.idleExpiresAt,
     required this.onLock,
@@ -722,6 +889,7 @@ class _SessionStatusCard extends StatelessWidget {
     final displayName = user.displayName.trim().isEmpty
         ? user.id
         : user.displayName.trim();
+    final tenantLabel = _formatTenantLabel(tenantId);
     final expirationText = expiresAt == null
         ? 'Expiration serveur non communiquée'
         : 'Expire à ${_formatSessionExpiration(expiresAt!.toLocal())}';
@@ -746,6 +914,16 @@ class _SessionStatusCard extends StatelessWidget {
               Text('Session ouverte', style: theme.textTheme.titleLarge),
               const SizedBox(height: 6),
               Text('$displayName — ${user.role.label}'),
+              if (tenantLabel.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'Espace de travail : $tenantLabel',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
               const SizedBox(height: 4),
               Text(
                 expirationText,
@@ -800,6 +978,17 @@ class _SessionStatusCard extends StatelessWidget {
       ),
     );
   }
+}
+
+String _formatTenantLabel(String tenantId) {
+  final trimmed = tenantId.trim();
+  if (trimmed.isEmpty) {
+    return '';
+  }
+  if (trimmed == SyncConfiguration.defaultTenantId) {
+    return 'Défaut ($trimmed)';
+  }
+  return trimmed;
 }
 
 String _formatSessionExpiration(DateTime value) {
@@ -932,6 +1121,79 @@ class _HomeActionCard extends StatelessWidget {
                 ],
               ),
       ),
+    );
+  }
+}
+
+class _TenantSelectionDialog extends StatelessWidget {
+  final List<TenantInfo> tenants;
+  final String selectedTenantId;
+
+  const _TenantSelectionDialog({
+    required this.tenants,
+    required this.selectedTenantId,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dialogMaxHeight = MediaQuery.sizeOf(context).height * 0.62;
+    return AlertDialog(
+      insetPadding: responsiveDialogInsetPadding(context),
+      title: const Text('Choisir l’espace de travail'),
+      content: ResponsiveDialogContent(
+        maxWidth: 720,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: dialogMaxHeight),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Veuillez d’abord sélectionner l’espace de travail. OpenIRN affichera ensuite uniquement les utilisateurs rattachés à cet espace.',
+                style: theme.textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 14),
+              Flexible(
+                fit: FlexFit.loose,
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  primary: false,
+                  itemCount: tenants.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final tenant = tenants[index];
+                    final selected = tenant.id == selectedTenantId;
+                    return Card.outlined(
+                      child: ListTile(
+                        leading: Icon(
+                          tenant.isDefault
+                              ? Icons.home_work_outlined
+                              : Icons.business_outlined,
+                        ),
+                        title: Text(tenant.displayName),
+                        subtitle: Text(
+                          '${tenant.id} · ${tenant.activeUserCount} utilisateur(s) actif(s) · ${tenant.campaignCount} campagne(s)',
+                        ),
+                        trailing: selected
+                            ? const Chip(label: Text('Actuel'))
+                            : const Icon(Icons.arrow_forward),
+                        onTap: () => Navigator.of(context).pop(tenant),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Annuler'),
+        ),
+      ],
     );
   }
 }
@@ -1167,7 +1429,7 @@ class _AdministrationPinAuthenticationDialogState
     final pin = _pinController.text.trim();
     if (pin.isEmpty) {
       setState(() {
-        _errorText = 'Saisis ton code personnel.';
+        _errorText = 'Veuillez saisir votre code personnel.';
       });
       return;
     }
@@ -1630,7 +1892,7 @@ class _ErrorState extends StatelessWidget {
             SelectableText(error, textAlign: TextAlign.center),
             const SizedBox(height: 16),
             const Text(
-              'Vérifie que le terminal est autorisé et que le référentiel officiel est installé côté serveur.',
+              'Veuillez vérifier que le terminal est autorisé et que le référentiel officiel est disponible.',
               textAlign: TextAlign.center,
             ),
           ],

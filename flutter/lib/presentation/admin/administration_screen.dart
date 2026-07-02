@@ -12,6 +12,7 @@ import 'official_referential_screen.dart';
 import 'security_audit_screen.dart';
 import 'server_maintenance_screen.dart';
 import 'server_sessions_screen.dart';
+import 'tenant_management_screen.dart';
 
 class AdministrationScreen extends StatelessWidget {
   final IrnReferential referential;
@@ -45,7 +46,7 @@ class AdministrationScreen extends StatelessWidget {
     if (!_hasServerReferential) {
       _showForbidden(
         context,
-        'Installe ou recharge le référentiel officiel aDRI avant de gérer les campagnes.',
+        'Veuillez installer ou recharger le référentiel officiel aDRI avant de gérer les campagnes.',
       );
       return;
     }
@@ -70,6 +71,21 @@ class AdministrationScreen extends StatelessWidget {
     await Navigator.of(
       context,
     ).push(MaterialPageRoute<void>(builder: (_) => const UserListScreen()));
+  }
+
+  Future<void> _openTenantManagement(BuildContext context) async {
+    if (!_accessPolicy.canManageTenants(activeUser)) {
+      _showForbidden(
+        context,
+        'La gestion des espaces de travail est réservée aux administrateurs.',
+      );
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => TenantManagementScreen(activeUser: activeUser),
+      ),
+    );
   }
 
   Future<void> _openServerMaintenance(BuildContext context) async {
@@ -188,6 +204,15 @@ class AdministrationScreen extends StatelessWidget {
               'Créer, modifier ou supprimer les utilisateurs depuis la base centrale serveur.',
           buttonLabel: 'Ouvrir',
           onPressed: () => _openUsersAdministration(context),
+        ),
+      if (_accessPolicy.canManageTenants(activeUser))
+        _AdministrationActionCard(
+          icon: Icons.account_tree_outlined,
+          title: 'Espaces de travail',
+          subtitle:
+              'Créer un espace isolé, y rattacher un Pilote IRN initial et sélectionner l’espace actif.',
+          buttonLabel: 'Gérer',
+          onPressed: () => _openTenantManagement(context),
         ),
       if (_accessPolicy.canManageAuthorizedDevices(activeUser))
         _AdministrationActionCard(

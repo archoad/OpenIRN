@@ -1,3 +1,5 @@
+> **Note v0.5.0 / patch 138C** : ce document décrit le MVP historique. Le référentiel n’est plus embarqué dans Flutter ; il est installé, servi et historisé côté API. Voir `docs/123b_referentiel_serveur_uniquement.md` et `docs/138c_nettoyage_referentiel_embarque.md`.
+
 # Lot 003 — MVP centré sur le référentiel officiel aDRI
 
 ## Décision de périmètre

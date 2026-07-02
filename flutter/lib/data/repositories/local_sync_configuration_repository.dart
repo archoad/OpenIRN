@@ -25,8 +25,11 @@ class LocalSyncConfigurationRepository {
       configuration,
     );
 
-    AppSessionManager.instance.updateDeviceContext(
-      tenantId: normalized.tenantId,
+    final sessionManager = AppSessionManager.instance;
+    sessionManager.updateDeviceContext(
+      tenantId: sessionManager.hasActiveSession
+          ? sessionManager.tenantId
+          : normalized.tenantId,
       deviceId: normalized.deviceId,
     );
 
@@ -43,9 +46,7 @@ class LocalSyncConfigurationRepository {
               ? _generateDeviceId()
               : existing.deviceId.trim()
         : configuration.deviceId.trim();
-    final tenantId = configuration.tenantId.trim().isEmpty
-        ? SyncConfiguration.defaultTenantId
-        : configuration.tenantId.trim();
+    final tenantId = configuration.tenantId.trim();
     final sessionToken = configuration.apiToken.trim();
 
     final publicConfiguration = configuration.copyWith(
@@ -73,15 +74,59 @@ class LocalSyncConfigurationRepository {
     );
 
     if (sessionToken.isNotEmpty) {
-      AppSessionManager.instance.startSession(
+      final sessionManager = AppSessionManager.instance;
+      final preservedUser = sessionManager.activeUser;
+      final preservedSessionId = sessionManager.sessionId;
+      final preservedExpiresAt = sessionManager.expiresAt;
+      final preservedIdleTimeout = sessionManager.idleTimeout;
+      sessionManager.startSession(
         apiToken: sessionToken,
         tenantId: publicConfiguration.tenantId,
         deviceId: publicConfiguration.deviceId,
-        expiresAt: DateTime.now().toUtc().add(const Duration(hours: 8)),
+        sessionId: preservedSessionId,
+        expiresAt:
+            preservedExpiresAt ??
+            DateTime.now().toUtc().add(const Duration(hours: 8)),
+        idleTimeout: preservedIdleTimeout,
+        activeUser: preservedUser,
       );
     } else {
       AppSessionManager.instance.clearSession();
     }
+
+    return publicConfiguration.copyWith(
+      apiToken: AppSessionManager.instance.apiToken,
+    );
+  }
+
+  Future<SyncConfiguration> saveTenantSelectionForSolutionAdministration(
+    SyncConfiguration configuration,
+  ) async {
+    final preferences = await SharedPreferences.getInstance();
+    final existing = await _loadPublicConfiguration(preferences);
+    final deviceId = configuration.deviceId.trim().isEmpty
+        ? existing.deviceId.trim().isEmpty
+              ? _generateDeviceId()
+              : existing.deviceId.trim()
+        : configuration.deviceId.trim();
+    final publicConfiguration = configuration.copyWith(
+      apiBaseUrl: SyncConfiguration.fixedApiBaseUrl,
+      tenantId: configuration.tenantId.trim(),
+      deviceId: deviceId,
+      apiToken: '',
+      updatedAt: DateTime.now().toUtc(),
+    );
+
+    final payload = <String, dynamic>{
+      'schemaVersion': _schemaVersion,
+      'updatedAt': publicConfiguration.updatedAt.toUtc().toIso8601String(),
+      'storage': 'public_device_metadata',
+      'configuration': publicConfiguration.toJson(),
+    };
+
+    await preferences.setString(_deviceIdKey, publicConfiguration.deviceId);
+    await preferences.setString(_configurationKey, jsonEncode(payload));
+    await _deleteLegacySecureFallback(preferences);
 
     return publicConfiguration.copyWith(
       apiToken: AppSessionManager.instance.apiToken,
@@ -95,6 +140,13 @@ class LocalSyncConfigurationRepository {
       configuration.copyWith(deviceId: deviceId, apiToken: ''),
     );
     return updated.deviceId;
+  }
+
+  Future<SyncConfiguration> clearTenantSelection() async {
+    final configuration = await loadConfiguration();
+    return saveConfiguration(
+      configuration.copyWith(tenantId: '', enabled: false, apiToken: ''),
+    );
   }
 
   Future<SyncConfiguration> _loadPublicConfiguration(
@@ -143,9 +195,7 @@ class LocalSyncConfigurationRepository {
     final deviceId = configuration.deviceId.trim().isEmpty
         ? _generateDeviceId()
         : configuration.deviceId.trim();
-    final tenantId = configuration.tenantId.trim().isEmpty
-        ? SyncConfiguration.defaultTenantId
-        : configuration.tenantId.trim();
+    final tenantId = configuration.tenantId.trim();
     final normalized = configuration.copyWith(
       apiBaseUrl: SyncConfiguration.fixedApiBaseUrl,
       tenantId: tenantId,

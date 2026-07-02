@@ -33,14 +33,6 @@ class _AboutScreenState extends State<AboutScreen> {
               ),
               const SizedBox(height: 12),
               _ReferentialCard(referential: widget.referential),
-              const SizedBox(height: 12),
-              _LicenseCard(referential: widget.referential),
-              if (widget.referential.importWarnings.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                _ImportWarningsCard(
-                  warnings: widget.referential.importWarnings,
-                ),
-              ],
             ],
           ),
         ),
@@ -80,7 +72,7 @@ class _ApplicationCard extends StatelessWidget {
                       Text('OpenIRN', style: textTheme.headlineSmall),
                       const SizedBox(height: 4),
                       const Text(
-                        'Application open source d’exploration et d’évaluation locale de l’Indice de Résilience Numérique.',
+                        'Application open source d’exploration et d’évaluation de l’Indice de Résilience Numérique.',
                       ),
                     ],
                   ),
@@ -101,19 +93,13 @@ class _ApplicationCard extends StatelessWidget {
                   runSpacing: 8,
                   children: [
                     Chip(label: Text('OpenIRN $versionLabel')),
-                    Chip(label: Text('${referential.pillars.length} piliers')),
-                    Chip(
-                      label: Text('${referential.criteria.length} critères'),
-                    ),
                     Chip(label: Text('Référentiel ${referential.version}')),
                   ],
                 );
               },
             ),
             const SizedBox(height: 16),
-            const Text(
-              'OpenIRN distingue clairement le code de l’application, le référentiel officiel aDRI importé, et les campagnes créées par l’utilisateur.',
-            ),
+            const Text('Copyright © Michel Dubois 2026'),
           ],
         ),
       ),
@@ -135,7 +121,7 @@ class _ReferentialCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Référentiel officiel utilisé',
+              'Référentiel utilisé',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 12),
@@ -146,115 +132,20 @@ class _ReferentialCard extends StatelessWidget {
               value: referential.sourceUrl,
               selectable: true,
             ),
-            if (referential.source.projectPath.isNotEmpty)
-              _InfoRow(
-                label: 'Projet source',
-                value: referential.source.projectPath,
-              ),
-            if (referential.source.defaultBranch.isNotEmpty)
-              _InfoRow(
-                label: 'Branche',
-                value: referential.source.defaultBranch,
-              ),
             if (referential.source.filePath.isNotEmpty)
               _InfoRow(
                 label: 'Fichier importé',
                 value: referential.source.filePath,
-              ),
-            if (referential.source.commitSha != null &&
-                referential.source.commitSha!.isNotEmpty)
-              _InfoRow(
-                label: 'Commit',
-                value: referential.source.commitSha!,
-                selectable: true,
-              ),
-            if (referential.checksumSha256 != null &&
-                referential.checksumSha256!.isNotEmpty)
-              _InfoRow(
-                label: 'SHA-256',
-                value: referential.checksumSha256!,
-                selectable: true,
               ),
             if (referential.importedAt != null)
               _InfoRow(
                 label: 'Importé le',
                 value: referential.importedAt!.toLocal().toString(),
               ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _LicenseCard extends StatelessWidget {
-  final IrnReferential referential;
-
-  const _LicenseCard({required this.referential});
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Licence et attribution',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 12),
             _InfoRow(
               label: 'Licence du référentiel',
               value: referential.license,
             ),
-            const SizedBox(height: 8),
-            const Text(
-              'Le référentiel IRN importé est attribué à l’aDRI / Digital Resilience Initiative. '
-              'OpenIRN conserve la source, la version et le checksum du fichier importé afin de faciliter la traçabilité.',
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Les campagnes, réponses, justifications, scores et journaux produits dans OpenIRN sont des données de ce terminal distinctes du référentiel officiel.',
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ImportWarningsCard extends StatelessWidget {
-  final List<String> warnings;
-
-  const _ImportWarningsCard({required this.warnings});
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Avertissements d’import',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 12),
-            for (final warning in warnings)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Icon(Icons.warning_amber_outlined, size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(child: Text(warning)),
-                  ],
-                ),
-              ),
           ],
         ),
       ),

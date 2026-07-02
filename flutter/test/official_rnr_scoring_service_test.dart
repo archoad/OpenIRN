@@ -4,6 +4,22 @@ import 'package:openirn/domain/models/irn_referential.dart';
 import 'package:openirn/domain/services/official_rnr_scoring_service.dart';
 
 void main() {
+  test(
+    'methodMetadata explicite que le score OpenIRN R/NR nest pas pondéré',
+    () {
+      expect(
+        OfficialRnrScoringService.methodMetadata.methodStatus,
+        'public_rnr_unweighted',
+      );
+      expect(
+        OfficialRnrScoringService
+            .methodMetadata
+            .weightedOfficialMethodImplemented,
+        isFalse,
+      );
+    },
+  );
+
   test('computeSummary calcule R / (R + NR) et exclut les N.C.', () {
     final referential = _sampleReferential();
     const service = OfficialRnrScoringService();
@@ -19,6 +35,7 @@ void main() {
     expect(summary.resilientCriteria, 1);
     expect(summary.nonResilientCriteria, 1);
     expect(summary.notAnsweredCriteria, 1);
+    expect(summary.openIrnRnrScore, 50);
     expect(summary.officialScore, 50);
   });
 
@@ -30,6 +47,7 @@ void main() {
 
     expect(summary.answeredCriteria, 0);
     expect(summary.officialScore, isNull);
+    expect(summary.formattedOpenIrnRnrScore, 'N/A');
     expect(summary.formattedOfficialScore, 'N/A');
   });
 

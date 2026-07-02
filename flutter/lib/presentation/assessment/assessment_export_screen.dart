@@ -316,9 +316,9 @@ class _ExportIntroCard extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             const Text(
-              'Cet export sert de contrat intermédiaire avant la future synchronisation API. '
+              'Cet export sert de format d’échange avant la future synchronisation serveur. '
               'Il contient la traçabilité du référentiel officiel, la campagne, les réponses R / NR / N.C., les justifications, les scores calculés et le journal d’activité local. '
-              'Tu peux l’enregistrer en fichier .json ou le copier dans le presse-papiers.',
+              'Vous pouvez l’enregistrer au format JSON ou le copier dans le presse-papiers.',
             ),
             const SizedBox(height: 12),
             Wrap(

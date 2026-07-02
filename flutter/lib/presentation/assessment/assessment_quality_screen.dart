@@ -80,7 +80,7 @@ class _QualityHeaderCard extends StatelessWidget {
         : 'Campagne à compléter';
     final message = report.isReadyForReview
         ? 'Les informations de campagne sont complètes, tous les critères actifs sont cotés et chaque réponse R / NR dispose d’une justification.'
-        : 'Complète les informations de campagne, les critères non cotés et les justifications avant revue ou export de référence.';
+        : 'Complèter les informations de campagne, les critères non cotés et les justifications avant revue ou export de référence.';
 
     return Card(
       child: Padding(

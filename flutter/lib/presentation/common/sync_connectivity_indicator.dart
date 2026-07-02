@@ -4,8 +4,9 @@ import 'package:flutter/material.dart';
 
 import '../../data/api/openirn_api_client.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
+import '../../domain/services/app_session_manager.dart';
 
-enum _ConnectivityState { checking, online, localOnly }
+enum _ConnectivityState { tenantNotSelected, checking, online, localOnly }
 
 class SyncConnectivityIndicator extends StatefulWidget {
   final Duration refreshInterval;
@@ -42,16 +43,31 @@ class _SyncConnectivityIndicatorState extends State<SyncConnectivityIndicator> {
   }
 
   Future<void> _refresh() async {
+    final activeTenantId = AppSessionManager.instance.tenantId.trim();
+    if (activeTenantId.isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _state = _ConnectivityState.tenantNotSelected;
+        _tooltip =
+            'Aucun espace de travail sélectionné : aucune connexion au serveur n’est ouverte.';
+      });
+      return;
+    }
+
     final configuration = await _configurationRepository.loadConfiguration();
     if (!mounted) {
       return;
     }
 
-    if (!configuration.isConfigured) {
+    if (!configuration.isConfigured ||
+        !configuration.hasSelectedTenant ||
+        configuration.tenantId != activeTenantId) {
       setState(() {
         _state = _ConnectivityState.localOnly;
         _tooltip =
-            'Mode hors ligne uniquement : synchronisation non configurée ou désactivée.';
+            'Mode hors ligne uniquement : synchronisation non configurée pour l’espace courant.';
       });
       return;
     }
@@ -84,11 +100,13 @@ class _SyncConnectivityIndicatorState extends State<SyncConnectivityIndicator> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final color = switch (_state) {
+      _ConnectivityState.tenantNotSelected => colorScheme.outline,
       _ConnectivityState.checking => colorScheme.tertiary,
       _ConnectivityState.online => Colors.green,
       _ConnectivityState.localOnly => colorScheme.error,
     };
     final label = switch (_state) {
+      _ConnectivityState.tenantNotSelected => 'Aucun espace sélectionné',
       _ConnectivityState.checking => 'Contrôle en cours',
       _ConnectivityState.online => 'Serveur accessible',
       _ConnectivityState.localOnly => 'Mode hors ligne',

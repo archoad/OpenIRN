@@ -1,3 +1,5 @@
+> **Note v0.5.0 / patch 138C** : cette décision est historique et n’est plus l’architecture active. Le bundle `flutter/assets/referentials` et son générateur ont été supprimés pendant la sanitization post-v0.5.0.
+
 # Référentiel officiel embarqué dans les assets Flutter
 
 À partir du patch 037, OpenIRN versionne directement le bundle JSON du référentiel officiel aDRI dans :
