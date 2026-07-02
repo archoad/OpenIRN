@@ -1778,15 +1778,6 @@ class _HeaderCard extends StatelessWidget {
             SelectableText('Source : ${referential.sourceUrl}'),
             const SizedBox(height: 4),
             Text('Licence : ${referential.license}'),
-            if (referential.source.filePath.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text('Fichier : ${referential.source.filePath}'),
-            ],
-            if (referential.checksumSha256 != null &&
-                referential.checksumSha256!.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              SelectableText('SHA-256 : ${referential.checksumSha256}'),
-            ],
           ],
         ),
       ),
