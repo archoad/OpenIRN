@@ -1,13 +1,20 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+
+import '../../data/files/local_image_file_service.dart';
+import '../../data/files/local_pdf_file_service.dart';
 
 import '../../domain/models/irn_assessment.dart';
 import '../../domain/models/irn_referential.dart';
 import '../../domain/models/local_campaign.dart';
+import '../../domain/services/assessment_pdf_export_service.dart';
 import '../../domain/services/official_rnr_scoring_service.dart';
 import 'widgets/pillar_radar_chart.dart';
 import '../common/openirn_app_bar.dart';
 
-class AssessmentSummaryScreen extends StatelessWidget {
+class AssessmentSummaryScreen extends StatefulWidget {
   final IrnReferential referential;
   final LocalCampaign campaign;
   final Map<String, CriterionAnswer> criterionAnswers;
@@ -20,16 +27,35 @@ class AssessmentSummaryScreen extends StatelessWidget {
   });
 
   @override
+  State<AssessmentSummaryScreen> createState() =>
+      _AssessmentSummaryScreenState();
+}
+
+class _AssessmentSummaryScreenState extends State<AssessmentSummaryScreen> {
+  final LocalImageFileService _imageFileService = const LocalImageFileService();
+  final LocalPdfFileService _pdfFileService = const LocalPdfFileService();
+  final AssessmentPdfExportService _pdfExportService =
+      const AssessmentPdfExportService();
+  final GlobalKey _indicatorBoardKey = GlobalKey();
+  final GlobalKey _radarKey = GlobalKey();
+  bool _exportingIndicatorBoard = false;
+  bool _exportingRadar = false;
+  bool _exportingPdf = false;
+
+  @override
   Widget build(BuildContext context) {
     const scoringService = OfficialRnrScoringService();
-    final answers = _answersFromCriterionAnswers(criterionAnswers);
-    final globalSummary = scoringService.computeSummary(referential, answers);
+    final answers = _answersFromCriterionAnswers(widget.criterionAnswers);
+    final globalSummary = scoringService.computeSummary(
+      widget.referential,
+      answers,
+    );
     final pillarSummaries = scoringService.computeSummariesByPillar(
-      referential,
+      widget.referential,
       answers,
     );
     final scopeSummaries = scoringService.computeSummariesByScope(
-      referential,
+      widget.referential,
       answers,
     );
     final weakestPillars = _rankedPillars(
@@ -43,7 +69,7 @@ class AssessmentSummaryScreen extends StatelessWidget {
     final radarData = _radarData(pillarSummaries);
 
     return Scaffold(
-      appBar: OpenIrnAppBar(title: 'Synthèse — ${campaign.name}'),
+      appBar: OpenIrnAppBar(title: 'Synthèse — ${widget.campaign.name}'),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 1100),
@@ -51,20 +77,62 @@ class AssessmentSummaryScreen extends StatelessWidget {
             padding: const EdgeInsets.all(16),
             children: [
               _CampaignSummaryHeader(
-                campaign: campaign,
-                referential: referential,
+                campaign: widget.campaign,
+                referential: widget.referential,
+                isExportingPdf: _exportingPdf,
+                onExportPdfPressed: () => _exportSummaryAsPdf(
+                  globalSummary: globalSummary,
+                  pillarSummaries: pillarSummaries,
+                  scopeSummaries: scopeSummaries,
+                  strongestPillars: strongestPillars,
+                  weakestPillars: weakestPillars,
+                ),
               ),
               const SizedBox(height: 12),
               _GlobalSummaryCard(summary: globalSummary),
               const SizedBox(height: 12),
               _InterpretationCard(summary: globalSummary),
               const SizedBox(height: 12),
-              _IrnIndicatorBoardCard(
-                globalSummary: globalSummary,
-                pillarSummaries: pillarSummaries,
+              RepaintBoundary(
+                key: _indicatorBoardKey,
+                child: _IrnIndicatorBoardCard(
+                  globalSummary: globalSummary,
+                  pillarSummaries: pillarSummaries,
+                  isExporting: _exportingIndicatorBoard,
+                  onExportPressed: () => _exportCardAsPng(
+                    boundaryKey: _indicatorBoardKey,
+                    suggestedName: _buildExportName('indicateurs_irn'),
+                    successMessage:
+                        'Le cartouche Indicateurs IRN a été exporté au format PNG.',
+                    setExporting: (value) {
+                      if (!mounted) {
+                        return;
+                      }
+                      setState(() => _exportingIndicatorBoard = value);
+                    },
+                  ),
+                ),
               ),
               const SizedBox(height: 12),
-              _PillarRadarCard(data: radarData),
+              RepaintBoundary(
+                key: _radarKey,
+                child: _PillarRadarCard(
+                  data: radarData,
+                  isExporting: _exportingRadar,
+                  onExportPressed: () => _exportCardAsPng(
+                    boundaryKey: _radarKey,
+                    suggestedName: _buildExportName('radar_irn'),
+                    successMessage:
+                        'Le cartouche Radar IRN a été exporté au format PNG.',
+                    setExporting: (value) {
+                      if (!mounted) {
+                        return;
+                      }
+                      setState(() => _exportingRadar = value);
+                    },
+                  ),
+                ),
+              ),
               const SizedBox(height: 12),
               const _SectionTitle(
                 title: 'Score par pilier',
@@ -103,6 +171,155 @@ class AssessmentSummaryScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  String _buildExportName(String suffix) {
+    return _imageFileService.buildExportFileName(
+      campaignName: widget.campaign.name,
+      label: suffix,
+      now: DateTime.now(),
+    );
+  }
+
+  String _buildPdfExportName() {
+    return _pdfFileService.buildExportFileName(
+      campaignName: widget.campaign.name,
+      now: DateTime.now(),
+    );
+  }
+
+  Future<void> _exportSummaryAsPdf({
+    required IrnScoreSummary globalSummary,
+    required Map<IrnPillar, IrnScoreSummary> pillarSummaries,
+    required Map<CriterionScope, IrnScoreSummary> scopeSummaries,
+    required List<MapEntry<IrnPillar, IrnScoreSummary>> strongestPillars,
+    required List<MapEntry<IrnPillar, IrnScoreSummary>> weakestPillars,
+  }) async {
+    FocusScope.of(context).unfocus();
+    setState(() => _exportingPdf = true);
+
+    try {
+      final bytes = await _pdfExportService.buildSummaryPdf(
+        campaign: widget.campaign,
+        referential: widget.referential,
+        globalSummary: globalSummary,
+        pillarSummaries: pillarSummaries,
+        scopeSummaries: scopeSummaries,
+        strongestPillars: strongestPillars,
+        weakestPillars: weakestPillars,
+      );
+      final path = await _pdfFileService.savePdf(
+        bytes: bytes,
+        suggestedName: _buildPdfExportName(),
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      if (path == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Export PDF annulé.')),
+        );
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'La synthèse IRN a été exportée en PDF.\nFichier : $path',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'L’export PDF n’a pas pu être effectué. Détail : $error',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _exportingPdf = false);
+      }
+    }
+  }
+
+  Future<void> _exportCardAsPng({
+    required GlobalKey boundaryKey,
+    required String suggestedName,
+    required String successMessage,
+    required ValueChanged<bool> setExporting,
+  }) async {
+    FocusScope.of(context).unfocus();
+    setExporting(true);
+    final devicePixelRatio = MediaQuery.of(context).devicePixelRatio;
+
+    try {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) {
+        return;
+      }
+
+      final boundaryContext = boundaryKey.currentContext;
+      if (boundaryContext == null) {
+        throw StateError('Le visuel à exporter n’est pas disponible.');
+      }
+      if (!boundaryContext.mounted) {
+        return;
+      }
+
+      final renderObject = boundaryContext.findRenderObject();
+      if (renderObject is! RenderRepaintBoundary) {
+        throw StateError('Le visuel à exporter ne peut pas être capturé.');
+      }
+
+      final image = await renderObject.toImage(
+        pixelRatio: devicePixelRatio < 2 ? 2 : devicePixelRatio,
+      );
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) {
+        throw StateError('Le rendu de l’image a échoué.');
+      }
+
+      final path = await _imageFileService.savePng(
+        bytes: byteData.buffer.asUint8List(),
+        suggestedName: suggestedName,
+      );
+      image.dispose();
+
+      if (!mounted) {
+        return;
+      }
+
+      if (path == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Export PNG annulé.')),
+        );
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$successMessage\nFichier : $path')),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'L’export PNG n’a pas pu être effectué. Détail : $error',
+          ),
+        ),
+      );
+    } finally {
+      setExporting(false);
+    }
   }
 
   Map<String, IrnAnswer> _answersFromCriterionAnswers(
@@ -148,10 +365,14 @@ class AssessmentSummaryScreen extends StatelessWidget {
 class _CampaignSummaryHeader extends StatelessWidget {
   final LocalCampaign campaign;
   final IrnReferential referential;
+  final VoidCallback onExportPdfPressed;
+  final bool isExportingPdf;
 
   const _CampaignSummaryHeader({
     required this.campaign,
     required this.referential,
+    required this.onExportPdfPressed,
+    required this.isExportingPdf,
   });
 
   @override
@@ -179,6 +400,20 @@ class _CampaignSummaryHeader extends StatelessWidget {
                     Text(campaign.description),
                   ],
                 ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            OutlinedButton.icon(
+              onPressed: isExportingPdf ? null : onExportPdfPressed,
+              icon: isExportingPdf
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.picture_as_pdf_outlined),
+              label: Text(
+                isExportingPdf ? 'Export PDF...' : 'Exporter la synthèse PDF',
               ),
             ),
           ],
@@ -310,10 +545,14 @@ class _InterpretationCard extends StatelessWidget {
 class _IrnIndicatorBoardCard extends StatelessWidget {
   final IrnScoreSummary globalSummary;
   final Map<IrnPillar, IrnScoreSummary> pillarSummaries;
+  final VoidCallback onExportPressed;
+  final bool isExporting;
 
   const _IrnIndicatorBoardCard({
     required this.globalSummary,
     required this.pillarSummaries,
+    required this.onExportPressed,
+    required this.isExporting,
   });
 
   @override
@@ -331,7 +570,18 @@ class _IrnIndicatorBoardCard extends StatelessWidget {
               children: [
                 const Icon(Icons.grid_view_rounded),
                 const SizedBox(width: 8),
-                Text('Indicateurs IRN', style: theme.textTheme.titleMedium),
+                Expanded(
+                  child: Text(
+                    'Indicateurs IRN',
+                    style: theme.textTheme.titleMedium,
+                  ),
+                ),
+                if (!isExporting)
+                  OutlinedButton.icon(
+                    onPressed: onExportPressed,
+                    icon: const Icon(Icons.image_outlined),
+                    label: const Text('Exporter en PNG'),
+                  ),
               ],
             ),
             const SizedBox(height: 4),
@@ -779,8 +1029,14 @@ Color _scoreTileForegroundColor(Color backgroundColor) {
 
 class _PillarRadarCard extends StatelessWidget {
   final List<PillarRadarDatum> data;
+  final VoidCallback onExportPressed;
+  final bool isExporting;
 
-  const _PillarRadarCard({required this.data});
+  const _PillarRadarCard({
+    required this.data,
+    required this.onExportPressed,
+    required this.isExporting,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -796,7 +1052,15 @@ class _PillarRadarCard extends StatelessWidget {
               children: [
                 const Icon(Icons.radar),
                 const SizedBox(width: 8),
-                Text('Radar IRN', style: theme.textTheme.titleMedium),
+                Expanded(
+                  child: Text('Radar IRN', style: theme.textTheme.titleMedium),
+                ),
+                if (!isExporting)
+                  OutlinedButton.icon(
+                    onPressed: onExportPressed,
+                    icon: const Icon(Icons.image_outlined),
+                    label: const Text('Exporter en PNG'),
+                  ),
               ],
             ),
             const SizedBox(height: 4),

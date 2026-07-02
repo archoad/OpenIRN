@@ -14,6 +14,7 @@ import '../../domain/services/referential_catalog_service.dart';
 import '../about/about_screen.dart';
 import '../admin/administration_screen.dart';
 import '../campaigns/campaign_list_screen.dart';
+import '../common/change_access_code_card.dart';
 import '../common/openirn_app_bar.dart';
 import '../common/responsive_autofocus.dart';
 import '../common/responsive_dialog.dart';
@@ -856,6 +857,14 @@ class _HomeContentState extends State<_HomeContent> {
                       subtitle: 'Accéder aux opérations d\'administration.',
                       buttonLabel: 'Administrer',
                       onPressed: _openAdministration,
+                    )
+                  else
+                    const ChangeAccessCodeCard(
+                      title: 'Administration',
+                      subtitle:
+                          'Changer votre code d’accès personnel sans passer par un administrateur.',
+                      buttonLabel: 'Changer mon code',
+                      elevatedButton: true,
                     ),
                 ],
               ],

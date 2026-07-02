@@ -1163,6 +1163,8 @@ String _backupReasonLabel(String reason) {
       return 'Avant remplacement utilisateurs';
     case 'pre_user_pin_change':
       return 'Avant changement PIN';
+    case 'pre_self_pin_change':
+      return 'Avant changement de code personnel';
     case 'pre_campaign_restore':
       return 'Avant restauration campagne';
     case 'manual_restore':

@@ -100,6 +100,39 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
     }
   }
 
+  Future<void> _renameTenant(
+    _TenantManagementStateData state,
+    TenantInfo tenant,
+  ) async {
+    final form = await showDialog<_TenantRenameFormResult>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _TenantRenameDialog(tenant: tenant),
+    );
+    if (form == null || !mounted) {
+      return;
+    }
+
+    final result = await _apiClient.updateTenant(
+      baseUrl: state.configuration.apiBaseUrl,
+      tenantId: tenant.id,
+      displayName: form.displayName,
+      apiToken: state.configuration.apiToken,
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${result.title} — ${result.message}')),
+    );
+
+    if (result.isAvailable) {
+      _reload();
+    }
+  }
+
   Future<void> _switchTenant(
     TenantInfo tenant, {
     required bool solutionAdministrator,
@@ -167,6 +200,7 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
                       tenant: tenant,
                       isCurrent: tenant.id == state.configuration.tenantId,
                       solutionAdministrator: state.solutionAdministrator,
+                      onRename: () => _renameTenant(state, tenant),
                       onSwitch: tenant.id == state.configuration.tenantId
                           ? null
                           : () => _switchTenant(
@@ -286,12 +320,14 @@ class _TenantCard extends StatelessWidget {
   final TenantInfo tenant;
   final bool isCurrent;
   final bool solutionAdministrator;
+  final VoidCallback onRename;
   final VoidCallback? onSwitch;
 
   const _TenantCard({
     required this.tenant,
     required this.isCurrent,
     required this.solutionAdministrator,
+    required this.onRename,
     required this.onSwitch,
   });
 
@@ -356,14 +392,26 @@ class _TenantCard extends StatelessWidget {
                 children: [
                   content,
                   const SizedBox(height: 14),
-                  OutlinedButton.icon(
-                    onPressed: onSwitch,
-                    icon: const Icon(Icons.login_outlined),
-                    label: Text(
-                      solutionAdministrator
-                          ? 'Administrer cet espace'
-                          : 'Utiliser cet espace',
-                    ),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    alignment: WrapAlignment.end,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: onRename,
+                        icon: const Icon(Icons.edit_outlined),
+                        label: const Text('Renommer'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: onSwitch,
+                        icon: const Icon(Icons.login_outlined),
+                        label: Text(
+                          solutionAdministrator
+                              ? 'Administrer cet espace'
+                              : 'Utiliser cet espace',
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               )
@@ -371,18 +419,127 @@ class _TenantCard extends StatelessWidget {
                 children: [
                   Expanded(child: content),
                   const SizedBox(width: 16),
-                  OutlinedButton.icon(
-                    onPressed: onSwitch,
-                    icon: const Icon(Icons.login_outlined),
-                    label: Text(
-                      solutionAdministrator
-                          ? 'Administrer cet espace'
-                          : 'Utiliser cet espace',
-                    ),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    alignment: WrapAlignment.end,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: onRename,
+                        icon: const Icon(Icons.edit_outlined),
+                        label: const Text('Renommer'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: onSwitch,
+                        icon: const Icon(Icons.login_outlined),
+                        label: Text(
+                          solutionAdministrator
+                              ? 'Administrer cet espace'
+                              : 'Utiliser cet espace',
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
       ),
+    );
+  }
+}
+
+class _TenantRenameFormResult {
+  final String displayName;
+
+  const _TenantRenameFormResult({required this.displayName});
+}
+
+class _TenantRenameDialog extends StatefulWidget {
+  final TenantInfo tenant;
+
+  const _TenantRenameDialog({required this.tenant});
+
+  @override
+  State<_TenantRenameDialog> createState() => _TenantRenameDialogState();
+}
+
+class _TenantRenameDialogState extends State<_TenantRenameDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _displayNameController;
+
+  @override
+  void initState() {
+    super.initState();
+    _displayNameController = TextEditingController(
+      text: widget.tenant.displayName,
+    );
+  }
+
+  @override
+  void dispose() {
+    _displayNameController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (!(_formKey.currentState?.validate() ?? false)) {
+      return;
+    }
+    Navigator.of(context).pop(
+      _TenantRenameFormResult(
+        displayName: _displayNameController.text.trim(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      insetPadding: responsiveDialogInsetPadding(context),
+      title: const Text('Renommer l’espace de travail'),
+      content: ResponsiveDialogContent(
+        maxWidth: 520,
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SelectableText('Identifiant : ${widget.tenant.id}'),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _displayNameController,
+                autofocus: shouldAutofocusTextField(context),
+                decoration: const InputDecoration(
+                  labelText: 'Nouveau nom affiché',
+                  prefixIcon: Icon(Icons.business_outlined),
+                ),
+                validator: (value) {
+                  final raw = value?.trim() ?? '';
+                  if (raw.isEmpty) {
+                    return 'Le nom affiché est obligatoire.';
+                  }
+                  if (raw.length > 160) {
+                    return 'Le nom ne doit pas dépasser 160 caractères.';
+                  }
+                  return null;
+                },
+                onFieldSubmitted: (_) => _submit(),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Annuler'),
+        ),
+        FilledButton.icon(
+          onPressed: _submit,
+          icon: const Icon(Icons.save_outlined),
+          label: const Text('Enregistrer'),
+        ),
+      ],
     );
   }
 }
