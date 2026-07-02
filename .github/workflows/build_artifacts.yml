@@ -29,7 +29,7 @@ jobs:
         run: flutter build apk --release
 
       - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: openirn-android-apk
           path: flutter/build/app/outputs/flutter-apk/app-release.apk
@@ -66,7 +66,7 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent openirn.app openirn-macos.zip
 
       - name: Upload macOS app
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: openirn-macos
           path: flutter/build/macos/Build/Products/Release/openirn-macos.zip
@@ -103,7 +103,7 @@ jobs:
           Compress-Archive -Path flutter\build\windows\x64\runner\Release\* -DestinationPath openirn-windows.zip -Force
 
       - name: Upload Windows app
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: openirn-windows
           path: openirn-windows.zip
@@ -131,7 +131,7 @@ jobs:
         run: flutter build ios --release --no-codesign
 
       - name: Upload iOS build folder
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: openirn-ios-no-codesign
           path: flutter/build/ios/iphoneos

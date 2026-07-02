@@ -132,7 +132,7 @@ jobs:
           cp flutter/build/app/outputs/bundle/release/app-release.aab release_artifacts/openirn-android.aab
 
       - name: Upload Android artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: openirn-android-signed
           path: release_artifacts/openirn-android.*
@@ -203,7 +203,7 @@ jobs:
           Compress-Archive -Path flutter\build\windows\x64\runner\Release\* -DestinationPath release_artifacts\openirn-windows-signed.zip -Force
 
       - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: openirn-windows-signed
           path: release_artifacts/openirn-windows-signed.zip
