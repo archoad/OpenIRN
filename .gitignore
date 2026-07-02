@@ -56,34 +56,22 @@ validation_report.json
 openirn_*.json
 *_campaign_export.json
 
-# Secrets
-.env
-.env.*
-*.pem
-*.key
-*.p12
-*.mobileprovision
-
 # Release signing material — never commit private signing assets
+/secrets/
 flutter/android/key.properties
 flutter/android/app/*.jks
 flutter/android/app/*.keystore
 *.jks
 *.keystore
-*.pfx
-*.cer
-*.crt
-*.p8
-
-# OpenIRN local signing secrets
-/secrets/
-flutter/android/key.properties
-*.jks
-*.keystore
 *.p12
+*.p8
 *.pfx
 *.mobileprovision
 *.cer
 *.csr
+*.crt
 *.key
 *.pem
+.env
+.env.*
+*.mobileprovision

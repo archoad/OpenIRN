@@ -172,7 +172,9 @@ jobs:
         run: |
           if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)) { throw "Secret GitHub manquant : WINDOWS_CERTIFICATE_BASE64" }
           if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) { throw "Secret GitHub manquant : WINDOWS_CERTIFICATE_PASSWORD" }
-          [System.Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64) | Set-Content -Encoding Byte openirn-windows-codesign.pfx
+          $certificateBytes = [System.Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64)
+          [System.IO.File]::WriteAllBytes((Join-Path $PWD "openirn-windows-codesign.pfx"), $certificateBytes)
+          if (-not (Test-Path openirn-windows-codesign.pfx)) { throw "Certificat Windows non créé" }
 
       - name: Sign Windows binaries
         shell: pwsh
