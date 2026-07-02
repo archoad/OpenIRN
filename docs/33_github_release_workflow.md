@@ -1,51 +1,65 @@
 # GitHub Release workflow
 
-Le workflow de release construit et publie les artefacts OpenIRN lorsqu’un tag `v*` est poussé ou lorsque le workflow est lancé manuellement depuis GitHub Actions.
+Le workflow de release OpenIRN construit et publie les artefacts signés lorsqu’un tag `v*` est poussé ou lorsque le workflow est lancé manuellement depuis GitHub Actions.
+
+## Workflow principal
+
+Fichier :
+
+```text
+.github/workflows/release.yml
+```
+
+Nom GitHub Actions :
+
+```text
+Release signée
+```
 
 ## Artefacts produits
 
-- `openirn-android.apk`
-- `openirn-macos.zip`
-- `openirn-windows.zip`
-- `openirn-ios-no-codesign.zip`
-- `SHA256SUMS.txt`
-
-## Statut de distribution
-
-Ces artefacts sont utiles pour validation et diffusion contrôlée, mais ils ne sont pas encore prêts pour les stores :
-
-- l’APK Android n’est pas configuré pour une signature Play Store ;
-- l’application macOS n’est pas signée/notarisée ;
-- l’artefact Windows est un ZIP, pas un installateur MSIX ;
-- le build iOS est généré avec `--no-codesign`.
+- `openirn-android.apk` : APK Android signé.
+- `openirn-android.aab` : Android App Bundle signé.
+- `openirn-windows-signed.zip` : application Windows avec binaires signés.
+- `openirn-macos-signed-notarized.zip` : application macOS signée Developer ID et notarizée.
+- `openirn-ios.ipa` : IPA iOS signé.
+- `SHA256SUMS.txt` : empreintes SHA-256 des artefacts.
 
 ## Créer une release
 
 ```bash
-git tag v0.5.0
-git push origin v0.5.0
+git tag v0.6.1
+git push origin v0.6.1
 ```
 
-GitHub Actions construit les artefacts et les attache à la release GitHub.
+Par défaut, un tag `v*` crée une vraie release GitHub, pas une pré-release.
 
 ## Lancement manuel
 
 Dans GitHub :
 
 1. ouvrir **Actions** ;
-2. ouvrir **Release** ;
+2. ouvrir **Release signée** ;
 3. cliquer **Run workflow** ;
-4. saisir un tag, par exemple `v0.5.0` ;
-5. choisir si la release est une pré-release.
+4. saisir un tag, par exemple `v0.6.1` ;
+5. choisir si la release doit être marquée comme pré-release.
 
-## Sécurité / publication
+## Secrets de signature
 
-Le workflow lance `tools/check_open_source_readiness.sh` avant construction.
+La liste complète des secrets est documentée dans :
 
-Une release ne doit pas embarquer :
+```text
+docs/149_releases_signees.md
+```
 
-- fichiers temporaires ou métadonnées OS ;
-- fichiers de travail du référentiel ;
-- exports de campagnes privées ;
-- données internes d’entreprise ;
-- secrets ou certificats.
+Aucune clé privée, aucun certificat et aucun mot de passe ne doit être versionné dans le dépôt.
+
+## Workflow manuel non signé
+
+Le fichier :
+
+```text
+.github/workflows/build_artifacts.yml
+```
+
+reste disponible en lancement manuel pour produire des artefacts de test. Il ne se lance plus automatiquement sur les tags afin d’éviter toute confusion avec les releases signées.

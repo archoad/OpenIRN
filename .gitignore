@@ -3,7 +3,6 @@
 .AppleDouble
 .LSOverride
 
-
 # Editor swap / backup files
 *.swp
 .*.swp
@@ -64,6 +63,27 @@ openirn_*.json
 *.key
 *.p12
 *.mobileprovision
-# Obsolete local-first referential bundle (removed after server-only referential)
-flutter/assets/referentials/
-flutter/pubspec_fragment.yaml
+
+# Release signing material — never commit private signing assets
+flutter/android/key.properties
+flutter/android/app/*.jks
+flutter/android/app/*.keystore
+*.jks
+*.keystore
+*.pfx
+*.cer
+*.crt
+*.p8
+
+# OpenIRN local signing secrets
+/secrets/
+flutter/android/key.properties
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.mobileprovision
+*.cer
+*.csr
+*.key
+*.pem
