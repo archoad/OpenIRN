@@ -763,7 +763,7 @@ Color _scoreTileColor(double? score) {
     return const Color(0xFF2E7D32); // vert
   }
   if (bounded >= 60) {
-    return const Color(0xFFF9A825); // jaune
+    return const Color(0xFFFFCE00); // jaune
   }
   if (bounded >= 40) {
     return const Color(0xFFEF6C00); // orange
