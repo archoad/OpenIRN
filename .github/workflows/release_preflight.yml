@@ -1,0 +1,25 @@
+name: Release preflight Android / Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag à vérifier, par exemple v0.6.1'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Préflight release Android / Windows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run preflight
+        run: |
+          chmod +x tools/check_openirn_release_preflight.sh
+          ./tools/check_openirn_release_preflight.sh --tag "${{ github.event.inputs.tag_name }}"

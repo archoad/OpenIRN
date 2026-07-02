@@ -184,11 +184,5 @@ class _InfoRow extends StatelessWidget {
 
 String _formatPackageVersion(PackageInfo info) {
   final version = info.version.trim();
-  final buildNumber = info.buildNumber.trim();
-
-  if (buildNumber.isEmpty) {
-    return version;
-  }
-
-  return '$version+$buildNumber';
+  return version.isEmpty ? 'Version inconnue' : version;
 }

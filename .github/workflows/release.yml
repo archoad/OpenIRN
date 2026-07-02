@@ -1,4 +1,4 @@
-name: Release
+name: Release signée Android / Windows
 
 on:
   push:
@@ -7,29 +7,31 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Release tag to create/update, for example v0.1.0'
+        description: 'Tag de release à publier, par exemple v0.6.1'
         required: true
         type: string
       prerelease:
-        description: 'Mark release as pre-release'
+        description: 'Marquer la release comme pré-release'
         required: true
-        default: true
+        default: false
         type: boolean
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}-${{ github.event.inputs.tag_name }}
+  group: release-signed-${{ github.ref }}-${{ github.event.inputs.tag_name }}
   cancel-in-progress: false
 
 env:
-  FLUTTER_VERSION: 'stable'
+  FLUTTER_CHANNEL: stable
   APP_NAME: openirn
+  APP_DISPLAY_NAME: OpenIRN
+  APP_BUNDLE_ID: io.github.myshelldubois.openirn
 
 jobs:
   validate:
-    name: Validate
+    name: Qualité et contrôles publication
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -38,7 +40,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: ${{ env.FLUTTER_VERSION }}
+          channel: ${{ env.FLUTTER_CHANNEL }}
           cache: true
 
       - name: Install dependencies
@@ -62,8 +64,13 @@ jobs:
           chmod +x tools/check_open_source_readiness.sh
           ./tools/check_open_source_readiness.sh
 
+      - name: Check signing workflow files
+        run: |
+          chmod +x tools/check_release_signing_setup.sh
+          ./tools/check_release_signing_setup.sh
+
   android:
-    name: Android APK
+    name: Android signé APK et AAB
     needs: validate
     runs-on: ubuntu-latest
     steps:
@@ -79,65 +86,60 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: ${{ env.FLUTTER_VERSION }}
+          channel: ${{ env.FLUTTER_CHANNEL }}
           cache: true
 
       - name: Install dependencies
         working-directory: flutter
         run: flutter pub get
 
-      - name: Build Android APK
+      - name: Prepare Android signing key
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_PASSWORD ANDROID_KEY_ALIAS; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Secret GitHub manquant : ${name}" >&2
+              exit 1
+            fi
+          done
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > flutter/android/app/openirn-upload-keystore.jks
+          cat > flutter/android/key.properties <<EOF_SIGNING
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyPassword=$ANDROID_KEY_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          storeFile=app/openirn-upload-keystore.jks
+          EOF_SIGNING
+          chmod 600 flutter/android/app/openirn-upload-keystore.jks flutter/android/key.properties
+
+      - name: Build signed Android APK
         working-directory: flutter
         run: flutter build apk --release
 
-      - name: Prepare Android artifact
+      - name: Build signed Android App Bundle
+        working-directory: flutter
+        run: flutter build appbundle --release
+
+      - name: Prepare Android artifacts
         run: |
           mkdir -p release_artifacts
           cp flutter/build/app/outputs/flutter-apk/app-release.apk release_artifacts/openirn-android.apk
+          cp flutter/build/app/outputs/bundle/release/app-release.aab release_artifacts/openirn-android.aab
 
-      - name: Upload Android artifact
+      - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: openirn-android
-          path: release_artifacts/openirn-android.apk
-
-  macos:
-    name: macOS app
-    needs: validate
-    runs-on: macos-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: ${{ env.FLUTTER_VERSION }}
-          cache: true
-
-      - name: Install dependencies
-        working-directory: flutter
-        run: flutter pub get
-
-      - name: Build macOS app
-        working-directory: flutter
-        run: flutter build macos --release
-
-      - name: Package macOS app
-        run: |
-          mkdir -p release_artifacts
-          ditto -c -k --sequesterRsrc --keepParent \
-            flutter/build/macos/Build/Products/Release/openirn.app \
-            release_artifacts/openirn-macos.zip
-
-      - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: openirn-macos
-          path: release_artifacts/openirn-macos.zip
+          name: openirn-android-signed
+          path: release_artifacts/openirn-android.*
+          if-no-files-found: error
 
   windows:
-    name: Windows app
+    name: Windows signé
     needs: validate
     runs-on: windows-latest
     steps:
@@ -147,72 +149,72 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: ${{ env.FLUTTER_VERSION }}
+          channel: ${{ env.FLUTTER_CHANNEL }}
           cache: true
 
       - name: Install dependencies
         working-directory: flutter
         run: flutter pub get
+
+      - name: Enable Windows desktop
+        working-directory: flutter
+        run: flutter config --enable-windows-desktop
 
       - name: Build Windows app
         working-directory: flutter
         run: flutter build windows --release
 
+      - name: Import Windows signing certificate
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)) { throw "Secret GitHub manquant : WINDOWS_CERTIFICATE_BASE64" }
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) { throw "Secret GitHub manquant : WINDOWS_CERTIFICATE_PASSWORD" }
+          [System.Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64) | Set-Content -Encoding Byte openirn-windows-codesign.pfx
+
+      - name: Sign Windows binaries
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $signtool = (Get-Command signtool.exe -ErrorAction SilentlyContinue).Source
+          if (-not $signtool) {
+            $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $signtool) { throw "signtool.exe introuvable sur le runner Windows" }
+
+          $files = Get-ChildItem flutter\build\windows\x64\runner\Release -Recurse -Include *.exe,*.dll |
+            Where-Object { $_.FullName -notmatch "\\data\\flutter_assets\\" }
+          if ($files.Count -eq 0) { throw "Aucun binaire Windows à signer" }
+
+          foreach ($file in $files) {
+            & $signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f openirn-windows-codesign.pfx /p "$env:WINDOWS_CERTIFICATE_PASSWORD" "$($file.FullName)"
+            if ($LASTEXITCODE -ne 0) { throw "Échec de signature : $($file.FullName)" }
+          }
+
       - name: Package Windows app
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force release_artifacts | Out-Null
-          Compress-Archive -Path flutter/build/windows/x64/runner/Release/* -DestinationPath release_artifacts/openirn-windows.zip -Force
+          Compress-Archive -Path flutter\build\windows\x64\runner\Release\* -DestinationPath release_artifacts\openirn-windows-signed.zip -Force
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: openirn-windows
-          path: release_artifacts/openirn-windows.zip
-
-  ios:
-    name: iOS no-codesign
-    needs: validate
-    runs-on: macos-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: ${{ env.FLUTTER_VERSION }}
-          cache: true
-
-      - name: Install dependencies
-        working-directory: flutter
-        run: flutter pub get
-
-      - name: Build iOS without code signing
-        working-directory: flutter
-        run: flutter build ios --release --no-codesign
-
-      - name: Package iOS build
-        run: |
-          mkdir -p release_artifacts
-          ditto -c -k --sequesterRsrc --keepParent \
-            flutter/build/ios/iphoneos \
-            release_artifacts/openirn-ios-no-codesign.zip
-
-      - name: Upload iOS artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: openirn-ios-no-codesign
-          path: release_artifacts/openirn-ios-no-codesign.zip
+          name: openirn-windows-signed
+          path: release_artifacts/openirn-windows-signed.zip
+          if-no-files-found: error
 
   publish:
-    name: Publish GitHub Release
+    name: Publier la release GitHub
     needs:
       - validate
       - android
-      - macos
       - windows
-      - ios
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -227,7 +229,7 @@ jobs:
             PRERELEASE="${{ github.event.inputs.prerelease }}"
           else
             TAG_NAME="${GITHUB_REF_NAME}"
-            PRERELEASE="true"
+            PRERELEASE="false"
           fi
           echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
           echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
@@ -240,7 +242,7 @@ jobs:
       - name: Flatten artifacts
         run: |
           mkdir -p release_artifacts
-          find downloaded_artifacts -type f -maxdepth 3 -print -exec cp {} release_artifacts/ \;
+          find downloaded_artifacts -maxdepth 3 -type f -print -exec cp {} release_artifacts/ \;
           ls -lh release_artifacts
 
       - name: Generate checksums
@@ -249,42 +251,51 @@ jobs:
           sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-      - name: Create or update release
+      - name: Create release notes
+        run: |
+          cat > release_notes.md <<'EOF_NOTES'
+          # OpenIRN release signée
+
+          Cette release contient les artefacts OpenIRN générés par GitHub Actions avec signature de distribution Android et Windows.
+
+          ## Artefacts
+
+          - `openirn-android.apk` : APK Android signé.
+          - `openirn-android.aab` : Android App Bundle signé pour Google Play.
+          - `openirn-windows-signed.zip` : application Windows dont les binaires ont été signés.
+          - `SHA256SUMS.txt` : empreintes SHA-256 des artefacts.
+
+          ## Note Windows
+
+          Le certificat Windows actuellement utilisé peut être auto-signé pour valider la chaîne technique. Pour une distribution publique, il faudra passer à un certificat de signature de code OV/EV ou à un service de signature reconnu.
+
+          ## macOS et iOS
+
+          Les artefacts macOS et iOS ne sont pas produits dans ce profil de release. Ils seront ajoutés ultérieurement lorsque les certificats Apple Developer et la notarisation seront disponibles.
+
+          ## Sécurité
+
+          Les clés privées et certificats ne sont pas stockés dans le dépôt. Ils sont fournis au workflow via les secrets GitHub Actions du dépôt.
+          EOF_NOTES
+
+      - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ steps.metadata.outputs.tag_name }}
           PRERELEASE: ${{ steps.metadata.outputs.prerelease }}
         run: |
-          NOTES_FILE="release_notes.md"
-          cat > "$NOTES_FILE" <<'EOF'
-          # OpenIRN release
-
-          This release contains automated build artifacts generated by GitHub Actions.
-
-          ## Artifacts
-
-          - `openirn-android.apk`: Android APK release build.
-          - `openirn-macos.zip`: macOS `.app` bundle, not yet signed/notarized.
-          - `openirn-windows.zip`: Windows release build archive.
-          - `openirn-ios-no-codesign.zip`: iOS release build without code signing.
-          - `SHA256SUMS.txt`: checksums for all release artifacts.
-
-          ## Important
-
-          These artifacts are generated from the public OpenIRN source tree after repository readiness checks. They must not include local import work files, private campaign data, internal enterprise data, OS metadata, editor swap files, or secrets.
-          EOF
-
           if gh release view "$TAG_NAME" >/dev/null 2>&1; then
             gh release upload "$TAG_NAME" release_artifacts/* --clobber
+            gh release edit "$TAG_NAME" --notes-file release_notes.md --prerelease="$PRERELEASE"
           else
             if [[ "$PRERELEASE" == "true" ]]; then
               gh release create "$TAG_NAME" release_artifacts/* \
                 --title "OpenIRN ${TAG_NAME}" \
-                --notes-file "$NOTES_FILE" \
+                --notes-file release_notes.md \
                 --prerelease
             else
               gh release create "$TAG_NAME" release_artifacts/* \
                 --title "OpenIRN ${TAG_NAME}" \
-                --notes-file "$NOTES_FILE"
+                --notes-file release_notes.md
             fi
           fi
