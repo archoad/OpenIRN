@@ -164,7 +164,7 @@ jobs:
         working-directory: flutter
         run: flutter build windows --release
 
-      - name: Import Windows signing certificate
+      - name: Import and validate Windows signing certificate
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
@@ -172,9 +172,31 @@ jobs:
         run: |
           if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)) { throw "Secret GitHub manquant : WINDOWS_CERTIFICATE_BASE64" }
           if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) { throw "Secret GitHub manquant : WINDOWS_CERTIFICATE_PASSWORD" }
+
+          $windowsCertificatePassword = $env:WINDOWS_CERTIFICATE_PASSWORD.Trim()
+          $certificatePath = Join-Path $PWD "openirn-windows-codesign.pfx"
           $certificateBytes = [System.Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64)
-          [System.IO.File]::WriteAllBytes((Join-Path $PWD "openirn-windows-codesign.pfx"), $certificateBytes)
-          if (-not (Test-Path openirn-windows-codesign.pfx)) { throw "Certificat Windows non créé" }
+          [System.IO.File]::WriteAllBytes($certificatePath, $certificateBytes)
+          if (-not (Test-Path $certificatePath)) { throw "Certificat Windows non créé" }
+
+          try {
+            $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+              $certificatePath,
+              $windowsCertificatePassword,
+              [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+            )
+          } catch {
+            throw "Le certificat Windows PFX ne peut pas être ouvert avec WINDOWS_CERTIFICATE_PASSWORD. Vérifiez que le secret correspond exactement au mot de passe utilisé lors de l'export du fichier .pfx. Détail : $($_.Exception.Message)"
+          }
+
+          if (-not $certificate.HasPrivateKey) {
+            throw "Le certificat Windows PFX ne contient pas de clé privée. Exportez de nouveau le certificat en incluant la clé privée."
+          }
+
+          $ekuNames = @($certificate.EnhancedKeyUsageList | ForEach-Object { $_.FriendlyName }) -join ", "
+          Write-Host "Certificat Windows chargé : $($certificate.Subject)"
+          Write-Host "Empreinte Windows : $($certificate.Thumbprint)"
+          if ($ekuNames) { Write-Host "Usages du certificat : $ekuNames" }
 
       - name: Sign Windows binaries
         shell: pwsh
@@ -193,8 +215,11 @@ jobs:
             Where-Object { $_.FullName -notmatch "\\data\\flutter_assets\\" }
           if ($files.Count -eq 0) { throw "Aucun binaire Windows à signer" }
 
+          $windowsCertificatePassword = $env:WINDOWS_CERTIFICATE_PASSWORD.Trim()
+          if ([string]::IsNullOrWhiteSpace($windowsCertificatePassword)) { throw "Secret GitHub manquant : WINDOWS_CERTIFICATE_PASSWORD" }
+
           foreach ($file in $files) {
-            & $signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f openirn-windows-codesign.pfx /p "$env:WINDOWS_CERTIFICATE_PASSWORD" "$($file.FullName)"
+            & $signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f openirn-windows-codesign.pfx /p "$windowsCertificatePassword" "$($file.FullName)"
             if ($LASTEXITCODE -ne 0) { throw "Échec de signature : $($file.FullName)" }
           }
 
