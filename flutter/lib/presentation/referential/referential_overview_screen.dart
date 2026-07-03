@@ -370,6 +370,7 @@ class _HomeContentState extends State<_HomeContent> {
     final updated = await _syncConfigurationRepository.saveConfiguration(
       configuration.copyWith(
         tenantId: selected.id,
+        tenantDisplayName: selected.label,
         enabled: true,
         apiToken: '',
       ),
@@ -414,6 +415,77 @@ class _HomeContentState extends State<_HomeContent> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  bool _isGenericTenantLabel(String value) {
+    final normalized = value.trim().toLowerCase();
+    return normalized.isEmpty || normalized == 'espace de travail';
+  }
+
+  String _firstBusinessTenantLabel(Iterable<String> candidates) {
+    for (final candidate in candidates) {
+      final label = candidate.trim();
+      if (!_isGenericTenantLabel(label)) {
+        return label;
+      }
+    }
+    return '';
+  }
+
+  String _tenantLabelFromUsers(
+    Iterable<AppUser> users, {
+    String fallback = '',
+  }) {
+    return _firstBusinessTenantLabel(<String>[
+      fallback,
+      for (final user in users) user.tenantDisplayName,
+      for (final user in users) user.tenantLabel,
+    ]);
+  }
+
+  String _effectiveSessionTenantLabel({
+    SyncConfiguration? configuration,
+    required AppUser user,
+  }) {
+    return _firstBusinessTenantLabel(<String>[
+      configuration?.tenantDisplayName ?? '',
+      user.tenantDisplayName,
+      user.tenantLabel,
+      configuration?.tenantLabel ?? '',
+    ]);
+  }
+
+  String _currentTenantName(SyncConfiguration? configuration) {
+    final activeUser = AppSessionManager.instance.activeUser;
+    return _firstBusinessTenantLabel(<String>[
+      configuration?.tenantDisplayName ?? '',
+      activeUser?.tenantDisplayName ?? '',
+      activeUser?.tenantLabel ?? '',
+      configuration?.tenantLabel ?? '',
+    ]);
+  }
+
+  Future<void> _refreshConfigurationTenantLabel({
+    required String tenantLabel,
+    String tenantId = '',
+  }) async {
+    final label = tenantLabel.trim();
+    if (_isGenericTenantLabel(label)) {
+      return;
+    }
+    final current = await _syncConfigurationRepository.loadConfiguration();
+    final updated = await _syncConfigurationRepository.saveConfiguration(
+      current.copyWith(
+        tenantId: tenantId.trim().isEmpty ? current.tenantId : tenantId.trim(),
+        tenantDisplayName: label,
+      ),
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _syncConfigurationFuture = Future<SyncConfiguration>.value(updated);
+    });
   }
 
   Future<void> _openCampaigns() async {
@@ -582,7 +654,7 @@ class _HomeContentState extends State<_HomeContent> {
       builder: (_) => _AdministrationAuthenticationDialog(
         title: 'Déverrouiller OpenIRN',
         intro:
-            'Veuillez choisir votre profil dans l’espace de travail ${authenticationData.tenantId}, puis saisir votre code personnel.',
+            'Veuillez choisir votre profil dans l’espace de travail ${authenticationData.tenantLabel}, puis saisir votre code personnel.',
         users: activeUsers,
         source: authenticationData.source,
         message: authenticationData.message,
@@ -599,6 +671,22 @@ class _HomeContentState extends State<_HomeContent> {
       user: selectedUser,
     );
     if (!verified || !mounted) {
+      return;
+    }
+
+    final authenticatedUser =
+        AppSessionManager.instance.activeUser ?? selectedUser;
+    final effectiveTenantLabel = _tenantLabelFromUsers(<AppUser>[
+      authenticatedUser,
+      selectedUser,
+    ], fallback: authenticationData.tenantDisplayName);
+    await _refreshConfigurationTenantLabel(
+      tenantLabel: effectiveTenantLabel,
+      tenantId: AppSessionManager.instance.tenantId.isNotEmpty
+          ? AppSessionManager.instance.tenantId
+          : authenticationData.tenantId,
+    );
+    if (!mounted) {
       return;
     }
 
@@ -729,7 +817,13 @@ class _HomeContentState extends State<_HomeContent> {
               '${centralUsers.message} Veuillez sélectionner votre identité puis saisir votre code personnel.',
           users: centralUsers.users,
           apiBaseUrl: configuration.apiBaseUrl,
-          tenantId: configuration.tenantId,
+          tenantId: centralUsers.tenantId.trim().isNotEmpty
+              ? centralUsers.tenantId
+              : configuration.tenantId,
+          tenantDisplayName: _tenantLabelFromUsers(
+            centralUsers.users,
+            fallback: configuration.tenantDisplayName,
+          ),
           apiToken: configuration.apiToken,
         );
       }
@@ -757,6 +851,13 @@ class _HomeContentState extends State<_HomeContent> {
       builder: (context, snapshot) {
         final configuration = snapshot.data;
         final isConfigured = configuration?.isConfigured ?? false;
+        final currentTenantName = _currentTenantName(configuration);
+        final currentTenantSentence = currentTenantName.isEmpty
+            ? 'Espace actuel : espace sélectionné.'
+            : 'Espace actuel : « $currentTenantName ».';
+        final currentTenantPhrase = currentTenantName.isEmpty
+            ? 'l’espace de travail sélectionné'
+            : 'l’espace de travail « $currentTenantName »';
 
         return Center(
           child: ConstrainedBox(
@@ -779,7 +880,7 @@ class _HomeContentState extends State<_HomeContent> {
                     icon: Icons.phonelink_lock_outlined,
                     title: 'Autoriser ce terminal',
                     subtitle:
-                        'Autoriser ce poste dans l’espace de travail ${configuration?.tenantId ?? ''} avant d’accéder aux campagnes et à l’administration.',
+                        'Autoriser ce poste dans $currentTenantPhrase avant d’accéder aux campagnes et à l’administration.',
                     buttonLabel: 'Appairer',
                     onPressed: _openDeviceEnrollment,
                   ),
@@ -807,16 +908,17 @@ class _HomeContentState extends State<_HomeContent> {
                     icon: Icons.swap_horiz_outlined,
                     title: 'Changer d’espace de travail',
                     subtitle:
-                        'Revenir au choix de l’espace de travail OpenIRN avant d’ouvrir une session.',
+                        '$currentTenantSentence Revenir au choix de l’espace de travail OpenIRN avant d’ouvrir une session.',
                     buttonLabel: 'Changer',
                     onPressed: _chooseTenant,
                   ),
                 ] else ...[
                   _SessionStatusCard(
                     user: AppSessionManager.instance.activeUser!,
-                    tenantId: configuration?.tenantId.trim().isNotEmpty == true
-                        ? configuration!.tenantId
-                        : AppSessionManager.instance.tenantId,
+                    tenantLabel: _effectiveSessionTenantLabel(
+                      configuration: configuration,
+                      user: AppSessionManager.instance.activeUser!,
+                    ),
                     expiresAt: AppSessionManager.instance.expiresAt,
                     idleExpiresAt: AppSessionManager.instance.idleExpiresAt,
                     onLock: _lockSession,
@@ -878,14 +980,14 @@ class _HomeContentState extends State<_HomeContent> {
 
 class _SessionStatusCard extends StatelessWidget {
   final AppUser user;
-  final String tenantId;
+  final String tenantLabel;
   final DateTime? expiresAt;
   final DateTime? idleExpiresAt;
   final Future<void> Function() onLock;
 
   const _SessionStatusCard({
     required this.user,
-    required this.tenantId,
+    required this.tenantLabel,
     required this.expiresAt,
     required this.idleExpiresAt,
     required this.onLock,
@@ -895,10 +997,8 @@ class _SessionStatusCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final displayName = user.displayName.trim().isEmpty
-        ? user.id
-        : user.displayName.trim();
-    final tenantLabel = _formatTenantLabel(tenantId);
+    final displayName = user.displayName.trim();
+    final effectiveTenantLabel = tenantLabel.trim();
     final expirationText = expiresAt == null
         ? 'Expiration serveur non communiquée'
         : 'Expire à ${_formatSessionExpiration(expiresAt!.toLocal())}';
@@ -923,10 +1023,10 @@ class _SessionStatusCard extends StatelessWidget {
               Text('Session ouverte', style: theme.textTheme.titleLarge),
               const SizedBox(height: 6),
               Text('$displayName — ${user.role.label}'),
-              if (tenantLabel.isNotEmpty) ...[
+              if (effectiveTenantLabel.isNotEmpty) ...[
                 const SizedBox(height: 4),
                 Text(
-                  'Espace de travail : $tenantLabel',
+                  'Espace de travail : $effectiveTenantLabel',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w600,
@@ -987,17 +1087,6 @@ class _SessionStatusCard extends StatelessWidget {
       ),
     );
   }
-}
-
-String _formatTenantLabel(String tenantId) {
-  final trimmed = tenantId.trim();
-  if (trimmed.isEmpty) {
-    return '';
-  }
-  if (trimmed == SyncConfiguration.defaultTenantId) {
-    return 'Défaut ($trimmed)';
-  }
-  return trimmed;
 }
 
 String _formatSessionExpiration(DateTime value) {
@@ -1180,9 +1269,9 @@ class _TenantSelectionDialog extends StatelessWidget {
                               ? Icons.home_work_outlined
                               : Icons.business_outlined,
                         ),
-                        title: Text(tenant.displayName),
+                        title: Text(tenant.label),
                         subtitle: Text(
-                          '${tenant.id} · ${tenant.activeUserCount} utilisateur(s) actif(s) · ${tenant.campaignCount} campagne(s)',
+                          '${tenant.activeUserCount} utilisateur(s) actif(s) · ${tenant.campaignCount} campagne(s)',
                         ),
                         trailing: selected
                             ? const Chip(label: Text('Actuel'))
@@ -1215,6 +1304,7 @@ class _AdministrationAuthenticationData {
   final List<AppUser> users;
   final String apiBaseUrl;
   final String tenantId;
+  final String tenantDisplayName;
   final String apiToken;
 
   const _AdministrationAuthenticationData({
@@ -1223,6 +1313,7 @@ class _AdministrationAuthenticationData {
     required this.users,
     this.apiBaseUrl = '',
     this.tenantId = '',
+    this.tenantDisplayName = '',
     this.apiToken = '',
   });
 
@@ -1232,6 +1323,7 @@ class _AdministrationAuthenticationData {
     List<AppUser>? users,
     String? apiBaseUrl,
     String? tenantId,
+    String? tenantDisplayName,
     String? apiToken,
   }) {
     return _AdministrationAuthenticationData(
@@ -1240,8 +1332,14 @@ class _AdministrationAuthenticationData {
       users: users ?? this.users,
       apiBaseUrl: apiBaseUrl ?? this.apiBaseUrl,
       tenantId: tenantId ?? this.tenantId,
+      tenantDisplayName: tenantDisplayName ?? this.tenantDisplayName,
       apiToken: apiToken ?? this.apiToken,
     );
+  }
+
+  String get tenantLabel {
+    final label = tenantDisplayName.trim();
+    return label.isEmpty ? 'Espace de travail' : label;
   }
 
   String get sourceLabel {
@@ -1367,7 +1465,7 @@ class _AdministrationAuthenticationDialog extends StatelessWidget {
     if (parts.isEmpty) {
       final fallback = user.email.trim().isNotEmpty
           ? user.email.trim()
-          : user.id.trim();
+          : user.displayName.trim();
       return fallback.isEmpty ? '?' : fallback.substring(0, 1).toUpperCase();
     }
     final initials = parts
@@ -1463,7 +1561,7 @@ class _AdministrationPinAuthenticationDialogState
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                displayName.isEmpty ? widget.user.id : displayName,
+                displayName.isEmpty ? 'Utilisateur sans nom' : displayName,
                 style: Theme.of(context).textTheme.titleMedium,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,

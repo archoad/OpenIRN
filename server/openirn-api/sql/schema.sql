@@ -127,6 +127,27 @@ CREATE TABLE IF NOT EXISTS authorized_devices (
 CREATE INDEX IF NOT EXISTS idx_authorized_devices_tenant_status
     ON authorized_devices(tenant_id, status, last_seen_at DESC);
 
+
+CREATE TABLE IF NOT EXISTS device_enrollment_requests (
+    tenant_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    device_name TEXT NOT NULL DEFAULT '',
+    platform TEXT NOT NULL DEFAULT '',
+    requester_note TEXT NOT NULL DEFAULT '',
+    requester_ip TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    requested_at TEXT NOT NULL,
+    decided_at TEXT,
+    decided_by_user_id TEXT,
+    decision_note TEXT NOT NULL DEFAULT '',
+    enrollment_id TEXT,
+    PRIMARY KEY (tenant_id, request_id),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_device_enrollment_requests_tenant_status
+    ON device_enrollment_requests(tenant_id, status, requested_at DESC);
+
 CREATE TABLE IF NOT EXISTS device_enrollment_codes (
     tenant_id TEXT NOT NULL,
     enrollment_id TEXT NOT NULL,
@@ -287,6 +308,19 @@ CREATE INDEX IF NOT EXISTS idx_backup_audit_log_tenant_created
 CREATE INDEX IF NOT EXISTS idx_backup_audit_log_tenant_reason_created
     ON backup_audit_log(tenant_id, reason, created_at DESC);
 
+
+CREATE TABLE IF NOT EXISTS id_aliases (
+    entity_type TEXT NOT NULL,
+    scope_id TEXT NOT NULL DEFAULT '',
+    old_id TEXT NOT NULL,
+    new_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    PRIMARY KEY (entity_type, scope_id, old_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_id_aliases_new_id
+    ON id_aliases(entity_type, scope_id, new_id);
+
 INSERT OR IGNORE INTO schema_migrations(version, name)
 VALUES (1, 'initial_sqlite_sync_store');
 INSERT OR IGNORE INTO schema_migrations(version, name)
@@ -302,3 +336,5 @@ VALUES (6, 'official_referential_history_store');
 INSERT OR IGNORE INTO schema_migrations(version, name)
 VALUES (7, 'backup_audit_log_store');
 
+INSERT OR IGNORE INTO schema_migrations(version, name)
+VALUES (8, 'uuid_entity_ids');

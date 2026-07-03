@@ -5,6 +5,7 @@ import 'dart:io';
 import '../../domain/models/api_session.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/authorized_device.dart';
+import '../../domain/models/device_enrollment_request.dart';
 import '../../domain/models/irn_referential.dart';
 import '../../domain/models/official_referential.dart';
 import '../../domain/models/security_audit_event.dart';
@@ -316,6 +317,7 @@ class OpenIrnApiDevicesResult {
   final String message;
   final String tenantId;
   final List<AuthorizedDevice> devices;
+  final List<DeviceEnrollmentRequest> enrollmentRequests;
   final Map<String, dynamic>? responseBody;
 
   const OpenIrnApiDevicesResult({
@@ -326,6 +328,7 @@ class OpenIrnApiDevicesResult {
     required this.message,
     required this.tenantId,
     required this.devices,
+    this.enrollmentRequests = const <DeviceEnrollmentRequest>[],
     this.responseBody,
   });
 
@@ -731,7 +734,6 @@ class OpenIrnApiClient {
   Future<OpenIrnApiTenantsResult> createTenant({
     String? baseUrl,
     required String requesterTenantId,
-    required String tenantId,
     required String displayName,
     required String description,
     required String pilotFirstName,
@@ -751,7 +753,6 @@ class OpenIrnApiClient {
     try {
       final response = await _postJson(uri, <String, dynamic>{
         'requesterTenantId': safeRequesterTenantId,
-        'tenantId': tenantId.trim(),
         'displayName': displayName.trim(),
         'description': description.trim(),
         'pilot': <String, dynamic>{
@@ -783,7 +784,7 @@ class OpenIrnApiClient {
           message:
               decodedBody?['message']?.toString() ??
               'Espace de travail créé avec un Pilote IRN initial.',
-          tenantId: decodedBody?['tenantId']?.toString() ?? tenantId.trim(),
+          tenantId: decodedBody?['tenantId']?.toString() ?? '',
           defaultTenantId:
               decodedBody?['defaultTenantId']?.toString() ?? 'default',
           solutionAdministrator: decodedBody?['solutionAdministrator'] == true,
@@ -800,7 +801,7 @@ class OpenIrnApiClient {
         message:
             decodedBody?['detail']?.toString() ??
             'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
-        tenantId: tenantId.trim(),
+        tenantId: decodedBody?['tenantId']?.toString() ?? '',
         defaultTenantId: 'default',
         tenants: tenants,
         responseBody: decodedBody,
@@ -812,7 +813,7 @@ class OpenIrnApiClient {
         statusCode: null,
         title: 'Délai dépassé',
         message: 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
-        tenantId: tenantId.trim(),
+        tenantId: safeRequesterTenantId,
         defaultTenantId: 'default',
         tenants: const <TenantInfo>[],
       );
@@ -823,7 +824,7 @@ class OpenIrnApiClient {
         statusCode: null,
         title: 'Serveur injoignable',
         message: error.message,
-        tenantId: tenantId.trim(),
+        tenantId: safeRequesterTenantId,
         defaultTenantId: 'default',
         tenants: const <TenantInfo>[],
       );
@@ -834,7 +835,7 @@ class OpenIrnApiClient {
         statusCode: null,
         title: 'Erreur TLS',
         message: error.message,
-        tenantId: tenantId.trim(),
+        tenantId: safeRequesterTenantId,
         defaultTenantId: 'default',
         tenants: const <TenantInfo>[],
       );
@@ -845,7 +846,7 @@ class OpenIrnApiClient {
         statusCode: null,
         title: 'Adresse serveur invalide',
         message: error.message,
-        tenantId: tenantId.trim(),
+        tenantId: safeRequesterTenantId,
         defaultTenantId: 'default',
         tenants: const <TenantInfo>[],
       );
@@ -856,7 +857,7 @@ class OpenIrnApiClient {
         statusCode: null,
         title: 'Erreur HTTP',
         message: error.message,
-        tenantId: tenantId.trim(),
+        tenantId: safeRequesterTenantId,
         defaultTenantId: 'default',
         tenants: const <TenantInfo>[],
       );
@@ -1351,6 +1352,7 @@ class OpenIrnApiClient {
     String? baseUrl,
     required String tenantId,
     String apiToken = '',
+    bool allTenants = false,
   }) async {
     final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
       baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
@@ -1358,9 +1360,12 @@ class OpenIrnApiClient {
     final safeTenantId = tenantId.trim().isEmpty
         ? SyncConfiguration.defaultTenantId
         : tenantId.trim();
-    final usersUri = Uri.parse(
-      '$normalizedBaseUrl/users',
-    ).replace(queryParameters: <String, String>{'tenantId': safeTenantId});
+    final usersUri = Uri.parse('$normalizedBaseUrl/users').replace(
+      queryParameters: <String, String>{
+        'tenantId': safeTenantId,
+        if (allTenants) 'allTenants': 'true',
+      },
+    );
 
     try {
       final response = await _get(usersUri, bearerToken: apiToken);
@@ -2420,6 +2425,7 @@ class OpenIrnApiClient {
     String? baseUrl,
     required String tenantId,
     String apiToken = '',
+    bool includeAllTenants = false,
   }) async {
     final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
       baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
@@ -2427,9 +2433,12 @@ class OpenIrnApiClient {
     final safeTenantId = tenantId.trim().isEmpty
         ? SyncConfiguration.defaultTenantId
         : tenantId.trim();
-    final devicesUri = Uri.parse(
-      '$normalizedBaseUrl/devices',
-    ).replace(queryParameters: <String, String>{'tenantId': safeTenantId});
+    final devicesUri = Uri.parse('$normalizedBaseUrl/devices').replace(
+      queryParameters: <String, String>{
+        'tenantId': safeTenantId,
+        if (includeAllTenants) 'allTenants': 'true',
+      },
+    );
 
     try {
       final response = await _get(devicesUri, bearerToken: apiToken);
@@ -2448,6 +2457,18 @@ class OpenIrnApiClient {
                   .where((device) => device.deviceId.trim().isNotEmpty)
                   .toList(growable: false)
             : const <AuthorizedDevice>[];
+        final rawRequests = decodedBody?['enrollmentRequests'];
+        final requests = rawRequests is List
+            ? rawRequests
+                  .whereType<Map>()
+                  .map(
+                    (item) => DeviceEnrollmentRequest.fromJson(
+                      Map<String, dynamic>.from(item),
+                    ),
+                  )
+                  .where((request) => request.requestId.trim().isNotEmpty)
+                  .toList(growable: false)
+            : const <DeviceEnrollmentRequest>[];
         return OpenIrnApiDevicesResult(
           status: OpenIrnApiDevicesStatus.available,
           url: devicesUri.toString(),
@@ -2456,6 +2477,7 @@ class OpenIrnApiClient {
           message: '${devices.length} terminal(aux) autorisé(s) côté serveur.',
           tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
           devices: devices,
+          enrollmentRequests: requests,
           responseBody: decodedBody,
         );
       }
@@ -2674,6 +2696,310 @@ class OpenIrnApiClient {
         expiresInMinutes: 0,
         qrPayloadText: '',
         apiToken: '',
+      );
+    }
+  }
+
+  Future<OpenIrnApiEnrollmentResult> requestDeviceEnrollmentApproval({
+    String? baseUrl,
+    required String tenantId,
+    required String deviceName,
+    required String platform,
+    String note = '',
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final requestUri = Uri.parse(
+      '$normalizedBaseUrl/devices/enrollment/request',
+    );
+
+    try {
+      final response = await _postJson(requestUri, <String, dynamic>{
+        'tenantId': safeTenantId,
+        'deviceName': deviceName.trim(),
+        'platform': platform.trim(),
+        'note': note.trim(),
+      });
+      final decodedBody = _decodeJsonObject(response.body);
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return OpenIrnApiEnrollmentResult(
+          status: OpenIrnApiEnrollmentStatus.accepted,
+          url: requestUri.toString(),
+          statusCode: response.statusCode,
+          title: 'Demande envoyée',
+          message:
+              decodedBody?['message']?.toString() ??
+              'La demande d’autorisation a été envoyée au Pilote IRN et aux administrateurs.',
+          tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
+          enrollmentId: decodedBody?['requestId']?.toString() ?? '',
+          code: '',
+          expiresAt: null,
+          expiresInMinutes: 0,
+          qrPayloadText: '',
+          apiToken: '',
+          responseBody: decodedBody,
+        );
+      }
+
+      return OpenIrnApiEnrollmentResult(
+        status: OpenIrnApiEnrollmentStatus.rejected,
+        url: requestUri.toString(),
+        statusCode: response.statusCode,
+        title: 'Demande refusée',
+        message:
+            decodedBody?['detail']?.toString() ??
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        tenantId: safeTenantId,
+        enrollmentId: '',
+        code: '',
+        expiresAt: null,
+        expiresInMinutes: 0,
+        qrPayloadText: '',
+        apiToken: '',
+        responseBody: decodedBody,
+      );
+    } on TimeoutException {
+      return OpenIrnApiEnrollmentResult(
+        status: OpenIrnApiEnrollmentStatus.unreachable,
+        url: requestUri.toString(),
+        statusCode: null,
+        title: 'Délai dépassé',
+        message: 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+        tenantId: safeTenantId,
+        enrollmentId: '',
+        code: '',
+        expiresAt: null,
+        expiresInMinutes: 0,
+        qrPayloadText: '',
+        apiToken: '',
+      );
+    } on SocketException catch (error) {
+      return OpenIrnApiEnrollmentResult(
+        status: OpenIrnApiEnrollmentStatus.unreachable,
+        url: requestUri.toString(),
+        statusCode: null,
+        title: 'Serveur injoignable',
+        message: error.message,
+        tenantId: safeTenantId,
+        enrollmentId: '',
+        code: '',
+        expiresAt: null,
+        expiresInMinutes: 0,
+        qrPayloadText: '',
+        apiToken: '',
+      );
+    } on HandshakeException catch (error) {
+      return OpenIrnApiEnrollmentResult(
+        status: OpenIrnApiEnrollmentStatus.unreachable,
+        url: requestUri.toString(),
+        statusCode: null,
+        title: 'Erreur TLS',
+        message: error.message,
+        tenantId: safeTenantId,
+        enrollmentId: '',
+        code: '',
+        expiresAt: null,
+        expiresInMinutes: 0,
+        qrPayloadText: '',
+        apiToken: '',
+      );
+    } on FormatException catch (error) {
+      return OpenIrnApiEnrollmentResult(
+        status: OpenIrnApiEnrollmentStatus.unreachable,
+        url: requestUri.toString(),
+        statusCode: null,
+        title: 'Adresse serveur invalide',
+        message: error.message,
+        tenantId: safeTenantId,
+        enrollmentId: '',
+        code: '',
+        expiresAt: null,
+        expiresInMinutes: 0,
+        qrPayloadText: '',
+        apiToken: '',
+      );
+    } on HttpException catch (error) {
+      return OpenIrnApiEnrollmentResult(
+        status: OpenIrnApiEnrollmentStatus.unreachable,
+        url: requestUri.toString(),
+        statusCode: null,
+        title: 'Erreur HTTP',
+        message: error.message,
+        tenantId: safeTenantId,
+        enrollmentId: '',
+        code: '',
+        expiresAt: null,
+        expiresInMinutes: 0,
+        qrPayloadText: '',
+        apiToken: '',
+      );
+    }
+  }
+
+  Future<OpenIrnApiEnrollmentResult> approveDeviceEnrollmentRequest({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    required String requestId,
+    int expiresInMinutes = 15,
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final approveUri = Uri.parse(
+      '$normalizedBaseUrl/devices/enrollment/requests/$requestId/approve',
+    );
+
+    try {
+      final response = await _postJson(approveUri, <String, dynamic>{
+        'tenantId': safeTenantId,
+        'expiresInMinutes': expiresInMinutes.clamp(5, 15),
+      }, bearerToken: apiToken);
+      final decodedBody = _decodeJsonObject(response.body);
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return OpenIrnApiEnrollmentResult(
+          status: OpenIrnApiEnrollmentStatus.accepted,
+          url: approveUri.toString(),
+          statusCode: response.statusCode,
+          title: 'Demande approuvée',
+          message:
+              decodedBody?['message']?.toString() ??
+              'Un code d’appairage a été créé pour cette demande.',
+          tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
+          enrollmentId: decodedBody?['enrollmentId']?.toString() ?? '',
+          code: decodedBody?['code']?.toString() ?? '',
+          expiresAt: DateTime.tryParse(
+            decodedBody?['expiresAt']?.toString() ?? '',
+          )?.toUtc(),
+          expiresInMinutes: _intFromJson(decodedBody?['expiresInMinutes']),
+          qrPayloadText: decodedBody?['qrPayloadText']?.toString() ?? '',
+          apiToken: '',
+          responseBody: decodedBody,
+        );
+      }
+      return OpenIrnApiEnrollmentResult(
+        status: OpenIrnApiEnrollmentStatus.rejected,
+        url: approveUri.toString(),
+        statusCode: response.statusCode,
+        title: 'Approbation refusée',
+        message:
+            decodedBody?['detail']?.toString() ??
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        tenantId: safeTenantId,
+        enrollmentId: '',
+        code: '',
+        expiresAt: null,
+        expiresInMinutes: 0,
+        qrPayloadText: '',
+        apiToken: '',
+        responseBody: decodedBody,
+      );
+    } on TimeoutException {
+      return _enrollmentNetworkError(
+        approveUri,
+        safeTenantId,
+        'Délai dépassé',
+        'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+      );
+    } on SocketException catch (error) {
+      return _enrollmentNetworkError(
+        approveUri,
+        safeTenantId,
+        'Serveur injoignable',
+        error.message,
+      );
+    } on HandshakeException catch (error) {
+      return _enrollmentNetworkError(
+        approveUri,
+        safeTenantId,
+        'Erreur TLS',
+        error.message,
+      );
+    } on FormatException catch (error) {
+      return _enrollmentNetworkError(
+        approveUri,
+        safeTenantId,
+        'Adresse serveur invalide',
+        error.message,
+      );
+    } on HttpException catch (error) {
+      return _enrollmentNetworkError(
+        approveUri,
+        safeTenantId,
+        'Erreur HTTP',
+        error.message,
+      );
+    }
+  }
+
+  Future<OpenIrnApiDevicesResult> rejectDeviceEnrollmentRequest({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    required String requestId,
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final rejectUri = Uri.parse(
+      '$normalizedBaseUrl/devices/enrollment/requests/$requestId/reject',
+    );
+    try {
+      final response = await _postJson(rejectUri, <String, dynamic>{
+        'tenantId': safeTenantId,
+      }, bearerToken: apiToken);
+      return _devicesMutationResult(
+        response,
+        rejectUri,
+        safeTenantId,
+        successTitle: 'Demande refusée',
+        successMessage: 'La demande d’enrôlement a été refusée.',
+      );
+    } on TimeoutException {
+      return _devicesNetworkError(
+        rejectUri,
+        safeTenantId,
+        'Délai dépassé',
+        'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+      );
+    } on SocketException catch (error) {
+      return _devicesNetworkError(
+        rejectUri,
+        safeTenantId,
+        'Serveur injoignable',
+        error.message,
+      );
+    } on HandshakeException catch (error) {
+      return _devicesNetworkError(
+        rejectUri,
+        safeTenantId,
+        'Erreur TLS',
+        error.message,
+      );
+    } on FormatException catch (error) {
+      return _devicesNetworkError(
+        rejectUri,
+        safeTenantId,
+        'Adresse serveur invalide',
+        error.message,
+      );
+    } on HttpException catch (error) {
+      return _devicesNetworkError(
+        rejectUri,
+        safeTenantId,
+        'Erreur HTTP',
+        error.message,
       );
     }
   }
@@ -3487,6 +3813,18 @@ class OpenIrnApiClient {
               .where((device) => device.deviceId.trim().isNotEmpty)
               .toList(growable: false)
         : const <AuthorizedDevice>[];
+    final rawRequests = decodedBody?['enrollmentRequests'];
+    final requests = rawRequests is List
+        ? rawRequests
+              .whereType<Map>()
+              .map(
+                (item) => DeviceEnrollmentRequest.fromJson(
+                  Map<String, dynamic>.from(item),
+                ),
+              )
+              .where((request) => request.requestId.trim().isNotEmpty)
+              .toList(growable: false)
+        : const <DeviceEnrollmentRequest>[];
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return OpenIrnApiDevicesResult(
@@ -3497,6 +3835,7 @@ class OpenIrnApiClient {
         message: successMessage,
         tenantId: decodedBody?['tenantId']?.toString() ?? tenantId,
         devices: devices,
+        enrollmentRequests: requests,
         responseBody: decodedBody,
       );
     }
@@ -3511,7 +3850,30 @@ class OpenIrnApiClient {
           'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
       tenantId: tenantId,
       devices: devices,
+      enrollmentRequests: requests,
       responseBody: decodedBody,
+    );
+  }
+
+  OpenIrnApiEnrollmentResult _enrollmentNetworkError(
+    Uri uri,
+    String tenantId,
+    String title,
+    String message,
+  ) {
+    return OpenIrnApiEnrollmentResult(
+      status: OpenIrnApiEnrollmentStatus.unreachable,
+      url: uri.toString(),
+      statusCode: null,
+      title: title,
+      message: message,
+      tenantId: tenantId,
+      enrollmentId: '',
+      code: '',
+      expiresAt: null,
+      expiresInMinutes: 0,
+      qrPayloadText: '',
+      apiToken: '',
     );
   }
 

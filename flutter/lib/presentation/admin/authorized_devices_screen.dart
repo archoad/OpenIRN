@@ -5,6 +5,7 @@ import '../../data/api/openirn_api_client.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/authorized_device.dart';
+import '../../domain/models/device_enrollment_request.dart';
 import '../../domain/models/sync_configuration.dart';
 import '../../domain/services/access_policy_service.dart';
 import '../../domain/services/app_sync_coordinator.dart';
@@ -37,14 +38,15 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
   }
 
   Future<_AuthorizedDevicesStateData> _loadDevices() async {
-    if (!_accessPolicy.canManageAuthorizedDevices(widget.activeUser)) {
+    if (!_accessPolicy.canManageTenantAuthorizedDevices(widget.activeUser)) {
       return _AuthorizedDevicesStateData(
         configuration: SyncConfiguration.empty(),
         devices: const <AuthorizedDevice>[],
         serverAvailable: false,
         title: 'Accès refusé',
         message:
-            'La gestion des terminaux autorisés est réservée aux administrateurs.',
+            'La gestion des terminaux autorisés est réservée aux administrateurs et pilotes IRN.',
+        includeAllTenants: false,
       );
     }
     final configuration = await _configurationRepository.loadConfiguration();
@@ -56,18 +58,24 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
         title: 'Serveur non configuré',
         message:
             'La synchronisation serveur n’est pas configurée sur ce terminal. Impossible de gérer les terminaux autorisés.',
+        includeAllTenants: false,
       );
     }
 
+    final includeAllTenants =
+        widget.activeUser.role == AppUserRole.administrator;
     final result = await _apiClient.loadDevices(
       baseUrl: configuration.apiBaseUrl,
       tenantId: configuration.tenantId,
       apiToken: configuration.apiToken,
+      includeAllTenants: includeAllTenants,
     );
 
     return _AuthorizedDevicesStateData(
       configuration: configuration,
       devices: result.devices,
+      enrollmentRequests: result.enrollmentRequests,
+      includeAllTenants: includeAllTenants,
       serverAvailable: result.isAvailable,
       title: result.title,
       message: result.message,
@@ -135,6 +143,100 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
     }
   }
 
+  Future<void> _approveEnrollmentRequest(
+    _AuthorizedDevicesStateData state,
+    DeviceEnrollmentRequest request,
+  ) async {
+    if (!state.configuration.isConfigured || _working || !request.isPending) {
+      return;
+    }
+
+    setState(() {
+      _working = true;
+    });
+
+    try {
+      final enrollment = await _apiClient.approveDeviceEnrollmentRequest(
+        baseUrl: state.configuration.apiBaseUrl,
+        tenantId: request.tenantId,
+        apiToken: state.configuration.apiToken,
+        requestId: request.requestId,
+        expiresInMinutes: 15,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      if (!enrollment.isAccepted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${enrollment.title} — ${enrollment.message}'),
+          ),
+        );
+        return;
+      }
+
+      await showDialog<void>(
+        context: context,
+        builder: (context) => _EnrollmentCodeDialog(enrollment: enrollment),
+      );
+      await _refresh();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _working = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _rejectEnrollmentRequest(
+    _AuthorizedDevicesStateData state,
+    DeviceEnrollmentRequest request,
+  ) async {
+    if (!state.configuration.isConfigured || _working || !request.isPending) {
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        insetPadding: responsiveDialogInsetPadding(context),
+        title: const Text('Refuser la demande ?'),
+        content: ResponsiveDialogContent(
+          maxWidth: 620,
+          child: Text(
+            'La demande d’autorisation du terminal « ${request.displayName} » sera marquée comme refusée.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton.tonalIcon(
+            onPressed: () => Navigator.of(context).pop(true),
+            icon: const Icon(Icons.block_outlined),
+            label: const Text('Refuser'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) {
+      return;
+    }
+
+    await _runDeviceMutation(
+      () => _apiClient.rejectDeviceEnrollmentRequest(
+        baseUrl: state.configuration.apiBaseUrl,
+        tenantId: request.tenantId,
+        apiToken: state.configuration.apiToken,
+        requestId: request.requestId,
+      ),
+    );
+  }
+
   Future<void> _renameDevice(
     _AuthorizedDevicesStateData state,
     AuthorizedDevice device,
@@ -154,7 +256,9 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
     await _runDeviceMutation(
       () => _apiClient.renameDevice(
         baseUrl: state.configuration.apiBaseUrl,
-        tenantId: state.configuration.tenantId,
+        tenantId: device.tenantId.trim().isEmpty
+            ? state.configuration.tenantId
+            : device.tenantId,
         apiToken: state.configuration.apiToken,
         deviceId: device.deviceId,
         name: newName,
@@ -204,7 +308,9 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
     final success = await _runDeviceMutation(
       () => _apiClient.revokeDevice(
         baseUrl: state.configuration.apiBaseUrl,
-        tenantId: state.configuration.tenantId,
+        tenantId: device.tenantId.trim().isEmpty
+            ? state.configuration.tenantId
+            : device.tenantId,
         apiToken: state.configuration.apiToken,
         deviceId: device.deviceId,
       ),
@@ -311,6 +417,18 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
                           : null,
                     ),
                     const SizedBox(height: 12),
+                    if (state.serverAvailable &&
+                        state.enrollmentRequests.isNotEmpty) ...[
+                      _EnrollmentRequestsSection(
+                        requests: state.enrollmentRequests,
+                        working: _working,
+                        onApprove: (request) =>
+                            _approveEnrollmentRequest(state, request),
+                        onReject: (request) =>
+                            _rejectEnrollmentRequest(state, request),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     if (!state.serverAvailable)
                       _MessageCard(
                         icon: Icons.warning_amber_outlined,
@@ -362,6 +480,9 @@ class _HeaderCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final activeCount = state.devices.where((device) => device.isActive).length;
     final revokedCount = state.devices.length - activeCount;
+    final pendingRequestCount = state.enrollmentRequests
+        .where((request) => request.isPending)
+        .length;
     final isNarrow = MediaQuery.sizeOf(context).width < 720;
 
     final content = Row(
@@ -380,7 +501,7 @@ class _HeaderCard extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 state.serverAvailable
-                    ? '$activeCount actif(s), $revokedCount révoqué(s) — espace ${state.configuration.tenantId}'
+                    ? '$activeCount actif(s), $revokedCount révoqué(s), $pendingRequestCount demande(s) en attente — ${state.includeAllTenants ? 'tous les espaces' : state.configuration.tenantLabel}'
                     : state.message,
               ),
             ],
@@ -488,6 +609,14 @@ class _DeviceCard extends StatelessWidget {
                           ),
                         ),
                       ),
+                      if (device.tenantId.trim().isNotEmpty)
+                        Chip(
+                          avatar: const Icon(
+                            Icons.account_tree_outlined,
+                            size: 18,
+                          ),
+                          label: Text(device.tenantLabel),
+                        ),
                       if (isCurrentDevice)
                         DecoratedBox(
                           decoration: BoxDecoration(
@@ -552,6 +681,201 @@ class _DeviceCard extends StatelessWidget {
                 ),
               ],
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EnrollmentRequestsSection extends StatelessWidget {
+  final List<DeviceEnrollmentRequest> requests;
+  final bool working;
+  final ValueChanged<DeviceEnrollmentRequest> onApprove;
+  final ValueChanged<DeviceEnrollmentRequest> onReject;
+
+  const _EnrollmentRequestsSection({
+    required this.requests,
+    required this.working,
+    required this.onApprove,
+    required this.onReject,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final pending = requests.where((request) => request.isPending).toList();
+    final history = requests.where((request) => !request.isPending).take(5);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.notification_important_outlined, size: 34),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Demandes d’enrôlement',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        pending.isEmpty
+                            ? 'Aucune demande en attente.'
+                            : '${pending.length} demande(s) en attente de validation.',
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        for (final request in pending) ...[
+          _EnrollmentRequestCard(
+            request: request,
+            working: working,
+            onApprove: () => onApprove(request),
+            onReject: () => onReject(request),
+          ),
+          const SizedBox(height: 12),
+        ],
+        for (final request in history) ...[
+          _EnrollmentRequestCard(
+            request: request,
+            working: working,
+            onApprove: () => onApprove(request),
+            onReject: () => onReject(request),
+          ),
+          const SizedBox(height: 12),
+        ],
+      ],
+    );
+  }
+}
+
+class _EnrollmentRequestCard extends StatelessWidget {
+  final DeviceEnrollmentRequest request;
+  final bool working;
+  final VoidCallback onApprove;
+  final VoidCallback onReject;
+
+  const _EnrollmentRequestCard({
+    required this.request,
+    required this.working,
+    required this.onApprove,
+    required this.onReject,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final statusColor = request.isPending
+        ? colorScheme.tertiaryContainer
+        : colorScheme.surfaceContainerHighest;
+    final statusTextColor = request.isPending
+        ? colorScheme.onTertiaryContainer
+        : colorScheme.onSurfaceVariant;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              request.isPending
+                  ? Icons.phonelink_lock_outlined
+                  : Icons.phonelink_setup_outlined,
+              size: 34,
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text(
+                        request.displayName,
+                        style: theme.textTheme.titleMedium,
+                      ),
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: statusColor,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          child: Text(
+                            request.statusLabel,
+                            style: TextStyle(color: statusTextColor),
+                          ),
+                        ),
+                      ),
+                      if (request.tenantId.trim().isNotEmpty)
+                        Chip(
+                          avatar: const Icon(
+                            Icons.account_tree_outlined,
+                            size: 18,
+                          ),
+                          label: Text(request.tenantLabel),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '${request.platformLabel} — demandée le ${_formatDateTime(request.requestedAt)}',
+                  ),
+                  if (request.requesterNote.trim().isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      request.requesterNote,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                  if (request.decidedAt != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      'Traitée le ${_formatDateTime(request.decidedAt)}',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            if (request.isPending)
+              Wrap(
+                spacing: 4,
+                children: [
+                  TextButton.icon(
+                    onPressed: working ? null : onReject,
+                    icon: const Icon(Icons.block_outlined),
+                    label: const Text('Refuser'),
+                  ),
+                  FilledButton.icon(
+                    onPressed: working ? null : onApprove,
+                    icon: const Icon(Icons.check_circle_outline),
+                    label: const Text('Approuver'),
+                  ),
+                ],
+              ),
           ],
         ),
       ),
@@ -828,6 +1152,8 @@ class _RenameDeviceDialogState extends State<_RenameDeviceDialog> {
 class _AuthorizedDevicesStateData {
   final SyncConfiguration configuration;
   final List<AuthorizedDevice> devices;
+  final List<DeviceEnrollmentRequest> enrollmentRequests;
+  final bool includeAllTenants;
   final bool serverAvailable;
   final String title;
   final String message;
@@ -835,6 +1161,8 @@ class _AuthorizedDevicesStateData {
   const _AuthorizedDevicesStateData({
     required this.configuration,
     required this.devices,
+    this.enrollmentRequests = const <DeviceEnrollmentRequest>[],
+    required this.includeAllTenants,
     required this.serverAvailable,
     required this.title,
     required this.message,

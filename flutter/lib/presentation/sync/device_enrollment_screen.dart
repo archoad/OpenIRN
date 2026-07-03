@@ -73,6 +73,47 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
     ).showSnackBar(SnackBar(content: Text(result.title)));
   }
 
+  Future<void> _requestEnrollmentApproval() async {
+    final tenantId = _tenantIdController.text.trim();
+    final deviceName = _deviceNameController.text.trim();
+    if (tenantId.isEmpty || deviceName.isEmpty || _working) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Indiquez d’abord l’espace de travail et le nom de ce terminal.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _working = true;
+      _connectionResult = null;
+      _enrollmentResult = null;
+    });
+
+    final result = await _apiClient.requestDeviceEnrollmentApproval(
+      baseUrl: SyncConfiguration.fixedApiBaseUrl,
+      tenantId: tenantId,
+      deviceName: deviceName,
+      platform: _platformName(),
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _working = false;
+      _enrollmentResult = result;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${result.title} — ${result.message}')),
+    );
+  }
+
   Future<void> _consumeEnrollment() async {
     if (_formKey.currentState?.validate() != true || _working) {
       return;
@@ -134,6 +175,7 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
 
     final configuration = SyncConfiguration.empty(deviceId: deviceId).copyWith(
       tenantId: result.tenantId,
+      tenantDisplayName: result.device?.tenantLabel ?? '',
       deviceId: deviceId,
       enabled: true,
       apiToken: '',
@@ -292,7 +334,7 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Veuillez d’abord créer une invitation depuis un terminal déjà autorisé : Administration → Terminaux autorisés.',
+                          'Saisissez un code d’appairage fourni par un Pilote IRN ou demandez une autorisation depuis ce terminal.',
                           style: theme.textTheme.bodyMedium,
                         ),
                         const SizedBox(height: 18),
@@ -387,6 +429,13 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
                                   : _openPastePayloadDialog,
                               icon: const Icon(Icons.content_paste_go_outlined),
                               label: const Text('Coller invitation'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: _working
+                                  ? null
+                                  : _requestEnrollmentApproval,
+                              icon: const Icon(Icons.notification_add_outlined),
+                              label: const Text('Demander une autorisation'),
                             ),
                             FilledButton.icon(
                               onPressed: _working ? null : _consumeEnrollment,

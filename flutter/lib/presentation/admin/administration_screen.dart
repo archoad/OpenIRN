@@ -62,16 +62,18 @@ class AdministrationScreen extends StatelessWidget {
   }
 
   Future<void> _openUsersAdministration(BuildContext context) async {
-    if (!_accessPolicy.canManageUsers(activeUser)) {
+    if (!_accessPolicy.canManageTenantUsers(activeUser)) {
       _showForbidden(
         context,
-        'La gestion des utilisateurs est réservée aux administrateurs.',
+        'La gestion des utilisateurs est réservée aux administrateurs et pilotes IRN.',
       );
       return;
     }
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => const UserListScreen()));
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => UserListScreen(activeUser: activeUser),
+      ),
+    );
   }
 
   Future<void> _openTenantManagement(BuildContext context) async {
@@ -165,10 +167,10 @@ class AdministrationScreen extends StatelessWidget {
   }
 
   Future<void> _openAuthorizedDevices(BuildContext context) async {
-    if (!_accessPolicy.canManageAuthorizedDevices(activeUser)) {
+    if (!_accessPolicy.canManageTenantAuthorizedDevices(activeUser)) {
       _showForbidden(
         context,
-        'La gestion des terminaux autorisés est réservée aux administrateurs.',
+        'La gestion des terminaux autorisés est réservée aux administrateurs et pilotes IRN.',
       );
       return;
     }
@@ -203,12 +205,13 @@ class AdministrationScreen extends StatelessWidget {
           buttonLabel: 'Ouvrir',
           onPressed: () => _openCampaignManagement(context),
         ),
-      if (_accessPolicy.canManageUsers(activeUser))
+      if (_accessPolicy.canManageTenantUsers(activeUser))
         _AdministrationActionCard(
           icon: Icons.people_alt_outlined,
           title: 'Utilisateurs',
-          subtitle:
-              'Créer, modifier ou supprimer les utilisateurs depuis la base centrale serveur.',
+          subtitle: activeUser.role == AppUserRole.administrator
+              ? 'Consulter les utilisateurs de tous les espaces et administrer chaque annuaire.'
+              : 'Créer, modifier ou supprimer les utilisateurs de votre espace de travail.',
           buttonLabel: 'Ouvrir',
           onPressed: () => _openUsersAdministration(context),
         ),
@@ -221,12 +224,13 @@ class AdministrationScreen extends StatelessWidget {
           buttonLabel: 'Gérer',
           onPressed: () => _openTenantManagement(context),
         ),
-      if (_accessPolicy.canManageAuthorizedDevices(activeUser))
+      if (_accessPolicy.canManageTenantAuthorizedDevices(activeUser))
         _AdministrationActionCard(
           icon: Icons.devices_other_outlined,
           title: 'Terminaux autorisés',
-          subtitle:
-              'Créer une invitation, consulter les terminaux enrôlés, renommer ou révoquer un accès.',
+          subtitle: activeUser.role == AppUserRole.administrator
+              ? 'Traiter les demandes d’enrôlement et consulter les terminaux de tous les espaces.'
+              : 'Traiter les demandes d’enrôlement et gérer les terminaux de votre espace.',
           buttonLabel: 'Ouvrir',
           onPressed: () => _openAuthorizedDevices(context),
         ),

@@ -4,6 +4,7 @@ class SyncConfiguration {
 
   final String apiBaseUrl;
   final String tenantId;
+  final String tenantDisplayName;
   final String deviceId;
   final bool enabled;
   final String apiToken;
@@ -12,6 +13,7 @@ class SyncConfiguration {
   const SyncConfiguration({
     required this.apiBaseUrl,
     required this.tenantId,
+    this.tenantDisplayName = '',
     required this.deviceId,
     required this.enabled,
     required this.apiToken,
@@ -26,6 +28,7 @@ class SyncConfiguration {
     return SyncConfiguration(
       apiBaseUrl: fixedApiBaseUrl,
       tenantId: tenantId.trim(),
+      tenantDisplayName: '',
       deviceId: deviceId,
       enabled: false,
       apiToken: '',
@@ -36,6 +39,18 @@ class SyncConfiguration {
   bool get hasApiBaseUrl => apiBaseUrl.trim().isNotEmpty;
   bool get hasTenantId => tenantId.trim().isNotEmpty;
   bool get hasDeviceId => deviceId.trim().isNotEmpty;
+
+  String get tenantLabel {
+    final label = tenantDisplayName.trim();
+    if (label.isNotEmpty) {
+      return label;
+    }
+    if (tenantId.trim().isNotEmpty) {
+      return 'Espace de travail';
+    }
+    return '';
+  }
+
   bool get hasApiToken => apiToken.trim().isNotEmpty;
 
   bool get usesDeviceToken => apiToken.trim().startsWith('odt_');
@@ -102,6 +117,7 @@ class SyncConfiguration {
   SyncConfiguration copyWith({
     String? apiBaseUrl,
     String? tenantId,
+    String? tenantDisplayName,
     String? deviceId,
     bool? enabled,
     String? apiToken,
@@ -110,6 +126,7 @@ class SyncConfiguration {
     return SyncConfiguration(
       apiBaseUrl: normalizeApiBaseUrl(apiBaseUrl ?? this.apiBaseUrl),
       tenantId: (tenantId ?? this.tenantId).trim(),
+      tenantDisplayName: (tenantDisplayName ?? this.tenantDisplayName).trim(),
       deviceId: (deviceId ?? this.deviceId).trim(),
       enabled: enabled ?? this.enabled,
       apiToken: (apiToken ?? this.apiToken).trim(),
@@ -121,6 +138,7 @@ class SyncConfiguration {
     return SyncConfiguration(
       apiBaseUrl: fixedApiBaseUrl,
       tenantId: json['tenantId']?.toString().trim() ?? '',
+      tenantDisplayName: json['tenantDisplayName']?.toString().trim() ?? '',
       deviceId: json['deviceId']?.toString().trim() ?? '',
       enabled: json['enabled'] is bool ? json['enabled'] as bool : false,
       apiToken: json['apiToken']?.toString().trim() ?? '',
@@ -134,6 +152,7 @@ class SyncConfiguration {
     return <String, dynamic>{
       'apiBaseUrl': apiBaseUrl,
       'tenantId': tenantId,
+      'tenantDisplayName': tenantDisplayName,
       'deviceId': deviceId,
       'enabled': enabled,
       'apiToken': apiToken,
@@ -145,6 +164,7 @@ class SyncConfiguration {
     return <String, dynamic>{
       'apiBaseUrl': apiBaseUrl,
       'tenantId': tenantId,
+      'tenantDisplayName': tenantDisplayName,
       'deviceId': deviceId,
       'enabled': enabled,
       'apiTokenConfigured': hasApiToken,

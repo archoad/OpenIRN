@@ -599,7 +599,7 @@ class _ServerSummaryCard extends StatelessWidget {
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 8),
-            Text('Espace de travail : ${configuration?.tenantId ?? '—'}'),
+            Text('Espace de travail : ${configuration?.tenantLabel ?? '—'}'),
             Text('Serveur : ${configuration?.apiBaseUrl ?? '—'}'),
             const SizedBox(height: 12),
             Wrap(

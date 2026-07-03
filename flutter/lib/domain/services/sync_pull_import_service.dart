@@ -4,6 +4,7 @@ import '../models/irn_assessment.dart';
 import '../models/irn_referential.dart';
 import '../models/local_activity_event.dart';
 import '../models/local_campaign.dart';
+import '../utils/openirn_uuid.dart';
 
 enum SyncPullImportMode { copy, replaceLocal }
 
@@ -202,11 +203,6 @@ class SyncPullImportService {
     if (mode == SyncPullImportMode.replaceLocal) {
       return sourceCampaign.copyWith(updatedAt: importedAt);
     }
-    final safeReferentialId = _safeIdPart(referential.id);
-    final safeSyncId = _safeIdPart(
-      serverSyncId.isEmpty ? 'remote' : serverSyncId,
-    );
-    final safeCampaignId = _safeIdPart(sourceCampaign.id);
     final safeTimestamp = importedAt.toIso8601String().replaceAll(
       RegExp(r'[^0-9]'),
       '',
@@ -219,7 +215,7 @@ class SyncPullImportService {
         '${sourceDeviceId.isEmpty ? '' : ' émis par $sourceDeviceId'}.';
 
     return LocalCampaign(
-      id: 'remote-import-$safeReferentialId-$safeSyncId-$safeCampaignId-$safeTimestamp-$index',
+      id: newOpenIrnUuid(),
       referentialId: referential.id,
       name:
           '${sourceCampaign.name} — serveur ${shortSyncId.isEmpty ? safeTimestamp : shortSyncId}',
@@ -466,15 +462,6 @@ class SyncPullImportService {
       return value.toInt();
     }
     return int.tryParse(value?.toString() ?? '');
-  }
-
-  String _safeIdPart(String value) {
-    final normalized = value.toLowerCase().replaceAll(
-      RegExp(r'[^a-z0-9]+'),
-      '-',
-    );
-    final trimmed = normalized.replaceAll(RegExp(r'^-+|-+$'), '');
-    return trimmed.isEmpty ? 'unknown' : trimmed;
   }
 }
 

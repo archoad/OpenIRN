@@ -315,7 +315,9 @@ class _StatusCard extends StatelessWidget {
                     spacing: 8,
                     runSpacing: 8,
                     children: [
-                      Chip(label: Text('Espace ${result.tenantId}')),
+                      Chip(
+                        label: Text('Espace ${data.configuration.tenantLabel}'),
+                      ),
                       Chip(
                         label: Text(data.configuration.authorizationModeLabel),
                       ),

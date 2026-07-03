@@ -278,7 +278,7 @@ class _HeaderCard extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 state.serverAvailable
-                    ? '$activeCount active(s), $expiredCount expirée(s), $revokedCount révoquée(s) — espace ${state.configuration.tenantId}'
+                    ? '$activeCount active(s), $expiredCount expirée(s), $revokedCount révoquée(s) — ${state.configuration.tenantLabel}'
                     : state.message,
               ),
             ],
