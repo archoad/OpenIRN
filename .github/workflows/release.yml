@@ -27,7 +27,7 @@ env:
   FLUTTER_CHANNEL: stable
   APP_NAME: openirn
   APP_DISPLAY_NAME: OpenIRN
-  APP_BUNDLE_ID: io.github.myshelldubois.openirn
+  APP_BUNDLE_ID: io.github.archoad.openirn
 
 jobs:
   validate:
