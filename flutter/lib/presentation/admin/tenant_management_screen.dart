@@ -132,6 +132,79 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
     }
   }
 
+
+  Future<void> _deleteTenant(_TenantManagementStateData state) async {
+    final deletableTenants = state.tenants
+        .where((tenant) => !tenant.permanent && !tenant.isDefault)
+        .toList(growable: false);
+    if (deletableTenants.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Aucun espace de travail supprimable.'),
+        ),
+      );
+      return;
+    }
+
+    final selectedTenant = await showDialog<TenantInfo>(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => _TenantDeleteSelectionDialog(tenants: deletableTenants),
+    );
+    if (selectedTenant == null || !mounted) {
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _TenantDeleteConfirmationDialog(tenant: selectedTenant),
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    final result = await _apiClient.deleteTenant(
+      baseUrl: state.configuration.apiBaseUrl,
+      tenantId: selectedTenant.id,
+      apiToken: state.configuration.apiToken,
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${result.title} — ${result.message}')),
+    );
+
+    if (result.isAvailable) {
+      if (selectedTenant.id == state.configuration.tenantId) {
+        TenantInfo? fallbackTenant;
+        for (final tenant in result.tenants) {
+          if (tenant.permanent) {
+            fallbackTenant = tenant;
+            break;
+          }
+        }
+        if (fallbackTenant != null) {
+          await _configurationRepository
+              .saveTenantSelectionForSolutionAdministration(
+                state.configuration.copyWith(
+                  tenantId: fallbackTenant.id,
+                  tenantDisplayName: fallbackTenant.label,
+                  enabled: true,
+                ),
+              );
+          if (!mounted) {
+            return;
+          }
+        }
+      }
+      _reload();
+    }
+  }
+
   Future<void> _switchTenant(
     TenantInfo tenant, {
     required bool solutionAdministrator,
@@ -200,6 +273,7 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
                   _TenantIntroCard(
                     state: state,
                     onCreateTenant: () => _createTenant(state),
+                    onDeleteTenant: () => _deleteTenant(state),
                   ),
                   const SizedBox(height: 12),
                   for (final tenant in state.tenants) ...[
@@ -247,13 +321,36 @@ class _TenantManagementStateData {
 class _TenantIntroCard extends StatelessWidget {
   final _TenantManagementStateData state;
   final VoidCallback onCreateTenant;
+  final VoidCallback onDeleteTenant;
 
-  const _TenantIntroCard({required this.state, required this.onCreateTenant});
+  const _TenantIntroCard({
+    required this.state,
+    required this.onCreateTenant,
+    required this.onDeleteTenant,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isNarrow = MediaQuery.sizeOf(context).width < 680;
+    final canDeleteTenant = state.solutionAdministrator &&
+        state.tenants.any((tenant) => !tenant.permanent && !tenant.isDefault);
+    final deleteButton = FilledButton.icon(
+      onPressed: canDeleteTenant ? onDeleteTenant : null,
+      style: FilledButton.styleFrom(
+        backgroundColor: theme.colorScheme.error,
+        disabledBackgroundColor: theme.colorScheme.error.withValues(alpha: 0.24),
+        foregroundColor: theme.colorScheme.onError,
+        disabledForegroundColor: theme.colorScheme.onError.withValues(alpha: 0.54),
+      ),
+      icon: const Icon(Icons.delete_forever_outlined),
+      label: const Text('Supprimer un espace'),
+    );
+    final createButton = FilledButton.icon(
+      onPressed: onCreateTenant,
+      icon: const Icon(Icons.add_business_outlined),
+      label: const Text('Créer un espace'),
+    );
     final content = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -300,21 +397,26 @@ class _TenantIntroCard extends StatelessWidget {
                 children: [
                   content,
                   const SizedBox(height: 14),
-                  FilledButton.icon(
-                    onPressed: onCreateTenant,
-                    icon: const Icon(Icons.add_business_outlined),
-                    label: const Text('Créer un espace'),
-                  ),
+                  createButton,
+                  const SizedBox(height: 8),
+                  deleteButton,
                 ],
               )
             : Row(
                 children: [
                   Expanded(child: content),
                   const SizedBox(width: 16),
-                  FilledButton.icon(
-                    onPressed: onCreateTenant,
-                    icon: const Icon(Icons.add_business_outlined),
-                    label: const Text('Créer un espace'),
+                  SizedBox(
+                    width: 240,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        createButton,
+                        const SizedBox(height: 8),
+                        deleteButton,
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -452,6 +554,116 @@ class _TenantCard extends StatelessWidget {
   }
 }
 
+
+class _TenantDeleteSelectionDialog extends StatelessWidget {
+  final List<TenantInfo> tenants;
+
+  const _TenantDeleteSelectionDialog({required this.tenants});
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      insetPadding: responsiveDialogInsetPadding(context),
+      title: const Text('Supprimer un espace de travail'),
+      content: ResponsiveDialogContent(
+        maxWidth: 620,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Choisissez l’espace de travail à supprimer. L’espace par défaut n’est pas supprimable.',
+            ),
+            const SizedBox(height: 12),
+            for (final tenant in tenants)
+              Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  leading: const Icon(Icons.business_outlined),
+                  title: Text(tenant.label),
+                  subtitle: Text(
+                    '${tenant.activeUserCount} utilisateur(s) actif(s) · ${tenant.campaignCount} campagne(s)',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).pop(tenant),
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Annuler'),
+        ),
+      ],
+    );
+  }
+}
+
+class _TenantDeleteConfirmationDialog extends StatelessWidget {
+  final TenantInfo tenant;
+
+  const _TenantDeleteConfirmationDialog({required this.tenant});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AlertDialog(
+      insetPadding: responsiveDialogInsetPadding(context),
+      icon: Icon(
+        Icons.warning_amber_rounded,
+        color: theme.colorScheme.error,
+      ),
+      title: const Text('Êtes-vous sûr ?'),
+      content: ResponsiveDialogContent(
+        maxWidth: 560,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Cette action va supprimer définitivement l’espace de travail « ${tenant.label} ».',
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Les utilisateurs, campagnes, terminaux, demandes d’enrôlement, sessions et journaux associés à cet espace seront effacés.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.error,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                Chip(label: Text('${tenant.activeUserCount} utilisateur(s) actif(s)')),
+                Chip(label: Text('${tenant.campaignCount} campagne(s)')),
+              ],
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Annuler'),
+        ),
+        FilledButton.icon(
+          onPressed: () => Navigator.of(context).pop(true),
+          style: FilledButton.styleFrom(
+            backgroundColor: theme.colorScheme.error,
+            foregroundColor: theme.colorScheme.onError,
+          ),
+          icon: const Icon(Icons.delete_forever_outlined),
+          label: const Text('Supprimer définitivement'),
+        ),
+      ],
+    );
+  }
+}
+
 class _TenantRenameFormResult {
   final String displayName;
 
@@ -474,7 +686,9 @@ class _TenantRenameDialogState extends State<_TenantRenameDialog> {
   @override
   void initState() {
     super.initState();
-    _displayNameController = TextEditingController(text: widget.tenant.label);
+    _displayNameController = TextEditingController(
+      text: widget.tenant.label,
+    );
   }
 
   @override
@@ -488,7 +702,9 @@ class _TenantRenameDialogState extends State<_TenantRenameDialog> {
       return;
     }
     Navigator.of(context).pop(
-      _TenantRenameFormResult(displayName: _displayNameController.text.trim()),
+      _TenantRenameFormResult(
+        displayName: _displayNameController.text.trim(),
+      ),
     );
   }
 

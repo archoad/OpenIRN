@@ -984,6 +984,124 @@ class OpenIrnApiClient {
     }
   }
 
+
+  Future<OpenIrnApiTenantsResult> deleteTenant({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final uri = Uri.parse('$normalizedBaseUrl/tenants/$safeTenantId');
+
+    try {
+      final response = await _delete(uri, bearerToken: apiToken);
+      final decodedBody = _decodeJsonObject(response.body);
+      final rawTenants = decodedBody?['tenants'];
+      final tenants = rawTenants is List
+          ? rawTenants
+                .whereType<Map>()
+                .map(
+                  (item) =>
+                      TenantInfo.fromJson(Map<String, dynamic>.from(item)),
+                )
+                .where((tenant) => tenant.id.trim().isNotEmpty)
+                .toList(growable: false)
+          : const <TenantInfo>[];
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return OpenIrnApiTenantsResult(
+          status: OpenIrnApiTenantsStatus.available,
+          url: uri.toString(),
+          statusCode: response.statusCode,
+          title: 'Espace de travail supprimé',
+          message:
+              decodedBody?['message']?.toString() ??
+              'Espace de travail supprimé avec ses données associées.',
+          tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
+          defaultTenantId:
+              decodedBody?['defaultTenantId']?.toString() ?? 'default',
+          solutionAdministrator: decodedBody?['solutionAdministrator'] == true,
+          tenants: tenants,
+          responseBody: decodedBody,
+        );
+      }
+
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.rejected,
+        url: uri.toString(),
+        statusCode: response.statusCode,
+        title: 'Suppression refusée',
+        message:
+            decodedBody?['detail']?.toString() ??
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        tenantId: safeTenantId,
+        defaultTenantId: 'default',
+        tenants: tenants,
+        responseBody: decodedBody,
+      );
+    } on TimeoutException {
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.unreachable,
+        url: uri.toString(),
+        statusCode: null,
+        title: 'Délai dépassé',
+        message: 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+        tenantId: safeTenantId,
+        defaultTenantId: 'default',
+        tenants: const <TenantInfo>[],
+      );
+    } on SocketException catch (error) {
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.unreachable,
+        url: uri.toString(),
+        statusCode: null,
+        title: 'Serveur injoignable',
+        message: error.message,
+        tenantId: safeTenantId,
+        defaultTenantId: 'default',
+        tenants: const <TenantInfo>[],
+      );
+    } on HandshakeException catch (error) {
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.unreachable,
+        url: uri.toString(),
+        statusCode: null,
+        title: 'Erreur TLS',
+        message: error.message,
+        tenantId: safeTenantId,
+        defaultTenantId: 'default',
+        tenants: const <TenantInfo>[],
+      );
+    } on FormatException catch (error) {
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.unreachable,
+        url: uri.toString(),
+        statusCode: null,
+        title: 'Adresse serveur invalide',
+        message: error.message,
+        tenantId: safeTenantId,
+        defaultTenantId: 'default',
+        tenants: const <TenantInfo>[],
+      );
+    } on HttpException catch (error) {
+      return OpenIrnApiTenantsResult(
+        status: OpenIrnApiTenantsStatus.unreachable,
+        url: uri.toString(),
+        statusCode: null,
+        title: 'Erreur HTTP',
+        message: error.message,
+        tenantId: safeTenantId,
+        defaultTenantId: 'default',
+        tenants: const <TenantInfo>[],
+      );
+    }
+  }
+
   Future<OpenIrnApiPushResult> pushPayload({
     String? baseUrl,
     required Map<String, dynamic> payload,
@@ -1360,7 +1478,9 @@ class OpenIrnApiClient {
     final safeTenantId = tenantId.trim().isEmpty
         ? SyncConfiguration.defaultTenantId
         : tenantId.trim();
-    final usersUri = Uri.parse('$normalizedBaseUrl/users').replace(
+    final usersUri = Uri.parse(
+      '$normalizedBaseUrl/users',
+    ).replace(
       queryParameters: <String, String>{
         'tenantId': safeTenantId,
         if (allTenants) 'allTenants': 'true',
@@ -2433,7 +2553,9 @@ class OpenIrnApiClient {
     final safeTenantId = tenantId.trim().isEmpty
         ? SyncConfiguration.defaultTenantId
         : tenantId.trim();
-    final devicesUri = Uri.parse('$normalizedBaseUrl/devices').replace(
+    final devicesUri = Uri.parse(
+      '$normalizedBaseUrl/devices',
+    ).replace(
       queryParameters: <String, String>{
         'tenantId': safeTenantId,
         if (includeAllTenants) 'allTenants': 'true',
@@ -2713,9 +2835,7 @@ class OpenIrnApiClient {
     final safeTenantId = tenantId.trim().isEmpty
         ? SyncConfiguration.defaultTenantId
         : tenantId.trim();
-    final requestUri = Uri.parse(
-      '$normalizedBaseUrl/devices/enrollment/request',
-    );
+    final requestUri = Uri.parse('$normalizedBaseUrl/devices/enrollment/request');
 
     try {
       final response = await _postJson(requestUri, <String, dynamic>{
@@ -2903,40 +3023,15 @@ class OpenIrnApiClient {
         responseBody: decodedBody,
       );
     } on TimeoutException {
-      return _enrollmentNetworkError(
-        approveUri,
-        safeTenantId,
-        'Délai dépassé',
-        'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
-      );
+      return _enrollmentNetworkError(approveUri, safeTenantId, 'Délai dépassé', 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.');
     } on SocketException catch (error) {
-      return _enrollmentNetworkError(
-        approveUri,
-        safeTenantId,
-        'Serveur injoignable',
-        error.message,
-      );
+      return _enrollmentNetworkError(approveUri, safeTenantId, 'Serveur injoignable', error.message);
     } on HandshakeException catch (error) {
-      return _enrollmentNetworkError(
-        approveUri,
-        safeTenantId,
-        'Erreur TLS',
-        error.message,
-      );
+      return _enrollmentNetworkError(approveUri, safeTenantId, 'Erreur TLS', error.message);
     } on FormatException catch (error) {
-      return _enrollmentNetworkError(
-        approveUri,
-        safeTenantId,
-        'Adresse serveur invalide',
-        error.message,
-      );
+      return _enrollmentNetworkError(approveUri, safeTenantId, 'Adresse serveur invalide', error.message);
     } on HttpException catch (error) {
-      return _enrollmentNetworkError(
-        approveUri,
-        safeTenantId,
-        'Erreur HTTP',
-        error.message,
-      );
+      return _enrollmentNetworkError(approveUri, safeTenantId, 'Erreur HTTP', error.message);
     }
   }
 
@@ -2967,40 +3062,15 @@ class OpenIrnApiClient {
         successMessage: 'La demande d’enrôlement a été refusée.',
       );
     } on TimeoutException {
-      return _devicesNetworkError(
-        rejectUri,
-        safeTenantId,
-        'Délai dépassé',
-        'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
-      );
+      return _devicesNetworkError(rejectUri, safeTenantId, 'Délai dépassé', 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.');
     } on SocketException catch (error) {
-      return _devicesNetworkError(
-        rejectUri,
-        safeTenantId,
-        'Serveur injoignable',
-        error.message,
-      );
+      return _devicesNetworkError(rejectUri, safeTenantId, 'Serveur injoignable', error.message);
     } on HandshakeException catch (error) {
-      return _devicesNetworkError(
-        rejectUri,
-        safeTenantId,
-        'Erreur TLS',
-        error.message,
-      );
+      return _devicesNetworkError(rejectUri, safeTenantId, 'Erreur TLS', error.message);
     } on FormatException catch (error) {
-      return _devicesNetworkError(
-        rejectUri,
-        safeTenantId,
-        'Adresse serveur invalide',
-        error.message,
-      );
+      return _devicesNetworkError(rejectUri, safeTenantId, 'Adresse serveur invalide', error.message);
     } on HttpException catch (error) {
-      return _devicesNetworkError(
-        rejectUri,
-        safeTenantId,
-        'Erreur HTTP',
-        error.message,
-      );
+      return _devicesNetworkError(rejectUri, safeTenantId, 'Erreur HTTP', error.message);
     }
   }
 

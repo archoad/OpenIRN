@@ -776,6 +776,7 @@ def _apply_schema() -> None:
         con.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
         _migrate_tenants_schema(con)
         _migrate_existing_entity_ids_to_uuid(con)
+        _delete_legacy_revoked_authorized_devices(con)
         _ensure_tenant(con, DEFAULT_TENANT_ID)
         _backfill_default_tenant_display_name(con)
         _sync_solution_administrators_to_all_tenants(con)
@@ -1104,6 +1105,49 @@ def _migrate_existing_entity_ids_to_uuid(con: sqlite3.Connection) -> None:
 
     _record_migration(con, 156, "uuid_entity_ids_runtime_migration")
     con.execute("PRAGMA foreign_keys = ON")
+
+
+
+def _delete_legacy_revoked_authorized_devices(con: sqlite3.Connection) -> None:
+    """Remove devices that were soft-revoked by older OpenIRN versions."""
+    if _migration_applied(con, 161):
+        return
+    if not con.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='authorized_devices'"
+    ).fetchone():
+        _record_migration(con, 161, "delete_legacy_revoked_authorized_devices")
+        return
+
+    rows = con.execute(
+        """
+        SELECT tenant_id, device_id, name, platform, status, last_seen_at, revoked_at
+        FROM authorized_devices
+        WHERE status <> 'active' OR revoked_at IS NOT NULL
+        """
+    ).fetchall()
+    for row in rows:
+        tenant_id = str(row["tenant_id"] or "")
+        device_id = str(row["device_id"] or "")
+        if not tenant_id or not device_id:
+            continue
+        _record_device_audit(
+            con,
+            tenant_id,
+            "device.deleted",
+            device_id=device_id,
+            payload={
+                "reason": "legacy_revoked_device_cleanup",
+                "name": row["name"],
+                "platform": row["platform"],
+                "previousStatus": row["status"],
+                "lastSeenAt": row["last_seen_at"],
+                "revokedAt": row["revoked_at"],
+            },
+        )
+    con.execute(
+        "DELETE FROM authorized_devices WHERE status <> 'active' OR revoked_at IS NOT NULL"
+    )
+    _record_migration(con, 161, "delete_legacy_revoked_authorized_devices")
 
 
 def _tenant_business_label_from_alias(value: str) -> str:
@@ -4013,6 +4057,97 @@ async def tenant_update(tenant_id: str, request: Request) -> dict[str, Any]:
     }
 
 
+@app.delete("/tenants/{tenant_id}")
+def tenant_delete(tenant_id: str, request: Request) -> dict[str, Any]:
+    target_tenant_id = _resolve_tenant_id_for_request(tenant_id, DEFAULT_TENANT_ID)
+    auth_context = _require_admin_authorization(request, target_tenant_id)
+    actor_user_id = str(auth_context.get("userId") or "server").strip()[:120]
+    device_id = str(auth_context.get("deviceId") or "").strip()[:160]
+    auth_tenant_id = str(auth_context.get("tenantId") or "").strip()
+
+    with _db() as con:
+        with con:
+            _ensure_tenant(con, DEFAULT_TENANT_ID)
+            default_tenant_id = _resolve_tenant_id(con, DEFAULT_TENANT_ID, DEFAULT_TENANT_ID)
+            row = con.execute(
+                "SELECT id, display_name, permanent FROM tenants WHERE id = ?",
+                (target_tenant_id,),
+            ).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Espace de travail introuvable")
+
+            display_name = _tenant_display_name(con, target_tenant_id)
+            is_permanent = bool(int(row["permanent"] or 0))
+            if is_permanent or target_tenant_id == default_tenant_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail="L’espace de travail par défaut ne peut pas être supprimé",
+                )
+
+            counts = {
+                "users": int(con.execute(
+                    "SELECT COUNT(*) FROM users WHERE tenant_id = ?",
+                    (target_tenant_id,),
+                ).fetchone()[0]),
+                "campaigns": int(con.execute(
+                    "SELECT COUNT(*) FROM campaign_states WHERE tenant_id = ?",
+                    (target_tenant_id,),
+                ).fetchone()[0]),
+                "devices": int(con.execute(
+                    "SELECT COUNT(*) FROM authorized_devices WHERE tenant_id = ?",
+                    (target_tenant_id,),
+                ).fetchone()[0]),
+                "enrollmentRequests": int(con.execute(
+                    "SELECT COUNT(*) FROM device_enrollment_requests WHERE tenant_id = ?",
+                    (target_tenant_id,),
+                ).fetchone()[0]),
+            }
+
+            audit_tenant_id = auth_tenant_id if auth_tenant_id and auth_tenant_id != target_tenant_id else default_tenant_id
+            if audit_tenant_id and audit_tenant_id != target_tenant_id:
+                _record_device_audit(
+                    con,
+                    audit_tenant_id,
+                    "tenant.deleted",
+                    device_id=device_id,
+                    payload={
+                        "tenantId": target_tenant_id,
+                        "displayName": display_name,
+                        "actorUserId": actor_user_id,
+                        "deletedCounts": counts,
+                    },
+                )
+
+            con.execute(
+                """
+                DELETE FROM id_aliases
+                WHERE (entity_type = 'tenant' AND new_id = ?)
+                   OR scope_id = ?
+                   OR new_id = ?
+                """,
+                (target_tenant_id, target_tenant_id, target_tenant_id),
+            )
+            con.execute("DELETE FROM tenants WHERE id = ?", (target_tenant_id,))
+            _sync_solution_administrators_to_all_tenants(con)
+            items = _list_tenants(con)
+
+    return {
+        "status": "deleted",
+        "type": "openirn.tenantDeleted",
+        "application": "OpenIRN API",
+        "version": APP_VERSION,
+        "tenantId": target_tenant_id,
+        "tenantDisplayName": display_name,
+        "defaultTenantId": DEFAULT_TENANT_ID,
+        "solutionAdminTenantId": SOLUTION_ADMIN_TENANT_ID,
+        "solutionAdministrator": _is_solution_admin_context(auth_context),
+        "deletedCounts": counts,
+        "tenants": items,
+        "serverTime": _utc_now().isoformat(),
+        "message": f"L’espace de travail « {display_name} » a été supprimé avec ses utilisateurs et ses campagnes.",
+    }
+
+
 @app.get("/devices")
 def devices(
     request: Request,
@@ -4506,25 +4641,35 @@ def device_revoke(
     now = _utc_now().isoformat()
     with _db() as con:
         row = con.execute(
-            "SELECT status FROM authorized_devices WHERE tenant_id = ? AND device_id = ?",
+            """
+            SELECT name, platform, status, last_seen_at, revoked_at, invited_by_user_id, enrollment_id
+            FROM authorized_devices
+            WHERE tenant_id = ? AND device_id = ?
+            """,
             (tenant_id, device_id),
         ).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="Device not found")
         con.execute(
-            """
-            UPDATE authorized_devices
-            SET status = 'revoked', revoked_at = ?
-            WHERE tenant_id = ? AND device_id = ?
-            """,
-            (now, tenant_id, device_id),
+            "DELETE FROM authorized_devices WHERE tenant_id = ? AND device_id = ?",
+            (tenant_id, device_id),
         )
         _record_device_audit(
             con,
             tenant_id,
             "device.revoked",
             device_id=device_id,
-            payload={},
+            payload={
+                "deleted": True,
+                "deletedAt": now,
+                "name": row["name"],
+                "platform": row["platform"],
+                "previousStatus": row["status"],
+                "lastSeenAt": row["last_seen_at"],
+                "previousRevokedAt": row["revoked_at"],
+                "invitedByUserId": row["invited_by_user_id"],
+                "enrollmentId": row["enrollment_id"],
+            },
         )
         con.commit()
         devices_list = _list_devices(con, tenant_id)
