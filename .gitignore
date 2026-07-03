@@ -43,18 +43,8 @@ coverage/
 .vscode/
 *.iml
 
-# Local IRN import work files
-Questionnaire_IRN_*.xlsx
-Questionnaire_IRN_*.ods
-canonical_irn_*.json
-validation_referential_report.json
-
-# Company / campaign data
-Evaluation IRN*.xlsx
-company_seed.json
-validation_report.json
-openirn_*.json
-*_campaign_export.json
+# Local IRN data
+/branding/
 
 # Release signing material — never commit private signing assets
 /secrets/
