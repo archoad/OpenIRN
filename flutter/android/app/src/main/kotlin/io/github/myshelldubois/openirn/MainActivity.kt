@@ -1,5 +1,1 @@
-package io.github.myshelldubois.openirn
-
-import io.flutter.embedding.android.FlutterActivity
-
-class MainActivity : FlutterActivity()
+// MainActivity déplacée vers package io.github.archoad.openirn.
