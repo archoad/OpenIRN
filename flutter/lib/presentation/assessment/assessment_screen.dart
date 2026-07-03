@@ -1406,11 +1406,7 @@ class _AssignmentChip extends StatelessWidget {
         return email;
       }
     }
-    final userId = assignment?.userId.trim() ?? '';
-    if (userId.isEmpty) {
-      return 'Utilisateur inconnu';
-    }
-    return 'Utilisateur $userId';
+    return 'Utilisateur non résolu';
   }
 
   @override

@@ -217,7 +217,7 @@ class _HeaderCard extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 state.serverAvailable
-                    ? '${state.events.length} événement(s) — $authCount authentification(s), $deviceCount terminal(aux), $failureCount échec(s) — espace ${state.configuration.tenantId}'
+                    ? '${state.events.length} événement(s) — $authCount authentification(s), $deviceCount terminal(aux), $failureCount échec(s) — ${state.configuration.tenantLabel}'
                     : state.message,
               ),
             ],

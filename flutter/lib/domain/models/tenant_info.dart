@@ -34,7 +34,7 @@ class TenantInfo {
           : json['id']?.toString().trim() ?? '',
       displayName: json['displayName']?.toString().trim().isNotEmpty == true
           ? json['displayName'].toString().trim()
-          : json['tenantId']?.toString().trim() ?? '',
+          : 'Espace de travail',
       description: json['description']?.toString().trim() ?? '',
       permanent: json['permanent'] == true,
       isDefault: json['isDefault'] == true,
@@ -50,6 +50,14 @@ class TenantInfo {
       administratorCount: _intFromJson(json['administratorCount']),
       campaignCount: _intFromJson(json['campaignCount']),
     );
+  }
+
+  String get label {
+    final raw = displayName.trim();
+    if (raw.isNotEmpty) {
+      return raw;
+    }
+    return isDefault ? 'Espace de travail par défaut' : 'Espace de travail';
   }
 
   static int _intFromJson(Object? value) {

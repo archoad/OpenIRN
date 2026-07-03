@@ -97,6 +97,24 @@ def _safe_segment(value: Any, fallback: str) -> str:
     return cleaned[:80] or fallback
 
 
+UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+)
+
+
+def _new_uuid() -> str:
+    return str(uuid.uuid4())
+
+
+def _is_uuid(value: Any) -> bool:
+    return bool(UUID_RE.match(str(value or "").strip()))
+
+
+def _normalize_uuid(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    return raw if _is_uuid(raw) else ""
+
+
 def _canonical_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -397,16 +415,23 @@ def _request_auth_context(request: Request) -> dict[str, Any] | None:
     return _device_token_auth_context(provided_token)
 
 
-def _is_solution_admin_context(context: dict[str, Any] | None) -> bool:
+def _is_administrator_context(context: dict[str, Any] | None) -> bool:
     if context is None:
         return False
     if str(context.get("authMode") or "") == "server_bearer":
         return True
     return (
         str(context.get("authMode") or "") == "session"
-        and str(context.get("tenantId") or "") == SOLUTION_ADMIN_TENANT_ID
         and _role_normalize(context.get("userRole")) == "administrator"
     )
+
+
+def _is_solution_admin_context(context: dict[str, Any] | None) -> bool:
+    # Depuis la v1, le rôle Administrateur représente l’administration globale
+    # OpenIRN, quel que soit l’espace de travail utilisé pour ouvrir la session.
+    # Le nom historique "solution admin" reste conservé pour compatibilité avec
+    # les réponses API et l’interface existante.
+    return _is_administrator_context(context)
 
 
 def _request_has_solution_admin_authorization(request: Request) -> bool:
@@ -449,7 +474,7 @@ def _require_role_authorization(
         raise HTTPException(status_code=403, detail=detail)
 
     if tenant_id and str(context.get("tenantId") or "") != tenant_id:
-        if _is_solution_admin_context(context):
+        if _is_administrator_context(context):
             return context
         raise HTTPException(status_code=403, detail="La session ne correspond pas à l’espace de travail demandé")
 
@@ -491,7 +516,7 @@ def _require_device_or_authorized_read(request: Request, tenant_id: str) -> dict
             return context
         if not tenant_id or str(context.get("tenantId") or "") == tenant_id:
             return context
-        if _is_solution_admin_context(context):
+        if _is_administrator_context(context):
             return context
         raise HTTPException(status_code=403, detail="L’autorisation ne correspond pas à l’espace de travail demandé")
     _require_active_device(request, tenant_id)
@@ -750,7 +775,9 @@ def _apply_schema() -> None:
     with _db() as con:
         con.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
         _migrate_tenants_schema(con)
+        _migrate_existing_entity_ids_to_uuid(con)
         _ensure_tenant(con, DEFAULT_TENANT_ID)
+        _backfill_default_tenant_display_name(con)
         _sync_solution_administrators_to_all_tenants(con)
         _backfill_official_referential_history(con)
         con.commit()
@@ -777,9 +804,350 @@ def _migrate_tenants_schema(con: sqlite3.Connection) -> None:
         con.execute("ALTER TABLE tenants ADD COLUMN permanent INTEGER NOT NULL DEFAULT 0")
 
 
+def _migration_applied(con: sqlite3.Connection, version: int) -> bool:
+    row = con.execute(
+        "SELECT 1 FROM schema_migrations WHERE version = ?",
+        (version,),
+    ).fetchone()
+    return row is not None
+
+
+def _record_migration(con: sqlite3.Connection, version: int, name: str) -> None:
+    con.execute(
+        "INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (?, ?)",
+        (version, name),
+    )
+
+
+def _alias_target(con: sqlite3.Connection, entity_type: str, old_id: str, scope_id: str = "") -> str:
+    row = con.execute(
+        """
+        SELECT new_id FROM id_aliases
+        WHERE entity_type = ? AND scope_id = ? AND old_id = ?
+        """,
+        (entity_type, scope_id, old_id),
+    ).fetchone()
+    return str(row["new_id"] or "") if row else ""
+
+
+def _store_alias(
+    con: sqlite3.Connection,
+    *,
+    entity_type: str,
+    old_id: str,
+    new_id: str,
+    scope_id: str = "",
+) -> None:
+    if not old_id or not new_id or old_id == new_id:
+        return
+    con.execute(
+        """
+        INSERT OR IGNORE INTO id_aliases(entity_type, scope_id, old_id, new_id, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (entity_type, scope_id, old_id, new_id, _utc_now().isoformat()),
+    )
+
+
+def _rewrite_json_ids(raw: Any, mappings: dict[str, str]) -> Any:
+    if not mappings:
+        return raw
+    if isinstance(raw, str):
+        return mappings.get(raw, raw)
+    if isinstance(raw, list):
+        return [_rewrite_json_ids(item, mappings) for item in raw]
+    if isinstance(raw, dict):
+        rewritten: dict[str, Any] = {}
+        for key, value in raw.items():
+            new_key = mappings.get(str(key), str(key))
+            rewritten[new_key] = _rewrite_json_ids(value, mappings)
+        return rewritten
+    return raw
+
+
+def _rewrite_json_text(raw_text: str, mappings: dict[str, str]) -> str:
+    if not raw_text or not mappings:
+        return raw_text
+    try:
+        payload = json.loads(raw_text)
+    except Exception:
+        return raw_text
+    return _canonical_json(_rewrite_json_ids(payload, mappings))
+
+
+def _rewrite_json_column(
+    con: sqlite3.Connection,
+    table: str,
+    pk_columns: list[str],
+    json_column: str,
+    mappings: dict[str, str],
+) -> None:
+    if not mappings:
+        return
+    columns = _table_columns(con, table)
+    if json_column not in columns:
+        return
+    selected_columns = pk_columns + [json_column]
+    rows = con.execute(
+        f"SELECT {', '.join(selected_columns)} FROM {table}"
+    ).fetchall()
+    for row in rows:
+        original = str(row[json_column] or "")
+        rewritten = _rewrite_json_text(original, mappings)
+        if rewritten == original:
+            continue
+        where_clause = " AND ".join(f"{column} = ?" for column in pk_columns)
+        con.execute(
+            f"UPDATE {table} SET {json_column} = ? WHERE {where_clause}",
+            (rewritten, *[row[column] for column in pk_columns]),
+        )
+
+
+def _resolve_tenant_id(con: sqlite3.Connection, tenant_id: Any, fallback: str = DEFAULT_TENANT_ID) -> str:
+    requested = _safe_segment(tenant_id, fallback)
+    row = con.execute("SELECT id FROM tenants WHERE id = ?", (requested,)).fetchone()
+    if row is not None:
+        return str(row["id"] or requested)
+    aliased = _alias_target(con, "tenant", requested)
+    if aliased:
+        return aliased
+    if requested != fallback:
+        fallback_alias = _alias_target(con, "tenant", fallback)
+        if fallback_alias and requested == fallback:
+            return fallback_alias
+    return requested
+
+
+def _resolve_tenant_id_for_request(value: Any, fallback: str = DEFAULT_TENANT_ID) -> str:
+    requested = _safe_segment(value, fallback)
+    try:
+        with _db() as con:
+            return _resolve_tenant_id(con, requested, fallback)
+    except Exception:
+        return requested
+
+
+def _default_tenant_id(con: sqlite3.Connection) -> str:
+    row = con.execute(
+        "SELECT id FROM tenants WHERE permanent = 1 ORDER BY created_at ASC LIMIT 1"
+    ).fetchone()
+    if row is not None:
+        return str(row["id"] or DEFAULT_TENANT_ID)
+    aliased = _alias_target(con, "tenant", DEFAULT_TENANT_ID)
+    return aliased or DEFAULT_TENANT_ID
+
+
+def _tenant_id_for_creation(value: Any = None) -> str:
+    requested = _normalize_uuid(value)
+    return requested or _new_uuid()
+
+
+def _user_id_for_save(con: sqlite3.Connection, tenant_id: str, user_id: Any) -> str:
+    requested = str(user_id or "").strip()
+    if not requested:
+        return _new_uuid()
+    normalized = _normalize_uuid(requested)
+    if normalized:
+        return normalized
+    aliased = _alias_target(con, "user", requested, tenant_id)
+    if aliased:
+        return aliased
+    created = _new_uuid()
+    _store_alias(con, entity_type="user", scope_id=tenant_id, old_id=requested, new_id=created)
+    return created
+
+
+def _campaign_id_for_save(con: sqlite3.Connection, tenant_id: str, campaign_id: Any) -> str:
+    requested = str(campaign_id or "").strip()
+    if not requested:
+        return _new_uuid()
+    normalized = _normalize_uuid(requested)
+    if normalized:
+        return normalized
+    aliased = _alias_target(con, "campaign", requested, tenant_id)
+    if aliased:
+        return aliased
+    created = _new_uuid()
+    _store_alias(con, entity_type="campaign", scope_id=tenant_id, old_id=requested, new_id=created)
+    return created
+
+
+def _migrate_existing_entity_ids_to_uuid(con: sqlite3.Connection) -> None:
+    if _migration_applied(con, 156):
+        return
+
+    con.execute("PRAGMA foreign_keys = OFF")
+
+    tenant_map: dict[str, str] = {}
+    tenant_rows = con.execute("SELECT id FROM tenants ORDER BY id ASC").fetchall()
+    for row in tenant_rows:
+        old_id = str(row["id"] or "").strip()
+        if not old_id:
+            continue
+        new_id = old_id.lower() if _is_uuid(old_id) else (_alias_target(con, "tenant", old_id) or _new_uuid())
+        tenant_map[old_id] = new_id
+        _store_alias(con, entity_type="tenant", old_id=old_id, new_id=new_id)
+
+    tenant_tables = [
+        "users",
+        "user_credentials",
+        "sync_snapshots",
+        "campaign_states",
+        "campaign_revisions",
+        "authorized_devices",
+        "device_enrollment_requests",
+        "device_enrollment_codes",
+        "api_sessions",
+        "auth_attempts",
+        "device_audit_log",
+        "official_referentials",
+        "official_referential_history",
+        "sync_events",
+        "backup_audit_log",
+    ]
+    for old_id, new_id in tenant_map.items():
+        if old_id == new_id:
+            continue
+        con.execute("UPDATE tenants SET id = ? WHERE id = ?", (new_id, old_id))
+        for table in tenant_tables:
+            if table in {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}:
+                columns = _table_columns(con, table)
+                if "tenant_id" in columns:
+                    con.execute(f"UPDATE {table} SET tenant_id = ? WHERE tenant_id = ?", (new_id, old_id))
+
+    # Keep a permanent default alias even after the default tenant itself becomes a UUID.
+    default_id = tenant_map.get(DEFAULT_TENANT_ID) or _alias_target(con, "tenant", DEFAULT_TENANT_ID)
+    if default_id:
+        con.execute("UPDATE tenants SET permanent = 1 WHERE id = ?", (default_id,))
+
+    user_map: dict[str, str] = {}
+    user_rows = con.execute(
+        "SELECT tenant_id, user_id FROM users ORDER BY tenant_id ASC, user_id ASC"
+    ).fetchall()
+    for row in user_rows:
+        tenant_id = str(row["tenant_id"] or "")
+        old_user_id = str(row["user_id"] or "").strip()
+        if not old_user_id:
+            continue
+        new_user_id = old_user_id.lower() if _is_uuid(old_user_id) else user_map.get(old_user_id) or _new_uuid()
+        user_map[old_user_id] = new_user_id
+        _store_alias(con, entity_type="user", scope_id=tenant_id, old_id=old_user_id, new_id=new_user_id)
+
+    user_fk_tables = [
+        ("users", "user_id"),
+        ("user_credentials", "user_id"),
+        ("api_sessions", "user_id"),
+        ("auth_attempts", "user_id"),
+        ("authorized_devices", "invited_by_user_id"),
+        ("device_enrollment_requests", "decided_by_user_id"),
+        ("device_enrollment_codes", "created_by_user_id"),
+        ("official_referential_history", "triggered_by_user_id"),
+        ("backup_audit_log", "triggered_by_user_id"),
+    ]
+    for old_user_id, new_user_id in user_map.items():
+        if old_user_id == new_user_id:
+            continue
+        for table, column in user_fk_tables:
+            columns = _table_columns(con, table) if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone() else set()
+            if column in columns:
+                con.execute(f"UPDATE {table} SET {column} = ? WHERE {column} = ?", (new_user_id, old_user_id))
+
+    campaign_map: dict[str, str] = {}
+    campaign_rows = con.execute(
+        """
+        SELECT tenant_id, campaign_id FROM campaign_states
+        UNION
+        SELECT tenant_id, campaign_id FROM campaign_revisions
+        ORDER BY tenant_id ASC, campaign_id ASC
+        """
+    ).fetchall()
+    for row in campaign_rows:
+        tenant_id = str(row["tenant_id"] or "")
+        old_campaign_id = str(row["campaign_id"] or "").strip()
+        if not old_campaign_id:
+            continue
+        new_campaign_id = old_campaign_id.lower() if _is_uuid(old_campaign_id) else campaign_map.get(old_campaign_id) or _new_uuid()
+        campaign_map[old_campaign_id] = new_campaign_id
+        _store_alias(con, entity_type="campaign", scope_id=tenant_id, old_id=old_campaign_id, new_id=new_campaign_id)
+
+    for old_campaign_id, new_campaign_id in campaign_map.items():
+        if old_campaign_id == new_campaign_id:
+            continue
+        for table in ["campaign_states", "campaign_revisions", "sync_events"]:
+            columns = _table_columns(con, table) if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone() else set()
+            if "campaign_id" in columns:
+                con.execute(
+                    f"UPDATE {table} SET campaign_id = ? WHERE campaign_id = ?",
+                    (new_campaign_id, old_campaign_id),
+                )
+
+    mappings: dict[str, str] = {}
+    mappings.update({old: new for old, new in tenant_map.items() if old != new})
+    mappings.update({old: new for old, new in user_map.items() if old != new})
+    mappings.update({old: new for old, new in campaign_map.items() if old != new})
+
+    for table, pk_columns, json_column in [
+        ("users", ["tenant_id", "user_id"], "payload_json"),
+        ("sync_snapshots", ["tenant_id", "server_sync_id"], "payload_json"),
+        ("sync_snapshots", ["tenant_id", "server_sync_id"], "envelope_json"),
+        ("campaign_states", ["tenant_id", "campaign_id"], "payload_json"),
+        ("campaign_revisions", ["tenant_id", "campaign_id", "server_revision"], "payload_json"),
+        ("device_enrollment_requests", ["tenant_id", "request_id"], "decision_note"),
+        ("device_audit_log", ["id"], "payload_json"),
+        ("official_referentials", ["tenant_id", "referential_id"], "payload_json"),
+        ("official_referential_history", ["tenant_id", "history_id"], "payload_json"),
+        ("sync_events", ["id"], "payload_json"),
+        ("backup_audit_log", ["id"], "payload_json"),
+    ]:
+        if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+            _rewrite_json_column(con, table, pk_columns, json_column, mappings)
+
+    _record_migration(con, 156, "uuid_entity_ids_runtime_migration")
+    con.execute("PRAGMA foreign_keys = ON")
+
+
+def _tenant_business_label_from_alias(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "Espace de travail"
+    if raw == DEFAULT_TENANT_ID:
+        return "Défaut"
+    label = re.sub(r"[_\-.]+", " ", raw).strip()
+    if not label:
+        return "Espace de travail"
+    return " ".join(part[:1].upper() + part[1:] for part in label.split())
+
+
+def _tenant_alias_label(con: sqlite3.Connection, tenant_id: str) -> str:
+    row = con.execute(
+        """
+        SELECT old_id
+        FROM id_aliases
+        WHERE entity_type = 'tenant' AND new_id = ?
+        ORDER BY CASE WHEN old_id = ? THEN 0 ELSE 1 END, LENGTH(old_id) ASC, old_id ASC
+        LIMIT 1
+        """,
+        (tenant_id, DEFAULT_TENANT_ID),
+    ).fetchone()
+    if row is None:
+        return ""
+    return _tenant_business_label_from_alias(str(row["old_id"] or ""))
+
+
+def _is_generic_tenant_display_name(value: str, tenant_id: str = "") -> bool:
+    label = str(value or "").strip()
+    if not label:
+        return True
+    normalized = label.lower()
+    return normalized == "espace de travail" or (tenant_id and label == tenant_id)
+
+
 def _tenant_payload_from_row(con: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
     tenant_id = str(row["id"] or "")
-    display_name = str(_row_value(row, "display_name", "") or "").strip()
+    raw_display_name = str(_row_value(row, "display_name", "") or "").strip()
+    display_name = raw_display_name
+    if _is_generic_tenant_display_name(display_name, tenant_id):
+        display_name = _tenant_alias_label(con, tenant_id) or display_name
     user_count = int(
         con.execute("SELECT COUNT(*) FROM users WHERE tenant_id = ?", (tenant_id,)).fetchone()[0]
     )
@@ -816,10 +1184,10 @@ def _tenant_payload_from_row(con: sqlite3.Connection, row: sqlite3.Row) -> dict[
     return {
         "tenantId": tenant_id,
         "id": tenant_id,
-        "displayName": display_name or tenant_id,
+        "displayName": display_name or "Espace de travail",
         "description": str(_row_value(row, "description", "") or ""),
-        "permanent": bool(int(_row_value(row, "permanent", 0) or 0)) or tenant_id == DEFAULT_TENANT_ID,
-        "isDefault": tenant_id == DEFAULT_TENANT_ID,
+        "permanent": bool(int(_row_value(row, "permanent", 0) or 0)),
+        "isDefault": bool(int(_row_value(row, "permanent", 0) or 0)),
         "createdAt": row["created_at"],
         "updatedAt": row["updated_at"],
         "userCount": user_count,
@@ -830,15 +1198,50 @@ def _tenant_payload_from_row(con: sqlite3.Connection, row: sqlite3.Row) -> dict[
     }
 
 
+
+
+def _tenant_display_name(con: sqlite3.Connection, tenant_id: str) -> str:
+    safe_tenant_id = str(tenant_id or "").strip()
+    if not safe_tenant_id:
+        return "Espace de travail"
+    row = con.execute(
+        "SELECT display_name FROM tenants WHERE id = ?",
+        (safe_tenant_id,),
+    ).fetchone()
+    if row is not None:
+        display_name = str(_row_value(row, "display_name", "") or "").strip()
+        if not _is_generic_tenant_display_name(display_name, safe_tenant_id):
+            return display_name
+    alias_label = _tenant_alias_label(con, safe_tenant_id)
+    if alias_label:
+        return alias_label
+    if row is not None:
+        display_name = str(_row_value(row, "display_name", "") or "").strip()
+        if display_name and display_name != safe_tenant_id:
+            return display_name
+    return "Espace de travail"
+
+
+def _user_display_name_from_parts(first_name: Any, last_name: Any, email: Any, fallback: str = "Utilisateur") -> str:
+    parts = [str(first_name or "").strip(), str(last_name or "").strip()]
+    full_name = " ".join(part for part in parts if part)
+    email_value = str(email or "").strip()
+    if full_name and email_value:
+        return f"{full_name} <{email_value}>"
+    if full_name:
+        return full_name
+    if email_value:
+        return email_value
+    return fallback
+
 def _list_tenants(con: sqlite3.Connection) -> list[dict[str, Any]]:
     _ensure_tenant(con, DEFAULT_TENANT_ID)
     rows = con.execute(
         """
         SELECT id, created_at, updated_at, display_name, description, permanent
         FROM tenants
-        ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, id ASC
+        ORDER BY permanent DESC, display_name ASC, id ASC
         """,
-        (DEFAULT_TENANT_ID,),
     ).fetchall()
     return [_tenant_payload_from_row(con, row) for row in rows]
 
@@ -1008,19 +1411,53 @@ def _ensure_device_access_for_tenant(
 
 def _ensure_tenant(con: sqlite3.Connection, tenant_id: str) -> None:
     now = _utc_now().isoformat()
-    safe_tenant_id = _safe_segment(tenant_id, DEFAULT_TENANT_ID)
-    permanent = 1 if safe_tenant_id == DEFAULT_TENANT_ID else 0
+    requested_tenant_id = _safe_segment(tenant_id, DEFAULT_TENANT_ID)
+    resolved_tenant_id = _resolve_tenant_id(con, requested_tenant_id, DEFAULT_TENANT_ID)
+    existing = con.execute("SELECT id FROM tenants WHERE id = ?", (resolved_tenant_id,)).fetchone()
+    if existing is None:
+        resolved_tenant_id = _tenant_id_for_creation(requested_tenant_id)
+        display_name = "Défaut" if requested_tenant_id == DEFAULT_TENANT_ID else requested_tenant_id
+        permanent = 1 if requested_tenant_id == DEFAULT_TENANT_ID else 0
+        con.execute(
+            """
+            INSERT INTO tenants(id, created_at, updated_at, display_name, description, permanent)
+            VALUES (?, ?, ?, ?, '', ?)
+            """,
+            (resolved_tenant_id, now, now, display_name, permanent),
+        )
+        _store_alias(con, entity_type="tenant", old_id=requested_tenant_id, new_id=resolved_tenant_id)
+        return
+
     con.execute(
         """
-        INSERT INTO tenants(id, created_at, updated_at, display_name, description, permanent)
-        VALUES (?, ?, ?, ?, '', ?)
-        ON CONFLICT(id) DO UPDATE SET
-            updated_at = CASE WHEN tenants.updated_at = '' THEN excluded.updated_at ELSE tenants.updated_at END,
-            permanent = CASE WHEN tenants.id = ? THEN 1 ELSE tenants.permanent END
+        UPDATE tenants
+        SET updated_at = CASE WHEN updated_at = '' THEN ? ELSE updated_at END,
+            permanent = CASE WHEN ? = ? THEN 1 ELSE permanent END
+        WHERE id = ?
         """,
-        (safe_tenant_id, now, now, safe_tenant_id, permanent, DEFAULT_TENANT_ID),
+        (now, requested_tenant_id, DEFAULT_TENANT_ID, resolved_tenant_id),
     )
+    _store_alias(con, entity_type="tenant", old_id=requested_tenant_id, new_id=resolved_tenant_id)
 
+
+
+def _backfill_default_tenant_display_name(con: sqlite3.Connection) -> None:
+    default_tenant_id = _resolve_tenant_id(con, DEFAULT_TENANT_ID, DEFAULT_TENANT_ID)
+    if not default_tenant_id:
+        return
+    row = con.execute(
+        "SELECT display_name FROM tenants WHERE id = ?",
+        (default_tenant_id,),
+    ).fetchone()
+    if row is None:
+        return
+    display_name = str(_row_value(row, "display_name", "") or "").strip()
+    if _is_generic_tenant_display_name(display_name, default_tenant_id):
+        now = _utc_now().isoformat()
+        con.execute(
+            "UPDATE tenants SET display_name = ?, updated_at = ? WHERE id = ?",
+            ("Défaut", now, default_tenant_id),
+        )
 
 
 def _sync_solution_administrators_to_all_tenants(con: sqlite3.Connection) -> None:
@@ -1032,7 +1469,7 @@ def _sync_solution_administrators_to_all_tenants(con: sqlite3.Connection) -> Non
     tenant-local. Cross-tenant API authorization still relies on the original
     solution-tenant session token.
     """
-    source_tenant_id = SOLUTION_ADMIN_TENANT_ID
+    source_tenant_id = _resolve_tenant_id(con, SOLUTION_ADMIN_TENANT_ID, DEFAULT_TENANT_ID)
     if not source_tenant_id:
         return
 
@@ -1097,6 +1534,7 @@ def _sync_solution_administrators_to_all_tenants(con: sqlite3.Connection) -> Non
 def _device_from_row(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "tenantId": row["tenant_id"],
+        "tenantDisplayName": str(_row_value(row, "tenant_display_name", "") or "").strip() or "Espace de travail",
         "deviceId": row["device_id"],
         "name": row["name"],
         "platform": row["platform"],
@@ -1105,6 +1543,12 @@ def _device_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "lastSeenAt": row["last_seen_at"],
         "revokedAt": row["revoked_at"],
         "invitedByUserId": row["invited_by_user_id"],
+        "invitedByUserDisplayName": _user_display_name_from_parts(
+            _row_value(row, "invited_by_first_name", ""),
+            _row_value(row, "invited_by_last_name", ""),
+            _row_value(row, "invited_by_email", ""),
+            fallback="Utilisateur",
+        ),
         "enrollmentId": row["enrollment_id"],
     }
 
@@ -1179,10 +1623,15 @@ def _create_device(
     )
     row = con.execute(
         """
-        SELECT tenant_id, device_id, name, platform, status, created_at,
-               last_seen_at, revoked_at, invited_by_user_id, enrollment_id
-        FROM authorized_devices
-        WHERE tenant_id = ? AND device_id = ?
+        SELECT d.tenant_id, COALESCE(NULLIF(t.display_name, ''), 'Espace de travail') AS tenant_display_name,
+               d.device_id, d.name, d.platform, d.status, d.created_at,
+               d.last_seen_at, d.revoked_at, d.invited_by_user_id, d.enrollment_id,
+               u.first_name AS invited_by_first_name, u.last_name AS invited_by_last_name,
+               u.email AS invited_by_email
+        FROM authorized_devices d
+        LEFT JOIN tenants t ON t.id = d.tenant_id
+        LEFT JOIN users u ON u.tenant_id = d.tenant_id AND u.user_id = d.invited_by_user_id
+        WHERE d.tenant_id = ? AND d.device_id = ?
         """,
         (tenant_id, device_id),
     ).fetchone()
@@ -1194,15 +1643,108 @@ def _create_device(
 def _list_devices(con: sqlite3.Connection, tenant_id: str) -> list[dict[str, Any]]:
     rows = con.execute(
         """
-        SELECT tenant_id, device_id, name, platform, status, created_at,
-               last_seen_at, revoked_at, invited_by_user_id, enrollment_id
-        FROM authorized_devices
-        WHERE tenant_id = ?
-        ORDER BY status ASC, COALESCE(last_seen_at, created_at) DESC, name ASC
+        SELECT d.tenant_id, COALESCE(NULLIF(t.display_name, ''), 'Espace de travail') AS tenant_display_name,
+               d.device_id, d.name, d.platform, d.status, d.created_at,
+               d.last_seen_at, d.revoked_at, d.invited_by_user_id, d.enrollment_id,
+               u.first_name AS invited_by_first_name, u.last_name AS invited_by_last_name,
+               u.email AS invited_by_email
+        FROM authorized_devices d
+        LEFT JOIN tenants t ON t.id = d.tenant_id
+        LEFT JOIN users u ON u.tenant_id = d.tenant_id AND u.user_id = d.invited_by_user_id
+        WHERE d.tenant_id = ?
+        ORDER BY d.status ASC, COALESCE(d.last_seen_at, d.created_at) DESC, d.name ASC
         """,
         (tenant_id,),
     ).fetchall()
     return [_device_from_row(row) for row in rows]
+
+
+def _list_all_devices(con: sqlite3.Connection) -> list[dict[str, Any]]:
+    rows = con.execute(
+        """
+        SELECT d.tenant_id, COALESCE(NULLIF(t.display_name, ''), 'Espace de travail') AS tenant_display_name,
+               d.device_id, d.name, d.platform, d.status, d.created_at,
+               d.last_seen_at, d.revoked_at, d.invited_by_user_id, d.enrollment_id,
+               u.first_name AS invited_by_first_name, u.last_name AS invited_by_last_name,
+               u.email AS invited_by_email
+        FROM authorized_devices d
+        LEFT JOIN tenants t ON t.id = d.tenant_id
+        LEFT JOIN users u ON u.tenant_id = d.tenant_id AND u.user_id = d.invited_by_user_id
+        ORDER BY COALESCE(NULLIF(t.display_name, ''), 'Espace de travail') ASC, d.status ASC,
+                 COALESCE(d.last_seen_at, d.created_at) DESC, d.name ASC
+        """
+    ).fetchall()
+    return [_device_from_row(row) for row in rows]
+
+
+def _enrollment_request_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "tenantId": row["tenant_id"],
+        "tenantDisplayName": str(_row_value(row, "tenant_display_name", "") or "").strip() or "Espace de travail",
+        "requestId": row["request_id"],
+        "deviceName": row["device_name"],
+        "platform": row["platform"],
+        "requesterNote": row["requester_note"],
+        "status": row["status"],
+        "requestedAt": row["requested_at"],
+        "decidedAt": row["decided_at"],
+        "decidedByUserId": row["decided_by_user_id"],
+        "decidedByUserDisplayName": _user_display_name_from_parts(
+            _row_value(row, "decided_by_first_name", ""),
+            _row_value(row, "decided_by_last_name", ""),
+            _row_value(row, "decided_by_email", ""),
+            fallback="Utilisateur",
+        ),
+        "decisionNote": row["decision_note"],
+        "enrollmentId": row["enrollment_id"],
+    }
+
+
+def _list_device_enrollment_requests(
+    con: sqlite3.Connection,
+    tenant_id: str,
+    *,
+    include_all_tenants: bool = False,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    if include_all_tenants:
+        rows = con.execute(
+            """
+            SELECT r.tenant_id, COALESCE(NULLIF(t.display_name, ''), 'Espace de travail') AS tenant_display_name,
+                   r.request_id, r.device_name, r.platform, r.requester_note,
+                   r.status, r.requested_at, r.decided_at, r.decided_by_user_id,
+                   u.first_name AS decided_by_first_name, u.last_name AS decided_by_last_name,
+                   u.email AS decided_by_email,
+                   r.decision_note, r.enrollment_id
+            FROM device_enrollment_requests r
+            LEFT JOIN tenants t ON t.id = r.tenant_id
+            LEFT JOIN users u ON u.tenant_id = r.tenant_id AND u.user_id = r.decided_by_user_id
+            ORDER BY CASE WHEN r.status = 'pending' THEN 0 ELSE 1 END,
+                     r.requested_at DESC
+            LIMIT ?
+            """,
+            (max(1, min(limit, 500)),),
+        ).fetchall()
+    else:
+        rows = con.execute(
+            """
+            SELECT r.tenant_id, COALESCE(NULLIF(t.display_name, ''), 'Espace de travail') AS tenant_display_name,
+                   r.request_id, r.device_name, r.platform, r.requester_note,
+                   r.status, r.requested_at, r.decided_at, r.decided_by_user_id,
+                   u.first_name AS decided_by_first_name, u.last_name AS decided_by_last_name,
+                   u.email AS decided_by_email,
+                   r.decision_note, r.enrollment_id
+            FROM device_enrollment_requests r
+            LEFT JOIN tenants t ON t.id = r.tenant_id
+            LEFT JOIN users u ON u.tenant_id = r.tenant_id AND u.user_id = r.decided_by_user_id
+            WHERE r.tenant_id = ?
+            ORDER BY CASE WHEN r.status = 'pending' THEN 0 ELSE 1 END,
+                     r.requested_at DESC
+            LIMIT ?
+            """,
+            (tenant_id, max(1, min(limit, 200))),
+        ).fetchall()
+    return [_enrollment_request_from_row(row) for row in rows]
 
 
 ADRI_PILLAR_RE = re.compile(r"^RES-[1-8]$")
@@ -1715,7 +2257,9 @@ def _load_global_official_referential(
     versions of OpenIRN stored it with a tenant_id; this helper keeps backwards
     compatibility by selecting the best active row across tenants.
     """
-    preferred = _safe_segment(preferred_tenant_id, "")
+    preferred = _resolve_tenant_id(con, preferred_tenant_id, "") if preferred_tenant_id else ""
+    solution_tenant_id = _resolve_tenant_id(con, SOLUTION_ADMIN_TENANT_ID, DEFAULT_TENANT_ID)
+    default_tenant_id = _default_tenant_id(con)
     rows = con.execute(
         """
         SELECT tenant_id, referential_id, version, active, source_url, project_path,
@@ -1734,13 +2278,13 @@ def _load_global_official_referential(
             imported_at DESC
         LIMIT 1
         """,
-        (preferred, SOLUTION_ADMIN_TENANT_ID, DEFAULT_TENANT_ID),
+        (preferred, solution_tenant_id, default_tenant_id),
     ).fetchone()
     return rows
 
 
 def _load_current_official_referential(con: sqlite3.Connection, tenant_id: str) -> sqlite3.Row | None:
-    requested_tenant_id = _safe_segment(tenant_id, DEFAULT_TENANT_ID)
+    requested_tenant_id = _resolve_tenant_id(con, tenant_id, DEFAULT_TENANT_ID)
     local = con.execute(
         """
         SELECT tenant_id, referential_id, version, active, source_url, project_path,
@@ -1853,7 +2397,8 @@ def _seed_official_referential_from_default(
     official referential metadata/payload. Campaigns, users, sessions and device
     authorizations are never copied by this helper.
     """
-    target_tenant_id = _safe_segment(tenant_id, DEFAULT_TENANT_ID)
+    target_tenant_id = _resolve_tenant_id(con, tenant_id, DEFAULT_TENANT_ID)
+    source_tenant_id = _resolve_tenant_id(con, source_tenant_id, DEFAULT_TENANT_ID)
     if target_tenant_id == source_tenant_id:
         return False
 
@@ -2227,6 +2772,8 @@ def _row_to_user(row: sqlite3.Row) -> dict[str, Any]:
         payload = {}
     payload.update(
         {
+            "tenantId": row["tenant_id"],
+            "tenantDisplayName": str(_row_value(row, "tenant_display_name", "") or "").strip() or "Espace de travail",
             "id": row["user_id"],
             "firstName": row["first_name"],
             "lastName": row["last_name"],
@@ -2243,14 +2790,20 @@ def _row_to_user(row: sqlite3.Row) -> dict[str, Any]:
 def _load_central_users(con: sqlite3.Connection, tenant_id: str) -> list[dict[str, Any]]:
     rows = con.execute(
         """
-        SELECT tenant_id, user_id, first_name, last_name, email, role,
-               active, created_at, updated_at, payload_json
-        FROM users
-        WHERE tenant_id = ?
+        SELECT u.tenant_id, COALESCE(NULLIF(t.display_name, ''), 'Espace de travail') AS tenant_display_name,
+               u.user_id, u.first_name, u.last_name, u.email, u.role,
+               u.active, u.created_at, u.updated_at, u.payload_json
+        FROM users u
+        LEFT JOIN tenants t ON t.id = u.tenant_id
+        WHERE u.tenant_id = ?
         """,
         (tenant_id,),
     ).fetchall()
-    return _sort_users([_row_to_user(row) for row in rows])
+    tenant_label = _tenant_display_name(con, tenant_id)
+    users = [_row_to_user(row) for row in rows]
+    for user in users:
+        user["tenantDisplayName"] = tenant_label
+    return _sort_users(users)
 
 
 def _save_user(con: sqlite3.Connection, tenant_id: str, user: dict[str, Any]) -> None:
@@ -2478,10 +3031,13 @@ def _record_campaign_revisions(
     received_campaign_ids: set[str] = set()
 
     for raw_campaign in campaigns:
-        cid = _campaign_id(raw_campaign)
-        if not cid:
+        original_cid = _campaign_id(raw_campaign)
+        if not original_cid:
             skipped_without_id += 1
             continue
+        cid = _campaign_id_for_save(con, tenant_id, original_cid)
+        if cid != original_cid:
+            raw_campaign = _rewrite_json_ids(raw_campaign, {original_cid: cid})
         received_campaign_ids.add(cid)
 
         campaign_payload_sha256 = _json_sha256(raw_campaign)
@@ -2681,6 +3237,7 @@ def _public_campaign_state_from_row(row: sqlite3.Row) -> dict[str, Any]:
     campaign_id = str(row["campaign_id"] or "")
     return {
         "tenantId": row["tenant_id"],
+        "tenantDisplayName": str(_row_value(row, "tenant_display_name", "") or "").strip() or "Espace de travail",
         "campaignId": campaign_id,
         "campaignName": _campaign_title_from_payload(payload, campaign_id),
         "serverRevision": int(row["server_revision"] or 0),
@@ -2698,6 +3255,7 @@ def _public_campaign_revision_from_row(row: sqlite3.Row, *, include_payload: boo
     campaign_id = str(row["campaign_id"] or "")
     public = {
         "tenantId": row["tenant_id"],
+        "tenantDisplayName": str(_row_value(row, "tenant_display_name", "") or "").strip() or "Espace de travail",
         "campaignId": campaign_id,
         "campaignName": _campaign_title_from_payload(payload, campaign_id),
         "serverRevision": int(row["server_revision"] or 0),
@@ -2732,6 +3290,7 @@ def _table_counts(con: sqlite3.Connection) -> dict[str, int | None]:
         "campaign_states",
         "campaign_revisions",
         "authorized_devices",
+        "device_enrollment_requests",
         "device_enrollment_codes",
         "device_audit_log",
         "official_referentials",
@@ -3252,7 +3811,7 @@ def tenants(
     request: Request,
     tenantId: str = Query(default=DEFAULT_TENANT_ID, min_length=1, max_length=80),
 ) -> dict[str, Any]:
-    requester_tenant_id = _safe_segment(tenantId, DEFAULT_TENANT_ID)
+    requester_tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
     # Tenant discovery is intentionally public: the Flutter client must be able
     # to start without a selected tenant or session, then let the user choose
     # the workspace before checking terminal enrollment.
@@ -3286,13 +3845,11 @@ async def tenant_create(request: Request) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Payload must be a JSON object")
 
-    requester_tenant_id = _safe_segment(payload.get("requesterTenantId") or payload.get("adminTenantId") or payload.get("sourceTenantId"), DEFAULT_TENANT_ID)
+    requester_tenant_id = _resolve_tenant_id_for_request(payload.get("requesterTenantId") or payload.get("adminTenantId") or payload.get("sourceTenantId"), DEFAULT_TENANT_ID)
     auth_context = _require_admin_authorization(request, requester_tenant_id)
-    tenant_id = _safe_tenant_id_for_creation(payload.get("tenantId"))
-    if tenant_id == DEFAULT_TENANT_ID:
-        raise HTTPException(status_code=409, detail="L’espace par défaut est permanent et existe déjà")
+    tenant_id = _tenant_id_for_creation(payload.get("tenantId"))
 
-    display_name = str(payload.get("displayName") or payload.get("name") or tenant_id).strip()[:160]
+    display_name = str(payload.get("displayName") or payload.get("name") or "Nouvel espace de travail").strip()[:160]
     description = str(payload.get("description") or "").strip()[:500]
     pilot_payload = payload.get("pilot")
     if not isinstance(pilot_payload, dict):
@@ -3308,7 +3865,7 @@ async def tenant_create(request: Request) -> dict[str, Any]:
 
     now = _utc_now().isoformat()
     pilot_user = {
-        "id": str(pilot_payload.get("id") or f"pilot-{uuid.uuid4().hex[:12]}").strip()[:120],
+        "id": _normalize_uuid(pilot_payload.get("id")) or _new_uuid(),
         "firstName": pilot_first_name,
         "lastName": pilot_last_name,
         "email": pilot_email,
@@ -3360,7 +3917,7 @@ async def tenant_create(request: Request) -> dict[str, Any]:
                 device_id=device_id,
                 payload={
                     "tenantId": tenant_id,
-                    "displayName": display_name or tenant_id,
+                    "displayName": display_name or "Espace de travail",
                     "pilotUserId": pilot_user["id"],
                     "actorUserId": actor_user_id,
                 },
@@ -3396,7 +3953,7 @@ async def tenant_update(tenant_id: str, request: Request) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Payload must be a JSON object")
 
-    target_tenant_id = _safe_segment(tenant_id, DEFAULT_TENANT_ID)
+    target_tenant_id = _resolve_tenant_id_for_request(tenant_id, DEFAULT_TENANT_ID)
     auth_context = _require_admin_authorization(request, target_tenant_id)
     display_name = str(payload.get("displayName") or payload.get("name") or "").strip()
     if not display_name:
@@ -3460,20 +4017,94 @@ async def tenant_update(tenant_id: str, request: Request) -> dict[str, Any]:
 def devices(
     request: Request,
     tenantId: str = Query(default="default", min_length=1, max_length=80),
+    allTenants: bool = Query(default=False),
 ) -> dict[str, Any]:
-    tenant_id = _safe_segment(tenantId, "default")
-    _require_admin_authorization(request, tenant_id)
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
+    auth_context = _require_campaign_manager_authorization(request, tenant_id)
+    include_all_tenants = bool(allTenants and _is_administrator_context(auth_context))
     with _db() as con:
         _ensure_tenant(con, tenant_id)
-        devices_list = _list_devices(con, tenant_id)
+        devices_list = _list_all_devices(con) if include_all_tenants else _list_devices(con, tenant_id)
+        requests_list = _list_device_enrollment_requests(
+            con,
+            tenant_id,
+            include_all_tenants=include_all_tenants,
+        )
+        tenant_display_name = _tenant_display_name(con, tenant_id)
         con.commit()
     return {
         "status": "ok",
         "type": "openirn.devices",
         "tenantId": tenant_id,
+        "tenantDisplayName": tenant_display_name,
+        "scope": "all_tenants" if include_all_tenants else "tenant",
         "deviceCount": len(devices_list),
+        "enrollmentRequestCount": len(requests_list),
         "devices": devices_list,
+        "enrollmentRequests": requests_list,
         "serverTime": _utc_now().isoformat(),
+    }
+
+
+@app.post("/devices/enrollment/request")
+async def devices_enrollment_request(request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
+    device_name = str(payload.get("deviceName") or "").strip()[:120] or "Terminal OpenIRN"
+    platform = str(payload.get("platform") or "").strip()[:80]
+    requester_note = str(payload.get("note") or payload.get("requesterNote") or "").strip()[:500]
+    request_id = f"enrollment_request_{uuid.uuid4().hex}"
+    now = _utc_now().isoformat()
+
+    with _db() as con:
+        tenant_exists = con.execute("SELECT 1 FROM tenants WHERE id = ?", (tenant_id,)).fetchone()
+        if tenant_exists is None:
+            raise HTTPException(status_code=404, detail="Espace de travail introuvable")
+        con.execute(
+            """
+            INSERT INTO device_enrollment_requests(
+                tenant_id, request_id, device_name, platform, requester_note,
+                requester_ip, status, requested_at, decided_at, decided_by_user_id,
+                decision_note, enrollment_id
+            ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, NULL, NULL, '', NULL)
+            """,
+            (
+                tenant_id,
+                request_id,
+                device_name,
+                platform,
+                requester_note,
+                _request_client_ip(request),
+                now,
+            ),
+        )
+        _record_device_audit(
+            con,
+            tenant_id,
+            "enrollment_request.created",
+            payload={
+                "requestId": request_id,
+                "deviceName": device_name,
+                "platform": platform,
+            },
+        )
+        con.commit()
+
+    return {
+        "status": "pending",
+        "type": "openirn.deviceEnrollmentRequest",
+        "tenantId": tenant_id,
+        "requestId": request_id,
+        "deviceName": device_name,
+        "platform": platform,
+        "serverTime": _utc_now().isoformat(),
+        "message": "Demande d’autorisation envoyée. Un Pilote IRN ou un administrateur doit maintenant la traiter.",
     }
 
 
@@ -3486,8 +4117,8 @@ async def devices_enrollment(request: Request) -> dict[str, Any]:
     if not isinstance(payload, dict):
         payload = {}
 
-    tenant_id = _safe_segment(payload.get("tenantId"), "default")
-    _require_admin_authorization(request, tenant_id)
+    tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
+    _require_campaign_manager_authorization(request, tenant_id)
     created_by_user_id = str(payload.get("createdByUserId") or "").strip()[:120]
     label = str(payload.get("label") or "").strip()[:120]
     allowed_expiration_minutes = {5, 10, 15}
@@ -3558,6 +4189,183 @@ async def devices_enrollment(request: Request) -> dict[str, Any]:
     }
 
 
+@app.post("/devices/enrollment/requests/{request_id}/approve")
+async def devices_enrollment_request_approve(request_id: str, request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
+    auth_context = _require_campaign_manager_authorization(request, tenant_id)
+    actor_user_id = str(auth_context.get("userId") or "server").strip()[:120]
+    allowed_expiration_minutes = {5, 10, 15}
+    try:
+        expires_in_minutes = int(payload.get("expiresInMinutes") or 15)
+    except (TypeError, ValueError):
+        expires_in_minutes = 15
+    if expires_in_minutes not in allowed_expiration_minutes:
+        expires_in_minutes = 15
+
+    raw_code = _new_enrollment_code()
+    display_code = _format_enrollment_code(raw_code)
+    normalized_code = _normalize_enrollment_code(raw_code)
+    enrollment_id = f"enrollment_{uuid.uuid4().hex}"
+    now = _utc_now()
+    expires_at = now + timedelta(minutes=expires_in_minutes)
+
+    with _db() as con:
+        with con:
+            row = con.execute(
+                """
+                SELECT tenant_id, request_id, device_name, platform, status
+                FROM device_enrollment_requests
+                WHERE tenant_id = ? AND request_id = ?
+                """,
+                (tenant_id, request_id),
+            ).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Demande d’enrôlement introuvable")
+            if str(row["status"] or "") != "pending":
+                raise HTTPException(status_code=409, detail="Cette demande a déjà été traitée")
+            label = f"Demande {request_id} — {row['device_name']}"[:120]
+            con.execute(
+                """
+                INSERT INTO device_enrollment_codes(
+                    tenant_id, enrollment_id, code_hash, created_by_user_id, label,
+                    expires_at, consumed_at, consumed_by_device_id, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?)
+                """,
+                (
+                    tenant_id,
+                    enrollment_id,
+                    _enrollment_code_hash(tenant_id, normalized_code),
+                    actor_user_id,
+                    label,
+                    expires_at.isoformat(),
+                    now.isoformat(),
+                ),
+            )
+            con.execute(
+                """
+                UPDATE device_enrollment_requests
+                SET status = 'approved', decided_at = ?, decided_by_user_id = ?,
+                    decision_note = ?, enrollment_id = ?
+                WHERE tenant_id = ? AND request_id = ?
+                """,
+                (
+                    now.isoformat(),
+                    actor_user_id,
+                    str(payload.get("decisionNote") or "").strip()[:500],
+                    enrollment_id,
+                    tenant_id,
+                    request_id,
+                ),
+            )
+            _record_device_audit(
+                con,
+                tenant_id,
+                "enrollment_request.approved",
+                payload={
+                    "requestId": request_id,
+                    "enrollmentId": enrollment_id,
+                    "actorUserId": actor_user_id,
+                    "expiresAt": expires_at.isoformat(),
+                },
+            )
+            requests_list = _list_device_enrollment_requests(con, tenant_id)
+            devices_list = _list_devices(con, tenant_id)
+
+    qr_payload = {
+        "type": "openirn.deviceEnrollment",
+        "tenantId": tenant_id,
+        "code": display_code,
+        "enrollmentId": enrollment_id,
+        "expiresAt": expires_at.isoformat(),
+    }
+    return {
+        "status": "approved",
+        "type": "openirn.deviceEnrollmentRequestApproved",
+        "tenantId": tenant_id,
+        "requestId": request_id,
+        "enrollmentId": enrollment_id,
+        "code": display_code,
+        "expiresAt": expires_at.isoformat(),
+        "expiresInMinutes": expires_in_minutes,
+        "qrPayload": qr_payload,
+        "qrPayloadText": _canonical_json(qr_payload),
+        "devices": devices_list,
+        "enrollmentRequests": requests_list,
+        "serverTime": _utc_now().isoformat(),
+        "message": "Demande approuvée. Le code d’appairage peut être transmis au demandeur.",
+    }
+
+
+@app.post("/devices/enrollment/requests/{request_id}/reject")
+async def devices_enrollment_request_reject(request_id: str, request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
+    auth_context = _require_campaign_manager_authorization(request, tenant_id)
+    actor_user_id = str(auth_context.get("userId") or "server").strip()[:120]
+    now = _utc_now().isoformat()
+
+    with _db() as con:
+        with con:
+            row = con.execute(
+                """
+                SELECT status FROM device_enrollment_requests
+                WHERE tenant_id = ? AND request_id = ?
+                """,
+                (tenant_id, request_id),
+            ).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Demande d’enrôlement introuvable")
+            if str(row["status"] or "") != "pending":
+                raise HTTPException(status_code=409, detail="Cette demande a déjà été traitée")
+            con.execute(
+                """
+                UPDATE device_enrollment_requests
+                SET status = 'rejected', decided_at = ?, decided_by_user_id = ?,
+                    decision_note = ?
+                WHERE tenant_id = ? AND request_id = ?
+                """,
+                (
+                    now,
+                    actor_user_id,
+                    str(payload.get("decisionNote") or "").strip()[:500],
+                    tenant_id,
+                    request_id,
+                ),
+            )
+            _record_device_audit(
+                con,
+                tenant_id,
+                "enrollment_request.rejected",
+                payload={"requestId": request_id, "actorUserId": actor_user_id},
+            )
+            requests_list = _list_device_enrollment_requests(con, tenant_id)
+            devices_list = _list_devices(con, tenant_id)
+
+    return {
+        "status": "rejected",
+        "type": "openirn.deviceEnrollmentRequestRejected",
+        "tenantId": tenant_id,
+        "requestId": request_id,
+        "devices": devices_list,
+        "enrollmentRequests": requests_list,
+        "serverTime": _utc_now().isoformat(),
+        "message": "Demande refusée.",
+    }
+
+
 @app.post("/devices/enrollment/consume")
 async def devices_enrollment_consume(request: Request) -> dict[str, Any]:
     try:
@@ -3567,7 +4375,7 @@ async def devices_enrollment_consume(request: Request) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
-    tenant_id = _safe_segment(payload.get("tenantId"), "default")
+    tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
     code = _normalize_enrollment_code(payload.get("code"))
     if len(code) < 8:
         raise HTTPException(status_code=400, detail="Invalid enrollment code")
@@ -3612,6 +4420,14 @@ async def devices_enrollment_consume(request: Request) -> dict[str, Any]:
             """,
             (now.isoformat(), device["deviceId"], tenant_id, enrollment["enrollment_id"]),
         )
+        con.execute(
+            """
+            UPDATE device_enrollment_requests
+            SET status = 'consumed'
+            WHERE tenant_id = ? AND enrollment_id = ? AND status = 'approved'
+            """,
+            (tenant_id, enrollment["enrollment_id"]),
+        )
         _record_device_audit(
             con,
             tenant_id,
@@ -3643,8 +4459,8 @@ async def device_rename(device_id: str, request: Request) -> dict[str, Any]:
         payload = {}
     if not isinstance(payload, dict):
         payload = {}
-    tenant_id = _safe_segment(payload.get("tenantId"), "default")
-    _require_admin_authorization(request, tenant_id)
+    tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
+    _require_campaign_manager_authorization(request, tenant_id)
     name = str(payload.get("name") or "").strip()[:120]
     if not name:
         raise HTTPException(status_code=400, detail="Missing device name")
@@ -3685,8 +4501,8 @@ def device_revoke(
     request: Request,
     tenantId: str = Query(default="default", min_length=1, max_length=80),
 ) -> dict[str, Any]:
-    tenant_id = _safe_segment(tenantId, "default")
-    _require_admin_authorization(request, tenant_id)
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
+    _require_campaign_manager_authorization(request, tenant_id)
     now = _utc_now().isoformat()
     with _db() as con:
         row = con.execute(
@@ -3727,7 +4543,7 @@ def official_referential_status(
     request: Request,
     tenantId: str = Query(default="default", min_length=1, max_length=80),
 ) -> dict[str, Any]:
-    tenant_id = _safe_segment(tenantId, "default")
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
     _require_admin_authorization(request, tenant_id)
     remote = _official_remote_latest()
     with _db() as con:
@@ -3768,7 +4584,7 @@ def official_referential_current(
     request: Request,
     tenantId: str = Query(default="default", min_length=1, max_length=80),
 ) -> dict[str, Any]:
-    tenant_id = _safe_segment(tenantId, "default")
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
     if not _request_has_api_authorization(request):
         _require_active_device(request, tenant_id)
     with _db() as con:
@@ -3801,7 +4617,7 @@ def official_referential_history(
     tenantId: str = Query(default="default", min_length=1, max_length=80),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> dict[str, Any]:
-    tenant_id = _safe_segment(tenantId, "default")
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
     _require_admin_authorization(request, tenant_id)
     with _db() as con:
         _ensure_tenant(con, tenant_id)
@@ -3830,7 +4646,7 @@ async def official_referential_update(request: Request) -> dict[str, Any]:
     if not isinstance(payload, dict):
         payload = {}
 
-    tenant_id = _safe_segment(payload.get("tenantId"), "default")
+    tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
     auth_context = _require_admin_authorization(request, tenant_id)
     force = payload.get("force") is True
     triggered_by_user_id = (
@@ -3986,7 +4802,7 @@ async def sync_push(request: Request) -> dict[str, Any]:
     if not isinstance(sync_context, dict):
         raise HTTPException(status_code=400, detail="Missing sync context")
 
-    tenant_id = _safe_segment(sync_context.get("tenantId"), "default")
+    tenant_id = _resolve_tenant_id_for_request(sync_context.get("tenantId"), DEFAULT_TENANT_ID)
     _require_write_authorization(request, tenant_id)
     device_id = _safe_segment(sync_context.get("deviceId"), "unknown-device")
     campaigns = _extract_campaigns(payload)
@@ -4080,7 +4896,7 @@ async def auth_verify(request: Request) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Payload must be a JSON object")
 
-    tenant_id = _safe_segment(payload.get("tenantId"), "default")
+    tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
     user_id = str(payload.get("userId") or "").strip()
     pin = str(payload.get("pin") or "")
     device_id = _require_active_device(request, tenant_id, payload)
@@ -4370,7 +5186,7 @@ def security_audit(
     includeAuthAttempts: bool = Query(default=True),
     includeDeviceAudit: bool = Query(default=True),
 ) -> dict[str, Any]:
-    tenant_id = _safe_segment(tenantId, "default")
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
     _require_admin_authorization(request, tenant_id)
     safe_limit = max(25, min(int(limit), 500))
     events: list[dict[str, Any]] = []
@@ -4460,7 +5276,7 @@ def revoke_current_auth_session(
     request: Request,
     tenantId: str = Query(default="default", min_length=1, max_length=80),
 ) -> dict[str, Any]:
-    tenant_id = _safe_segment(tenantId, "default")
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
     provided_token = _extract_bearer_token(request)
     if not provided_token or not provided_token.startswith("ost_"):
         raise HTTPException(status_code=401, detail="Session courante requise")
@@ -4530,7 +5346,7 @@ def auth_sessions(
     tenantId: str = Query(default="default", min_length=1, max_length=80),
     includeInactive: bool = Query(default=True),
 ) -> dict[str, Any]:
-    tenant_id = _safe_segment(tenantId, "default")
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
     _require_admin_authorization(request, tenant_id)
     provided_token = _extract_bearer_token(request)
     current_token_hash = _secret_hash(provided_token) if provided_token.startswith("ost_") else ""
@@ -4606,7 +5422,7 @@ def revoke_auth_session(
     request: Request,
     tenantId: str = Query(default="default", min_length=1, max_length=80),
 ) -> dict[str, Any]:
-    tenant_id = _safe_segment(tenantId, "default")
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
     safe_session_id = str(session_id or "").strip()[:160]
     if not safe_session_id:
         raise HTTPException(status_code=400, detail="Missing session id")
@@ -4660,14 +5476,40 @@ def revoke_auth_session(
 
 
 @app.get("/users")
-def users(request: Request, tenantId: str = Query(default="default", min_length=1, max_length=80)) -> dict[str, Any]:
-    tenant_id = _safe_segment(tenantId, "default")
-    _require_device_or_authorized_read(request, tenant_id)
+def users(
+    request: Request,
+    tenantId: str = Query(default="default", min_length=1, max_length=80),
+    allTenants: bool = Query(default=False),
+) -> dict[str, Any]:
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
+    include_all_tenants = False
+    if allTenants:
+        auth_context = _require_admin_authorization(request, tenant_id)
+        include_all_tenants = _is_administrator_context(auth_context)
+        if not include_all_tenants:
+            raise HTTPException(status_code=403, detail="La vue multi-espaces est réservée à l’administrateur")
+    else:
+        _require_device_or_authorized_read(request, tenant_id)
 
     with _db() as con:
         _ensure_tenant(con, tenant_id)
-        central_users = _load_central_users(con, tenant_id)
-        _ensure_user_credentials(con, tenant_id, central_users)
+        if include_all_tenants:
+            rows = con.execute(
+                """
+                SELECT u.tenant_id, COALESCE(NULLIF(t.display_name, ''), 'Espace de travail') AS tenant_display_name,
+                       u.user_id, u.first_name, u.last_name, u.email, u.role,
+                       u.active, u.created_at, u.updated_at, u.payload_json
+                FROM users u
+                LEFT JOIN tenants t ON t.id = u.tenant_id
+                ORDER BY COALESCE(NULLIF(t.display_name, ''), 'Espace de travail') ASC, u.active DESC,
+                         u.last_name ASC, u.first_name ASC, u.email ASC
+                """
+            ).fetchall()
+            central_users = _sort_users([_row_to_user(row) for row in rows])
+        else:
+            central_users = _load_central_users(con, tenant_id)
+            _ensure_user_credentials(con, tenant_id, central_users)
+        tenant_display_name = _tenant_display_name(con, tenant_id)
         con.commit()
 
     return {
@@ -4676,6 +5518,8 @@ def users(request: Request, tenantId: str = Query(default="default", min_length=
         "application": "OpenIRN API",
         "version": APP_VERSION,
         "tenantId": tenant_id,
+        "tenantDisplayName": tenant_display_name,
+        "scope": "all_tenants" if include_all_tenants else "tenant",
         "serverTime": _utc_now().isoformat(),
         "userCount": len(central_users),
         "users": central_users,
@@ -4692,15 +5536,18 @@ async def users_replace(request: Request) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Payload must be a JSON object")
 
-    tenant_id = _safe_segment(payload.get("tenantId"), "default")
-    auth_context = _require_admin_authorization(request, tenant_id)
+    tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
+    auth_context = _require_campaign_manager_authorization(request, tenant_id)
     triggered_by_user_id = str(auth_context.get("userId") or "").strip()
     raw_users = payload.get("users")
     if not isinstance(raw_users, list):
         raise HTTPException(status_code=400, detail="Missing users array")
 
     users_to_save = [user for raw_user in raw_users if (user := _sanitize_user(raw_user))]
-    user_ids = {user["id"] for user in users_to_save}
+    if _role_normalize(auth_context.get("userRole")) != "administrator" and any(
+        user.get("role") == "administrator" for user in users_to_save
+    ):
+        raise HTTPException(status_code=403, detail="Un Pilote IRN ne peut pas créer ou modifier un profil Administrateur")
     protective_backup = _create_protective_backup(
         tenant_id,
         reason="pre_users_replace",
@@ -4710,8 +5557,17 @@ async def users_replace(request: Request) -> dict[str, Any]:
     with _db() as con:
         with con:
             _ensure_tenant(con, tenant_id)
+            resolved_users: list[dict[str, Any]] = []
             for user in users_to_save:
+                original_user_id = str(user.get("id") or "").strip()
+                resolved_user_id = _user_id_for_save(con, tenant_id, original_user_id)
+                if resolved_user_id != original_user_id:
+                    user = dict(user)
+                    user["id"] = resolved_user_id
+                resolved_users.append(user)
                 _save_user(con, tenant_id, user)
+            users_to_save = resolved_users
+            user_ids = {user["id"] for user in users_to_save}
             if user_ids:
                 placeholders = ",".join("?" for _ in user_ids)
                 con.execute(
@@ -4744,13 +5600,22 @@ async def users_pin(request: Request) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Payload must be a JSON object")
 
-    tenant_id = _safe_segment(payload.get("tenantId"), "default")
-    auth_context = _require_admin_authorization(request, tenant_id)
+    tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
+    auth_context = _require_campaign_manager_authorization(request, tenant_id)
     triggered_by_user_id = str(auth_context.get("userId") or "").strip()
     user_id = str(payload.get("userId") or "").strip()
     pin = str(payload.get("pin") or payload.get("newPin") or "").strip()
     if not user_id:
         raise HTTPException(status_code=400, detail="Missing userId")
+
+    if _role_normalize(auth_context.get("userRole")) != "administrator":
+        with _db() as con:
+            target = con.execute(
+                "SELECT role FROM users WHERE tenant_id = ? AND user_id = ?",
+                (tenant_id, user_id),
+            ).fetchone()
+            if target is not None and _role_normalize(target["role"]) == "administrator":
+                raise HTTPException(status_code=403, detail="Un Pilote IRN ne peut pas modifier le code d’un Administrateur")
 
     protective_backup = _create_protective_backup(
         tenant_id,
@@ -4778,7 +5643,7 @@ async def users_pin(request: Request) -> dict[str, Any]:
 
 @app.get("/sync/status")
 def sync_status(request: Request, tenantId: str = Query(default="default", min_length=1, max_length=80)) -> dict[str, Any]:
-    tenant_id = _safe_segment(tenantId, "default")
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
     _require_sync_read_access(request, tenant_id)
 
     with _db() as con:
@@ -4836,7 +5701,7 @@ def sync_pull(
     tenantId: str = Query(default="default", min_length=1, max_length=80),
     limit: int = Query(default=10, ge=1, le=50),
 ) -> dict[str, Any]:
-    tenant_id = _safe_segment(tenantId, "default")
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
     _require_sync_read_access(request, tenant_id)
 
     with _db() as con:
@@ -4877,7 +5742,7 @@ def campaigns(
     tenantId: str = Query(default="default", min_length=1, max_length=80),
     limit: int = Query(default=100, ge=1, le=500),
 ) -> dict[str, Any]:
-    tenant_id = _safe_segment(tenantId, "default")
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
     _require_sync_read_access(request, tenant_id)
 
     with _db() as con:
@@ -4929,7 +5794,7 @@ def campaign_revisions(
     campaignId: str = Query(min_length=1, max_length=240),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> dict[str, Any]:
-    tenant_id = _safe_segment(tenantId, "default")
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
     _require_campaign_manager_authorization(request, tenant_id)
     campaign_id = str(campaignId or "").strip()
 
@@ -4982,7 +5847,7 @@ def campaign_conflicts(
     campaignId: str = Query(default="", max_length=240),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> dict[str, Any]:
-    tenant_id = _safe_segment(tenantId, "default")
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
     _require_campaign_manager_authorization(request, tenant_id)
     campaign_id = str(campaignId or "").strip()
 
@@ -5035,7 +5900,7 @@ def campaign_revision(
     campaignId: str = Query(min_length=1, max_length=240),
     serverRevision: int = Query(ge=1),
 ) -> dict[str, Any]:
-    tenant_id = _safe_segment(tenantId, "default")
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
     _require_campaign_manager_authorization(request, tenant_id)
     campaign_id = str(campaignId or "").strip()
 
@@ -5076,7 +5941,7 @@ async def campaign_restore(request: Request) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Payload must be a JSON object")
 
-    tenant_id = _safe_segment(payload.get("tenantId"), "default")
+    tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
     auth_context = _require_campaign_manager_authorization(request, tenant_id)
     campaign_id = str(payload.get("campaignId") or "").strip()
     restored_by_user_id = str(payload.get("restoredByUserId") or "").strip()
@@ -5293,7 +6158,7 @@ def maintenance_status(
     tenantId: str = Query(default="default", min_length=1, max_length=80),
     limit: int = Query(default=10, ge=1, le=50),
 ) -> dict[str, Any]:
-    tenant_id = _safe_segment(tenantId or request.headers.get("x-openirn-tenant-id"), "default")
+    tenant_id = _resolve_tenant_id_for_request(tenantId or request.headers.get("x-openirn-tenant-id"), DEFAULT_TENANT_ID)
     _require_admin_authorization(request, tenant_id)
     return _maintenance_status(limit=limit, tenant_id=tenant_id)
 
@@ -5306,7 +6171,7 @@ async def maintenance_backup(request: Request) -> dict[str, Any]:
         payload = {}
     if not isinstance(payload, dict):
         payload = {}
-    tenant_id = _safe_segment(payload.get("tenantId") or request.headers.get("x-openirn-tenant-id"), "default")
+    tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId") or request.headers.get("x-openirn-tenant-id"), DEFAULT_TENANT_ID)
     auth_context = _require_admin_authorization(request, tenant_id)
     triggered_by_user_id = (
         str(payload.get("triggeredByUserId") or "").strip()
@@ -5338,7 +6203,7 @@ async def maintenance_restore_backup(backup_name: str, request: Request) -> dict
         payload = {}
     if not isinstance(payload, dict):
         payload = {}
-    tenant_id = _safe_segment(payload.get("tenantId") or request.headers.get("x-openirn-tenant-id"), "default")
+    tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId") or request.headers.get("x-openirn-tenant-id"), DEFAULT_TENANT_ID)
     auth_context = _require_admin_authorization(request, tenant_id)
     triggered_by_user_id = (
         str(payload.get("triggeredByUserId") or "").strip()
@@ -5367,7 +6232,7 @@ def maintenance_delete_backup(
     request: Request,
     tenantId: str = Query(default="default", min_length=1, max_length=80),
 ) -> dict[str, Any]:
-    tenant_id = _safe_segment(tenantId or request.headers.get("x-openirn-tenant-id"), "default")
+    tenant_id = _resolve_tenant_id_for_request(tenantId or request.headers.get("x-openirn-tenant-id"), DEFAULT_TENANT_ID)
     auth_context = _require_admin_authorization(request, tenant_id)
     deletion = _delete_sqlite_backup(
         backup_name,
@@ -5392,7 +6257,7 @@ async def sync_events(
     since: str = Query(default="", max_length=120),
     interval: float = Query(default=2.0, ge=1.0, le=30.0),
 ) -> StreamingResponse:
-    tenant_id = _safe_segment(tenantId, "default")
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
     _require_sync_read_access(request, tenant_id)
     last_server_sync_id = str(since or "").strip()
 

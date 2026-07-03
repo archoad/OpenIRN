@@ -3,13 +3,16 @@ import 'package:flutter/material.dart';
 import '../../data/api/openirn_api_client.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/app_user.dart';
+import '../../domain/models/sync_configuration.dart';
 import '../../domain/services/app_sync_coordinator.dart';
 import '../common/openirn_app_bar.dart';
 import '../common/responsive_autofocus.dart';
 import '../common/responsive_dialog.dart';
 
 class UserListScreen extends StatefulWidget {
-  const UserListScreen({super.key});
+  final AppUser activeUser;
+
+  const UserListScreen({required this.activeUser, super.key});
 
   @override
   State<UserListScreen> createState() => _UserListScreenState();
@@ -22,6 +25,9 @@ class _UserListScreenState extends State<UserListScreen> {
   late Future<_UserListStateData> _usersFuture;
   int _lastAppliedSyncSerial = 0;
   bool _working = false;
+
+  bool get _isSolutionAdministrator =>
+      widget.activeUser.role == AppUserRole.administrator;
 
   @override
   void initState() {
@@ -64,6 +70,7 @@ class _UserListScreenState extends State<UserListScreen> {
       baseUrl: configuration.apiBaseUrl,
       tenantId: configuration.tenantId,
       apiToken: configuration.apiToken,
+      allTenants: _isSolutionAdministrator,
     );
 
     if (centralUsers.isAvailable ||
@@ -71,7 +78,9 @@ class _UserListScreenState extends State<UserListScreen> {
       return _UserListStateData(
         users: centralUsers.users,
         serverAvailable: true,
-        sourceLabel: 'Base centrale serveur',
+        sourceLabel: _isSolutionAdministrator
+            ? 'Base centrale serveur · tous les espaces'
+            : 'Base centrale serveur',
         sourceMessage: centralUsers.message,
         apiBaseUrl: configuration.apiBaseUrl,
         tenantId: configuration.tenantId,
@@ -98,7 +107,9 @@ class _UserListScreenState extends State<UserListScreen> {
     await _usersFuture;
   }
 
-  Future<_UserListStateData> _loadWritableCentralUsers() async {
+  Future<_UserListStateData> _loadWritableCentralUsers({
+    String? tenantId,
+  }) async {
     final configuration = await _syncConfigurationRepository
         .loadConfiguration();
     if (!configuration.isConfigured) {
@@ -107,9 +118,14 @@ class _UserListScreenState extends State<UserListScreen> {
       );
     }
 
+    final requestedTenantId = tenantId?.trim() ?? '';
+    final targetTenantId = requestedTenantId.isEmpty
+        ? configuration.tenantId
+        : requestedTenantId;
+
     final centralUsers = await _apiClient.loadUsers(
       baseUrl: configuration.apiBaseUrl,
-      tenantId: configuration.tenantId,
+      tenantId: targetTenantId,
       apiToken: configuration.apiToken,
     );
 
@@ -126,13 +142,14 @@ class _UserListScreenState extends State<UserListScreen> {
       sourceLabel: 'Base centrale serveur',
       sourceMessage: centralUsers.message,
       apiBaseUrl: configuration.apiBaseUrl,
-      tenantId: configuration.tenantId,
+      tenantId: targetTenantId,
       apiToken: configuration.apiToken,
     );
   }
 
   Future<void> _replaceCentralUsers(
     List<AppUser> users, {
+    required String tenantId,
     required String successMessage,
   }) async {
     setState(() {
@@ -148,9 +165,12 @@ class _UserListScreenState extends State<UserListScreen> {
         );
       }
 
+      final targetTenantId = tenantId.trim().isEmpty
+          ? configuration.tenantId
+          : tenantId.trim();
       final result = await _apiClient.replaceUsers(
         baseUrl: configuration.apiBaseUrl,
-        tenantId: configuration.tenantId,
+        tenantId: targetTenantId,
         apiToken: configuration.apiToken,
         users: users,
       );
@@ -187,7 +207,8 @@ class _UserListScreenState extends State<UserListScreen> {
   Future<void> _createUser() async {
     final result = await showDialog<_UserFormResult>(
       context: context,
-      builder: (_) => const _UserDialog(),
+      builder: (_) =>
+          _UserDialog(allowAdministratorRole: _isSolutionAdministrator),
     );
     if (result == null) {
       return;
@@ -210,10 +231,12 @@ class _UserListScreenState extends State<UserListScreen> {
         lastName: result.lastName,
         email: normalizedEmail,
         role: result.role,
+        tenantId: state.tenantId,
       );
 
       await _replaceCentralUsers(
         <AppUser>[...state.users, user],
+        tenantId: state.tenantId,
         successMessage:
             'Utilisateur créé et synchronisé immédiatement avec le serveur.',
       );
@@ -230,14 +253,18 @@ class _UserListScreenState extends State<UserListScreen> {
   Future<void> _editUser(AppUser user) async {
     final result = await showDialog<_UserFormResult>(
       context: context,
-      builder: (_) => _UserDialog(user: user),
+      builder: (_) => _UserDialog(
+        user: user,
+        allowAdministratorRole: _isSolutionAdministrator,
+      ),
     );
     if (result == null) {
       return;
     }
 
     try {
-      final state = await _loadWritableCentralUsers();
+      final targetTenantId = _targetTenantIdForUser(user);
+      final state = await _loadWritableCentralUsers(tenantId: targetTenantId);
       final normalizedEmail = result.email.trim().toLowerCase();
       final duplicate = state.users.any(
         (candidate) =>
@@ -262,6 +289,7 @@ class _UserListScreenState extends State<UserListScreen> {
               email: normalizedEmail,
               role: result.role,
               updatedAt: DateTime.now().toUtc(),
+              tenantId: state.tenantId,
             );
           })
           .toList(growable: false);
@@ -274,6 +302,7 @@ class _UserListScreenState extends State<UserListScreen> {
 
       await _replaceCentralUsers(
         updatedUsers,
+        tenantId: state.tenantId,
         successMessage:
             'Utilisateur modifié et synchronisé immédiatement avec le serveur.',
       );
@@ -312,7 +341,7 @@ class _UserListScreenState extends State<UserListScreen> {
 
     final result = await _apiClient.updateUserPin(
       baseUrl: state.apiBaseUrl,
-      tenantId: state.tenantId,
+      tenantId: _targetTenantIdForUser(user, fallback: state.tenantId),
       apiToken: state.apiToken,
       userId: user.id,
       pin: pin,
@@ -357,7 +386,8 @@ class _UserListScreenState extends State<UserListScreen> {
     }
 
     try {
-      final state = await _loadWritableCentralUsers();
+      final targetTenantId = _targetTenantIdForUser(user);
+      final state = await _loadWritableCentralUsers(tenantId: targetTenantId);
       final updatedUsers = state.users
           .where((candidate) => candidate.id != user.id)
           .toList(growable: false);
@@ -369,6 +399,7 @@ class _UserListScreenState extends State<UserListScreen> {
 
       await _replaceCentralUsers(
         updatedUsers,
+        tenantId: state.tenantId,
         successMessage:
             'Utilisateur supprimé et synchronisé immédiatement avec le serveur.',
       );
@@ -382,11 +413,25 @@ class _UserListScreenState extends State<UserListScreen> {
     }
   }
 
+  String _targetTenantIdForUser(AppUser user, {String fallback = ''}) {
+    final userTenantId = user.tenantId.trim();
+    if (userTenantId.isNotEmpty) {
+      return userTenantId;
+    }
+    final fallbackTenantId = fallback.trim();
+    if (fallbackTenantId.isNotEmpty) {
+      return fallbackTenantId;
+    }
+    return SyncConfiguration.defaultTenantId;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: OpenIrnAppBar(
-        title: 'Utilisateurs',
+        title: _isSolutionAdministrator
+            ? 'Utilisateurs — tous les espaces'
+            : 'Utilisateurs',
         actions: [
           OpenIrnAppBarAction(
             id: 'refresh_users',
@@ -433,6 +478,7 @@ class _UserListScreenState extends State<UserListScreen> {
                   return _UserCard(
                     user: user,
                     centralPinsAvailable: serverAvailable,
+                    showTenant: _isSolutionAdministrator,
                     onEdit: serverAvailable && !_working
                         ? () => _editUser(user)
                         : null,
@@ -503,7 +549,7 @@ class _IntroCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             const Text(
-              'Les administrateurs et pilotes IRN modifient ici la base utilisateurs centrale du serveur.',
+              'Les administrateurs consultent tous les espaces. Les Pilotes IRN gèrent les utilisateurs de leur propre espace.',
             ),
             const SizedBox(height: 10),
             Wrap(
@@ -536,6 +582,7 @@ class _IntroCard extends StatelessWidget {
 class _UserCard extends StatelessWidget {
   final AppUser user;
   final bool centralPinsAvailable;
+  final bool showTenant;
   final VoidCallback? onEdit;
   final VoidCallback? onChangePin;
   final VoidCallback? onDelete;
@@ -543,6 +590,7 @@ class _UserCard extends StatelessWidget {
   const _UserCard({
     required this.user,
     required this.centralPinsAvailable,
+    required this.showTenant,
     required this.onEdit,
     required this.onChangePin,
     required this.onDelete,
@@ -598,6 +646,11 @@ class _UserCard extends StatelessWidget {
               runSpacing: 8,
               children: [
                 Chip(label: Text(user.role.label)),
+                if (showTenant && user.tenantId.trim().isNotEmpty)
+                  Chip(
+                    avatar: const Icon(Icons.account_tree_outlined, size: 18),
+                    label: Text(user.tenantLabel),
+                  ),
                 if (centralPinsAvailable)
                   const Chip(
                     avatar: Icon(Icons.key_outlined, size: 18),
@@ -680,8 +733,9 @@ class _UserFormResult {
 
 class _UserDialog extends StatefulWidget {
   final AppUser? user;
+  final bool allowAdministratorRole;
 
-  const _UserDialog({this.user});
+  const _UserDialog({this.user, this.allowAdministratorRole = true});
 
   @override
   State<_UserDialog> createState() => _UserDialogState();
@@ -702,6 +756,9 @@ class _UserDialogState extends State<_UserDialog> {
     _lastNameController = TextEditingController(text: user?.lastName ?? '');
     _emailController = TextEditingController(text: user?.email ?? '');
     _role = user?.role ?? AppUserRole.evaluator;
+    if (!widget.allowAdministratorRole && _role == AppUserRole.administrator) {
+      _role = AppUserRole.campaignManager;
+    }
   }
 
   @override
@@ -818,7 +875,11 @@ class _UserDialogState extends State<_UserDialog> {
                     border: OutlineInputBorder(),
                   ),
                   items: [
-                    for (final role in AppUserRole.values)
+                    for (final role in AppUserRole.values.where(
+                      (role) =>
+                          widget.allowAdministratorRole ||
+                          role != AppUserRole.administrator,
+                    ))
                       DropdownMenuItem<AppUserRole>(
                         value: role,
                         child: Text(
@@ -892,7 +953,7 @@ class _UserPinDialogState extends State<_UserPinDialog> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  displayName.isEmpty ? widget.user.id : displayName,
+                  displayName.isEmpty ? 'Utilisateur sans nom' : displayName,
                   style: Theme.of(context).textTheme.titleMedium,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,

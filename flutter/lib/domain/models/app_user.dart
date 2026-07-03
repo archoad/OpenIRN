@@ -1,3 +1,5 @@
+import '../utils/openirn_uuid.dart';
+
 enum AppUserRole {
   administrator,
   campaignManager,
@@ -84,7 +86,9 @@ class AppUser {
   // Il est conservé uniquement pour ignorer proprement les anciens exports.
   static const defaultAdministratorId = 'local-admin';
 
+  final String tenantId;
   final String id;
+  final String tenantDisplayName;
   final String firstName;
   final String lastName;
   final String email;
@@ -94,7 +98,9 @@ class AppUser {
   final DateTime updatedAt;
 
   const AppUser({
+    this.tenantId = '',
     required this.id,
+    this.tenantDisplayName = '',
     required this.firstName,
     required this.lastName,
     required this.email,
@@ -122,7 +128,12 @@ class AppUser {
     if (email.trim().isNotEmpty) {
       return email.trim();
     }
-    return id;
+    return 'Utilisateur sans nom';
+  }
+
+  String get tenantLabel {
+    final label = tenantDisplayName.trim();
+    return label.isEmpty ? 'Espace de travail' : label;
   }
 
   factory AppUser.create({
@@ -130,16 +141,14 @@ class AppUser {
     required String lastName,
     required String email,
     required AppUserRole role,
+    String tenantId = '',
     DateTime? now,
   }) {
     final timestamp = (now ?? DateTime.now()).toUtc();
-    final safeEmail = _safeIdPart(email.trim().toLowerCase());
-    final safeTimestamp = timestamp.toIso8601String().replaceAll(
-      RegExp(r'[^0-9]'),
-      '',
-    );
     return AppUser(
-      id: 'user-$safeTimestamp-$safeEmail',
+      tenantId: tenantId.trim(),
+      id: newOpenIrnUuid(),
+      tenantDisplayName: '',
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       email: email.trim().toLowerCase(),
@@ -156,7 +165,9 @@ class AppUser {
         DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
     final updatedAt = _parseDate(json['updatedAt']) ?? createdAt;
     return AppUser(
+      tenantId: json['tenantId']?.toString().trim() ?? '',
       id: json['id']?.toString() ?? '',
+      tenantDisplayName: json['tenantDisplayName']?.toString().trim() ?? '',
       firstName: json['firstName']?.toString().trim() ?? '',
       lastName: json['lastName']?.toString().trim() ?? '',
       email: json['email']?.toString().trim().toLowerCase() ?? '',
@@ -168,15 +179,19 @@ class AppUser {
   }
 
   AppUser copyWith({
+    String? tenantDisplayName,
     String? firstName,
     String? lastName,
     String? email,
     AppUserRole? role,
     bool? active,
     DateTime? updatedAt,
+    String? tenantId,
   }) {
     return AppUser(
+      tenantId: tenantId?.trim() ?? this.tenantId,
       id: id,
+      tenantDisplayName: tenantDisplayName?.trim() ?? this.tenantDisplayName,
       firstName: firstName?.trim() ?? this.firstName,
       lastName: lastName?.trim() ?? this.lastName,
       email: email?.trim().toLowerCase() ?? this.email,
@@ -189,6 +204,9 @@ class AppUser {
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
+      if (tenantId.trim().isNotEmpty) 'tenantId': tenantId.trim(),
+      if (tenantDisplayName.trim().isNotEmpty)
+        'tenantDisplayName': tenantDisplayName.trim(),
       'id': id,
       'firstName': firstName,
       'lastName': lastName,
@@ -207,13 +225,5 @@ class AppUser {
       return null;
     }
     return DateTime.tryParse(raw)?.toUtc();
-  }
-
-  static String _safeIdPart(String value) {
-    final normalized = value.toLowerCase().replaceAll(
-      RegExp(r'[^a-z0-9]+'),
-      '-',
-    );
-    return normalized.replaceAll(RegExp(r'^-+|-+$'), '');
   }
 }

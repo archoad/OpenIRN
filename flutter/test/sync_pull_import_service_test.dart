@@ -94,7 +94,7 @@ void main() {
 
     expect(result.campaignCount, 1);
     expect(result.users.single.id, 'user-1');
-    expect(result.campaigns.single.campaign.id, startsWith('remote-import-'));
+    expect(result.campaigns.single.campaign.id, isNotEmpty);
     expect(result.campaigns.single.campaign.name, contains('Campagne source'));
     expect(
       result.campaigns.single.criterionAnswers['RES-1.1']?.answer,

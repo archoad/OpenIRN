@@ -77,7 +77,6 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
     final result = await _apiClient.createTenant(
       baseUrl: state.configuration.apiBaseUrl,
       requesterTenantId: state.configuration.tenantId,
-      tenantId: form.tenantId,
       displayName: form.displayName,
       description: form.description,
       pilotFirstName: form.pilotFirstName,
@@ -141,15 +140,23 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
     if (solutionAdministrator) {
       await _configurationRepository
           .saveTenantSelectionForSolutionAdministration(
-            configuration.copyWith(tenantId: tenant.id, enabled: true),
+            configuration.copyWith(
+              tenantId: tenant.id,
+              tenantDisplayName: tenant.label,
+              enabled: true,
+            ),
           );
     } else {
       await _configurationRepository.saveConfiguration(
-        configuration.copyWith(tenantId: tenant.id, apiToken: ''),
+        configuration.copyWith(
+          tenantId: tenant.id,
+          tenantDisplayName: tenant.label,
+          apiToken: '',
+        ),
       );
       AppSessionManager.instance.clearSession(
         reason:
-            'Espace de travail changé : veuillez ouvrir une session dans ${tenant.displayName}.',
+            'Espace de travail changé : veuillez ouvrir une session dans ${tenant.label}.',
       );
     }
     if (!mounted) {
@@ -159,8 +166,8 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
       SnackBar(
         content: Text(
           solutionAdministrator
-              ? 'Espace administré : ${tenant.displayName}. La session d’administration globale reste active.'
-              : 'Espace sélectionné : ${tenant.displayName}. Veuillez déverrouiller la session pour continuer.',
+              ? 'Espace administré : ${tenant.label}. La session d’administration globale reste active.'
+              : 'Espace sélectionné : ${tenant.label}. Veuillez déverrouiller la session pour continuer.',
         ),
       ),
     );
@@ -270,7 +277,7 @@ class _TenantIntroCard extends StatelessWidget {
                   Chip(label: Text('${state.tenants.length} espace(s)')),
                   Chip(
                     label: Text(
-                      'Espace actif : ${state.configuration.tenantId}',
+                      'Espace actif : ${state.configuration.tenantLabel}',
                     ),
                   ),
                   const Chip(label: Text('Espace par défaut permanent')),
@@ -347,11 +354,9 @@ class _TenantCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                tenant.displayName,
+                tenant.label,
                 style: Theme.of(context).textTheme.titleMedium,
               ),
-              const SizedBox(height: 4),
-              SelectableText(tenant.id),
               if (tenant.description.trim().isNotEmpty) ...[
                 const SizedBox(height: 4),
                 Text(tenant.description),
@@ -469,9 +474,7 @@ class _TenantRenameDialogState extends State<_TenantRenameDialog> {
   @override
   void initState() {
     super.initState();
-    _displayNameController = TextEditingController(
-      text: widget.tenant.displayName,
-    );
+    _displayNameController = TextEditingController(text: widget.tenant.label);
   }
 
   @override
@@ -502,8 +505,6 @@ class _TenantRenameDialogState extends State<_TenantRenameDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SelectableText('Identifiant : ${widget.tenant.id}'),
-              const SizedBox(height: 12),
               TextFormField(
                 controller: _displayNameController,
                 autofocus: shouldAutofocusTextField(context),
@@ -543,7 +544,6 @@ class _TenantRenameDialogState extends State<_TenantRenameDialog> {
 }
 
 class _TenantCreateFormResult {
-  final String tenantId;
   final String displayName;
   final String description;
   final String pilotFirstName;
@@ -552,7 +552,6 @@ class _TenantCreateFormResult {
   final String pilotPin;
 
   const _TenantCreateFormResult({
-    required this.tenantId,
     required this.displayName,
     required this.description,
     required this.pilotFirstName,
@@ -571,7 +570,6 @@ class _TenantCreateDialog extends StatefulWidget {
 
 class _TenantCreateDialogState extends State<_TenantCreateDialog> {
   final _formKey = GlobalKey<FormState>();
-  final _tenantIdController = TextEditingController();
   final _displayNameController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _pilotFirstNameController = TextEditingController();
@@ -581,7 +579,6 @@ class _TenantCreateDialogState extends State<_TenantCreateDialog> {
 
   @override
   void dispose() {
-    _tenantIdController.dispose();
     _displayNameController.dispose();
     _descriptionController.dispose();
     _pilotFirstNameController.dispose();
@@ -597,7 +594,6 @@ class _TenantCreateDialogState extends State<_TenantCreateDialog> {
     }
     Navigator.of(context).pop(
       _TenantCreateFormResult(
-        tenantId: _tenantIdController.text.trim(),
         displayName: _displayNameController.text.trim(),
         description: _descriptionController.text.trim(),
         pilotFirstName: _pilotFirstNameController.text.trim(),
@@ -621,32 +617,14 @@ class _TenantCreateDialogState extends State<_TenantCreateDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextFormField(
-                  controller: _tenantIdController,
-                  autofocus: shouldAutofocusTextField(context),
-                  decoration: const InputDecoration(
-                    labelText: 'Identifiant technique',
-                    helperText:
-                        'Lettres, chiffres, tiret, point ou soulignement. Exemple : filiale-a',
-                    prefixIcon: Icon(Icons.tag_outlined),
-                  ),
-                  validator: (value) {
-                    final raw = value?.trim() ?? '';
-                    if (raw.isEmpty) {
-                      return 'L’identifiant de l’espace est obligatoire.';
-                    }
-                    if (raw == 'default') {
-                      return 'L’espace default existe déjà et reste permanent.';
-                    }
-                    if (!RegExp(r'^[a-zA-Z0-9_.-]+$').hasMatch(raw)) {
-                      return 'Veuillez utiliser uniquement lettres, chiffres, tiret, point ou soulignement.';
-                    }
-                    return null;
-                  },
+                Text(
+                  'L’identifiant technique sera généré automatiquement au format UUID.',
+                  style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _displayNameController,
+                  autofocus: shouldAutofocusTextField(context),
                   decoration: const InputDecoration(
                     labelText: 'Nom affiché',
                     prefixIcon: Icon(Icons.business_outlined),

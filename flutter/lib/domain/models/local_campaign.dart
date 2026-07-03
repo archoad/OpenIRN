@@ -1,3 +1,5 @@
+import '../utils/openirn_uuid.dart';
+
 enum LocalCampaignStatus {
   draft,
   readyForReview,
@@ -183,14 +185,8 @@ class LocalCampaign {
     DateTime? now,
   }) {
     final timestamp = (now ?? DateTime.now()).toUtc();
-    final safeReferentialId = _safeIdPart(referentialId);
-    final safeTimestamp = timestamp.toIso8601String().replaceAll(
-      RegExp(r'[^0-9]'),
-      '',
-    );
-
     return LocalCampaign(
-      id: 'local-$safeReferentialId-$safeTimestamp',
+      id: newOpenIrnUuid(),
       referentialId: referentialId,
       name: name.trim().isEmpty ? 'Évaluation locale' : name.trim(),
       description: description.trim(),
@@ -208,10 +204,8 @@ class LocalCampaign {
     DateTime? now,
   }) {
     final timestamp = (now ?? DateTime.now()).toUtc();
-    final safeReferentialId = _safeIdPart(referentialId);
-
     return LocalCampaign(
-      id: 'local-default-$safeReferentialId',
+      id: newOpenIrnUuid(),
       referentialId: referentialId,
       name: 'Évaluation locale — IRN $referentialVersion',
       description:
@@ -335,13 +329,5 @@ class LocalCampaign {
       return null;
     }
     return DateTime.tryParse(raw)?.toUtc();
-  }
-
-  static String _safeIdPart(String value) {
-    final normalized = value.toLowerCase().replaceAll(
-      RegExp(r'[^a-z0-9]+'),
-      '-',
-    );
-    return normalized.replaceAll(RegExp(r'^-+|-+$'), '');
   }
 }
