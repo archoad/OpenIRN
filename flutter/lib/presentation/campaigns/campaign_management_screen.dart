@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
+import '../../data/api/openirn_api_client.dart';
 import '../../data/repositories/local_activity_repository.dart';
 import '../../data/repositories/local_assessment_repository.dart';
 import '../../data/repositories/local_campaign_repository.dart';
 import '../../data/repositories/local_criterion_assignment_repository.dart';
+import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/criterion_assignment.dart';
+import '../../domain/models/irn_asset_inventory.dart';
 import '../../domain/models/irn_referential.dart';
 import '../../domain/models/local_activity_event.dart';
 import '../../domain/models/local_campaign.dart';
@@ -36,6 +39,8 @@ class _CampaignManagementScreenState extends State<CampaignManagementScreen> {
   final _assignmentRepository = const LocalCriterionAssignmentRepository();
   final _activityRepository = const LocalActivityRepository();
   final _syncAutomationService = const SyncAutomationService();
+  final _configurationRepository = const LocalSyncConfigurationRepository();
+  final _apiClient = const OpenIrnApiClient();
   final _appSyncCoordinator = AppSyncCoordinator.instance;
 
   late Future<List<LocalCampaign>> _campaignsFuture;
@@ -79,12 +84,33 @@ class _CampaignManagementScreenState extends State<CampaignManagementScreen> {
     await _campaignsFuture;
   }
 
+  Future<IrnAssetInventory?> _loadInventoryForCampaignCreation() async {
+    try {
+      final configuration = await _configurationRepository.loadConfiguration();
+      if (!configuration.isConfigured) {
+        return null;
+      }
+      final result = await _apiClient.loadAssetInventory(
+        baseUrl: configuration.apiBaseUrl,
+        tenantId: configuration.tenantId,
+        apiToken: configuration.apiToken,
+      );
+      return result.isAvailable ? result.inventory : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _createCampaign() async {
+    final inventory = await _loadInventoryForCampaignCreation();
+    if (!mounted) {
+      return;
+    }
     final result = await showDialog<_CampaignFormResult>(
       context: context,
-      builder: (_) => const _CreateCampaignDialog(),
+      builder: (_) => _CreateCampaignDialog(inventory: inventory),
     );
-    if (result == null) {
+    if (!mounted || result == null) {
       return;
     }
 
@@ -97,6 +123,7 @@ class _CampaignManagementScreenState extends State<CampaignManagementScreen> {
         referentialId: widget.referential.id,
         name: result.name,
         description: result.description,
+        information: result.information,
       );
       await _activityRepository.appendEvent(
         LocalActivityEvent.create(
@@ -386,7 +413,9 @@ class _ManagedCampaignCard extends StatelessWidget {
 }
 
 class _CreateCampaignDialog extends StatefulWidget {
-  const _CreateCampaignDialog();
+  final IrnAssetInventory? inventory;
+
+  const _CreateCampaignDialog({this.inventory});
 
   @override
   State<_CreateCampaignDialog> createState() => _CreateCampaignDialogState();
@@ -396,6 +425,56 @@ class _CreateCampaignDialogState extends State<_CreateCampaignDialog> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _descriptionController = TextEditingController();
+  String? _selectedSystemId;
+
+  IrnAssetInventory? get _inventory => widget.inventory;
+
+  List<InformationSystemInfo> get _systems {
+    final inventory = _inventory;
+    if (inventory == null) {
+      return const <InformationSystemInfo>[];
+    }
+    final systems = List<InformationSystemInfo>.from(
+      inventory.informationSystems,
+    )..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return systems;
+  }
+
+  InformationSystemInfo? get _selectedSystem {
+    final selected = _selectedSystemId;
+    if (selected == null || selected.trim().isEmpty) {
+      return null;
+    }
+    for (final system in _systems) {
+      if (system.id == selected) {
+        return system;
+      }
+    }
+    return null;
+  }
+
+  CriticalFunctionInfo? _functionForSystem(InformationSystemInfo system) {
+    final inventory = _inventory;
+    if (inventory == null) {
+      return null;
+    }
+    for (final function in inventory.criticalFunctions) {
+      if (function.id == system.functionId) {
+        return function;
+      }
+    }
+    return null;
+  }
+
+  List<InformationAssetInfo> _assetsForSystem(InformationSystemInfo system) {
+    final inventory = _inventory;
+    if (inventory == null) {
+      return const <InformationAssetInfo>[];
+    }
+    final assets = inventory.assetsForSystem(system.id)
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return assets;
+  }
 
   @override
   void dispose() {
@@ -404,31 +483,137 @@ class _CreateCampaignDialogState extends State<_CreateCampaignDialog> {
     super.dispose();
   }
 
+  void _selectSystem(String? systemId) {
+    setState(() {
+      _selectedSystemId = systemId;
+      final system = _selectedSystem;
+      if (system != null) {
+        if (_nameController.text.trim().isEmpty) {
+          _nameController.text = 'IRN — ${system.name}';
+        }
+        if (_descriptionController.text.trim().isEmpty) {
+          _descriptionController.text =
+              'Campagne de notation IRN des actifs du SI « ${system.name} ».';
+        }
+      }
+    });
+  }
+
   void _submit() {
     final formState = _formKey.currentState;
     if (formState == null || !formState.validate()) {
       return;
     }
+
+    final system = _selectedSystem;
+    CampaignInformation information = const CampaignInformation();
+    if (system != null) {
+      final function = _functionForSystem(system);
+      final assets = _assetsForSystem(system);
+      information = CampaignInformation(
+        systemName: system.name,
+        systemDescription: system.description,
+        projectDirectorLastName: system.owner,
+        criticalFunctionId: function?.id ?? '',
+        criticalFunctionName: function?.name ?? '',
+        informationSystemId: system.id,
+        assets: assets
+            .map(
+              (asset) => CampaignInformationAsset(
+                id: asset.id,
+                name: asset.name,
+                assetType: asset.assetType,
+                description: asset.description,
+              ),
+            )
+            .toList(growable: false),
+      );
+    }
+
     Navigator.of(context).pop(
       _CampaignFormResult(
         name: _nameController.text.trim(),
         description: _descriptionController.text.trim(),
+        information: information,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final systems = _systems;
+    final selectedSystem = _selectedSystem;
+    final selectedAssets = selectedSystem == null
+        ? const <InformationAssetInfo>[]
+        : _assetsForSystem(selectedSystem);
+    final selectedFunction = selectedSystem == null
+        ? null
+        : _functionForSystem(selectedSystem);
+
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
       title: const Text('Créer une campagne'),
       content: ResponsiveDialogContent(
-        maxWidth: 720,
+        maxWidth: 760,
         child: Form(
           key: _formKey,
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (systems.isEmpty)
+                const _InventoryUnavailableNotice()
+              else ...[
+                DropdownButtonFormField<String>(
+                  initialValue: _selectedSystemId,
+                  decoration: const InputDecoration(
+                    labelText: 'Système d’information à évaluer',
+                    prefixIcon: Icon(Icons.dns_outlined),
+                  ),
+                  items: [
+                    const DropdownMenuItem<String>(
+                      value: '',
+                      child: Text('Campagne libre, sans SI rattaché'),
+                    ),
+                    for (final system in systems)
+                      DropdownMenuItem<String>(
+                        value: system.id,
+                        child: Text(system.name),
+                      ),
+                  ],
+                  onChanged: (value) => _selectSystem(
+                    value == null || value.trim().isEmpty ? null : value,
+                  ),
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return null;
+                    }
+                    InformationSystemInfo? system;
+                    for (final item in _systems) {
+                      if (item.id == value) {
+                        system = item;
+                        break;
+                      }
+                    }
+                    if (system == null) {
+                      return 'SI inconnu.';
+                    }
+                    if (_assetsForSystem(system).isEmpty) {
+                      return 'Le SI sélectionné ne contient aucun actif.';
+                    }
+                    return null;
+                  },
+                ),
+                if (selectedSystem != null) ...[
+                  const SizedBox(height: 10),
+                  _SelectedSystemPreview(
+                    system: selectedSystem,
+                    function: selectedFunction,
+                    assetCount: selectedAssets.length,
+                  ),
+                ],
+                const SizedBox(height: 12),
+              ],
               TextFormField(
                 controller: _nameController,
                 autofocus: shouldAutofocusTextField(context),
@@ -468,6 +653,71 @@ class _CreateCampaignDialogState extends State<_CreateCampaignDialog> {
           label: const Text('Créer'),
         ),
       ],
+    );
+  }
+}
+
+class _InventoryUnavailableNotice extends StatelessWidget {
+  const _InventoryUnavailableNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      color: theme.colorScheme.surfaceContainerHighest,
+      child: const Padding(
+        padding: EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.info_outline),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Aucun inventaire SI disponible sur ce terminal. Vous pouvez créer une campagne libre, ou renseigner d’abord les fonctions critiques, SI et actifs.',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SelectedSystemPreview extends StatelessWidget {
+  final InformationSystemInfo system;
+  final CriticalFunctionInfo? function;
+  final int assetCount;
+
+  const _SelectedSystemPreview({
+    required this.system,
+    required this.function,
+    required this.assetCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.dividerColor),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Périmètre de notation', style: theme.textTheme.titleSmall),
+            const SizedBox(height: 6),
+            Text('Fonction critique : ${function?.name ?? 'non renseignée'}'),
+            Text('SI : ${system.name}'),
+            if (system.owner.trim().isNotEmpty)
+              Text('Porteur SI : ${system.owner}'),
+            Text('Actifs à noter : $assetCount'),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -519,8 +769,13 @@ class _DeleteCampaignDialog extends StatelessWidget {
 class _CampaignFormResult {
   final String name;
   final String description;
+  final CampaignInformation information;
 
-  const _CampaignFormResult({required this.name, required this.description});
+  const _CampaignFormResult({
+    required this.name,
+    required this.description,
+    this.information = const CampaignInformation(),
+  });
 }
 
 class _EmptyState extends StatelessWidget {

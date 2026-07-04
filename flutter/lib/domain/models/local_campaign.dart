@@ -72,12 +72,59 @@ enum LocalCampaignStatus {
   }
 }
 
+class CampaignInformationAsset {
+  final String id;
+  final String name;
+  final String assetType;
+  final String description;
+
+  const CampaignInformationAsset({
+    required this.id,
+    required this.name,
+    this.assetType = '',
+    this.description = '',
+  });
+
+  String get displayLabel {
+    final cleanName = name.trim();
+    if (cleanName.isNotEmpty) {
+      return cleanName;
+    }
+    return id.trim().isEmpty ? 'Actif sans nom' : id.trim();
+  }
+
+  factory CampaignInformationAsset.fromJson(Map<String, dynamic> json) {
+    return CampaignInformationAsset(
+      id:
+          json['assetId']?.toString().trim() ??
+          json['id']?.toString().trim() ??
+          '',
+      name: json['name']?.toString().trim() ?? '',
+      assetType: json['assetType']?.toString().trim() ?? '',
+      description: json['description']?.toString().trim() ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'assetId': id.trim(),
+      'name': name.trim(),
+      'assetType': assetType.trim(),
+      'description': description.trim(),
+    };
+  }
+}
+
 class CampaignInformation {
   final String systemName;
   final String systemDescription;
   final String projectDirectorFirstName;
   final String projectDirectorLastName;
   final String projectDirectorEmail;
+  final String criticalFunctionId;
+  final String criticalFunctionName;
+  final String informationSystemId;
+  final List<CampaignInformationAsset> assets;
 
   const CampaignInformation({
     this.systemName = '',
@@ -85,7 +132,27 @@ class CampaignInformation {
     this.projectDirectorFirstName = '',
     this.projectDirectorLastName = '',
     this.projectDirectorEmail = '',
+    this.criticalFunctionId = '',
+    this.criticalFunctionName = '',
+    this.informationSystemId = '',
+    this.assets = const <CampaignInformationAsset>[],
   });
+
+  bool get isAssetScoped =>
+      informationSystemId.trim().isNotEmpty && assets.isNotEmpty;
+
+  CampaignInformationAsset? assetById(String? assetId) {
+    final cleanId = assetId?.trim() ?? '';
+    if (cleanId.isEmpty) {
+      return null;
+    }
+    for (final asset in assets) {
+      if (asset.id == cleanId) {
+        return asset;
+      }
+    }
+    return null;
+  }
 
   bool get hasSystemName => systemName.trim().isNotEmpty;
   bool get hasSystemDescription => systemDescription.trim().isNotEmpty;
@@ -110,6 +177,23 @@ class CampaignInformation {
   }
 
   factory CampaignInformation.fromJson(Map<String, dynamic> json) {
+    final scopePayload = json['inventoryScope'];
+    final scope = scopePayload is Map
+        ? scopePayload.map((key, value) => MapEntry(key.toString(), value))
+        : const <String, dynamic>{};
+    final rawAssets = scope['assets'] ?? json['assets'];
+    final assets = rawAssets is List
+        ? rawAssets
+              .whereType<Map>()
+              .map(
+                (item) => CampaignInformationAsset.fromJson(
+                  item.map((key, value) => MapEntry(key.toString(), value)),
+                ),
+              )
+              .where((asset) => asset.id.trim().isNotEmpty)
+              .toList(growable: false)
+        : const <CampaignInformationAsset>[];
+
     return CampaignInformation(
       systemName: json['systemName']?.toString().trim() ?? '',
       systemDescription: json['systemDescription']?.toString().trim() ?? '',
@@ -119,6 +203,19 @@ class CampaignInformation {
           json['projectDirectorLastName']?.toString().trim() ?? '',
       projectDirectorEmail:
           json['projectDirectorEmail']?.toString().trim() ?? '',
+      criticalFunctionId:
+          scope['criticalFunctionId']?.toString().trim() ??
+          json['criticalFunctionId']?.toString().trim() ??
+          '',
+      criticalFunctionName:
+          scope['criticalFunctionName']?.toString().trim() ??
+          json['criticalFunctionName']?.toString().trim() ??
+          '',
+      informationSystemId:
+          scope['informationSystemId']?.toString().trim() ??
+          json['informationSystemId']?.toString().trim() ??
+          '',
+      assets: assets,
     );
   }
 
@@ -128,6 +225,10 @@ class CampaignInformation {
     String? projectDirectorFirstName,
     String? projectDirectorLastName,
     String? projectDirectorEmail,
+    String? criticalFunctionId,
+    String? criticalFunctionName,
+    String? informationSystemId,
+    List<CampaignInformationAsset>? assets,
   }) {
     return CampaignInformation(
       systemName: systemName?.trim() ?? this.systemName,
@@ -138,6 +239,12 @@ class CampaignInformation {
           projectDirectorLastName?.trim() ?? this.projectDirectorLastName,
       projectDirectorEmail:
           projectDirectorEmail?.trim() ?? this.projectDirectorEmail,
+      criticalFunctionId: criticalFunctionId?.trim() ?? this.criticalFunctionId,
+      criticalFunctionName:
+          criticalFunctionName?.trim() ?? this.criticalFunctionName,
+      informationSystemId:
+          informationSystemId?.trim() ?? this.informationSystemId,
+      assets: assets ?? this.assets,
     );
   }
 
@@ -148,6 +255,12 @@ class CampaignInformation {
       'projectDirectorFirstName': projectDirectorFirstName.trim(),
       'projectDirectorLastName': projectDirectorLastName.trim(),
       'projectDirectorEmail': projectDirectorEmail.trim(),
+      'inventoryScope': <String, dynamic>{
+        'criticalFunctionId': criticalFunctionId.trim(),
+        'criticalFunctionName': criticalFunctionName.trim(),
+        'informationSystemId': informationSystemId.trim(),
+        'assets': assets.map((asset) => asset.toJson()).toList(growable: false),
+      },
     };
   }
 }
@@ -298,6 +411,23 @@ class LocalCampaign {
           )
         : const <String, dynamic>{};
 
+    final scopePayload = json['inventoryScope'];
+    final scope = scopePayload is Map
+        ? scopePayload.map((key, value) => MapEntry(key.toString(), value))
+        : const <String, dynamic>{};
+    final rawAssets = scope['assets'] ?? json['assets'];
+    final assets = rawAssets is List
+        ? rawAssets
+              .whereType<Map>()
+              .map(
+                (item) => CampaignInformationAsset.fromJson(
+                  item.map((key, value) => MapEntry(key.toString(), value)),
+                ),
+              )
+              .where((asset) => asset.id.trim().isNotEmpty)
+              .toList(growable: false)
+        : const <CampaignInformationAsset>[];
+
     // Compatibilité avec les exports locaux qui exposent les informations
     // sous forme imbriquée ou sous forme de champs à plat.
     return CampaignInformation(
@@ -320,6 +450,19 @@ class LocalCampaign {
           projectDirector['email']?.toString().trim().isNotEmpty == true
           ? projectDirector['email'].toString().trim()
           : json['projectDirectorEmail']?.toString().trim() ?? '',
+      criticalFunctionId:
+          scope['criticalFunctionId']?.toString().trim() ??
+          json['criticalFunctionId']?.toString().trim() ??
+          '',
+      criticalFunctionName:
+          scope['criticalFunctionName']?.toString().trim() ??
+          json['criticalFunctionName']?.toString().trim() ??
+          '',
+      informationSystemId:
+          scope['informationSystemId']?.toString().trim() ??
+          json['informationSystemId']?.toString().trim() ??
+          '',
+      assets: assets,
     );
   }
 
