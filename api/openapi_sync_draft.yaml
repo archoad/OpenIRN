@@ -43,8 +43,8 @@ paths:
                     example: 0.10.0
                   storage:
                     type: string
-                    enum: [sqlite]
-                    example: sqlite
+                    enum: [mariadb]
+                    example: mariadb
                   tenantNumber:
                     type: integer
                     minimum: 0

@@ -8,7 +8,7 @@ Nettoyer les artefacts de travail et renforcer les contrôles de publication san
 
 ## Nettoyages ciblés
 
-Le script `tools/apply_openirn_patch_138a_cleanup.sh` supprime :
+Le script historique `tools/apply_openirn_patch_138a_cleanup.sh` supprimait :
 
 - les fichiers `.DS_Store` et `._*` ;
 - les swaps/sauvegardes d’éditeur (`*.swp`, `*.swo`, `*~`, `*.bak`) ;
@@ -34,13 +34,7 @@ Les documents de publication GitHub ont aussi été clarifiés pour éviter de p
 
 ## Validation
 
-Depuis la racine du dépôt :
-
-```bash
-./tools/apply_openirn_patch_138a_cleanup.sh
-```
-
-Puis, à tout moment :
+Depuis le nettoyage 163A, le script 138A n’est plus conservé dans le dépôt courant. Utiliser le contrôle de publication actuel :
 
 ```bash
 ./tools/check_open_source_readiness.sh

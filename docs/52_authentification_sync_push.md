@@ -1,96 +1,52 @@
 # Patch 057 — Authentification API pour `/sync/push`
 
-Ce patch protège le premier endpoint de synchronisation serveur OpenIRN.
+Ce patch avait introduit la protection du premier endpoint de synchronisation serveur OpenIRN.
 
-## Principe
+## État actuel depuis le patch 163B
 
-- `GET /api/health` reste public pour permettre à l’application de tester la connectivité.
-- `POST /api/sync/push` exige maintenant un header HTTP :
+Le schéma HTTP reste :
 
 ```http
-Authorization: Bearer <OPENIRN_API_TOKEN>
+Authorization: Bearer <token>
 ```
 
-Le token est configuré :
+Mais le token attendu n’est plus un bearer global partagé. Les accès d’écriture et d’administration utilisent désormais une session serveur courte (`ost_…`) associée à un utilisateur et à un rôle OpenIRN.
 
-- côté serveur avec la variable d’environnement `OPENIRN_API_TOKEN` ;
-- côté application dans l’écran `Synchronisation`.
+`OPENIRN_API_TOKEN` est déprécié, désactivé par défaut et ne doit plus être utilisé comme secret applicatif principal.
+
+## Principe actuel
+
+- `GET /api/health` reste public pour permettre à l’application de tester la connectivité.
+- `POST /api/sync/push` exige une session serveur active avec un rôle autorisé.
+- Les sessions sont transmises avec le header standard `Authorization: Bearer`.
+- Les anciens jetons de terminal restent limités aux usages de compatibilité explicitement prévus par le serveur.
 
 ## Serveur
 
 Le backend FastAPI vérifie :
 
-- présence du token serveur ;
-- présence du header `Authorization` ;
+- présence du header `Authorization` pour les opérations protégées ;
 - schéma `Bearer` ;
-- égalité du token via `hmac.compare_digest`.
+- validité de la session serveur ;
+- rôle utilisateur autorisé pour l’opération demandée ;
+- correspondance avec l’espace de travail demandé.
 
-Codes de retour :
+Codes de retour typiques :
 
-- `401` : token manquant ;
-- `403` : token invalide ;
-- `503` : token non configuré côté serveur.
-
-## Client Flutter
-
-L’écran `Synchronisation` ajoute un champ `Token API OpenIRN`.
-
-Le token est stocké localement via `SharedPreferences`. Ce stockage est suffisant pour cette étape de prototype. Une étape ultérieure pourra migrer ce secret vers un stockage sécurisé (`flutter_secure_storage`).
-
-## Déploiement systemd
-
-Générer un token :
-
-```bash
-tools/generate_openirn_api_token.sh
-```
-
-Créer le fichier d’environnement sur `srv` :
-
-```bash
-sudo install -o root -g www-data -m 0640 /dev/null /etc/openirn-api.env
-sudo vim /etc/openirn-api.env
-```
-
-Contenu attendu :
-
-```env
-OPENIRN_API_TOKEN=coller_ici_le_token_genere
-```
-
-Puis référencer ce fichier dans `/etc/systemd/system/openirn-api.service` :
-
-```ini
-EnvironmentFile=/etc/openirn-api.env
-```
-
-Redémarrer :
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl restart openirn-api
-```
+- `403` : session expirée, autorisation invalide ou rôle insuffisant ;
+- `404` / `409` / `422` selon les contrôles métier de synchronisation.
 
 ## Tests curl
 
-Sans token :
+Exemple avec une session serveur déjà obtenue :
 
 ```bash
+SESSION_TOKEN='ost_...'
+
 curl -i -X POST https://www.archoad.io/api/sync/push \
+  -H "Authorization: Bearer $SESSION_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"type":"openirn.syncPush"}'
+  -d '{"type":"openirn.syncPush","sync":{"tenantId":"default","deviceId":"curl"},"campaigns":[]}'
 ```
 
-Réponse attendue : `401`.
-
-Avec token :
-
-```bash
-TOKEN='le_token_configure'
-curl -i -X POST https://www.archoad.io/api/sync/push \
-  -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"type":"openirn.syncPush","sync":{"tenantId":"test","deviceId":"curl"},"campaigns":[]}'
-```
-
-Réponse attendue : `200` avec `status=accepted`.
+Réponse attendue : `200` avec `status=accepted` si la session et le rôle sont valides.

@@ -9,7 +9,6 @@ import '../../domain/models/app_user.dart';
 import '../../domain/models/sync_configuration.dart';
 import '../../domain/services/access_policy_service.dart';
 import '../common/openirn_app_bar.dart';
-import '../common/responsive_autofocus.dart';
 import '../common/responsive_dialog.dart';
 
 class ServerMaintenanceScreen extends StatefulWidget {
@@ -28,7 +27,6 @@ class _ServerMaintenanceScreenState extends State<ServerMaintenanceScreen> {
 
   bool _isLoading = true;
   bool _isBackingUp = false;
-  bool _isRestoring = false;
   bool _isDeleting = false;
   String? _errorMessage;
   String? _successMessage;
@@ -37,7 +35,7 @@ class _ServerMaintenanceScreenState extends State<ServerMaintenanceScreen> {
 
   bool get _canManage =>
       _accessPolicy.canManageServerMaintenance(widget.activeUser);
-  bool get _isWorking => _isBackingUp || _isRestoring || _isDeleting;
+  bool get _isWorking => _isBackingUp || _isDeleting;
 
   @override
   void initState() {
@@ -113,7 +111,7 @@ class _ServerMaintenanceScreenState extends State<ServerMaintenanceScreen> {
         content: const ResponsiveDialogContent(
           maxWidth: 620,
           child: Text(
-            'OpenIRN va demander au serveur de créer une sauvegarde SQLite cohérente. '
+            'OpenIRN va demander au serveur de créer un dump logique MariaDB cohérent. '
             'Le serveur reste disponible pendant l’opération.',
           ),
         ),
@@ -170,133 +168,6 @@ class _ServerMaintenanceScreenState extends State<ServerMaintenanceScreen> {
       setState(() {
         _isBackingUp = false;
         _errorMessage = 'Impossible de créer la sauvegarde : $error';
-      });
-    }
-  }
-
-  Future<void> _restoreBackup(_BackupEntry backup) async {
-    final configuration = _configuration;
-    if (configuration == null || !configuration.isConfigured || _isWorking) {
-      return;
-    }
-
-    final firstConfirmation = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        insetPadding: responsiveDialogInsetPadding(context),
-        title: const Text('Restaurer cette sauvegarde ?'),
-        content: ResponsiveDialogContent(
-          maxWidth: 680,
-          child: Text(
-            'Cette opération remplacera la base SQLite serveur actuelle par :\n\n'
-            '${backup.name}\n\n'
-            'Une sauvegarde de sécurité sera créée automatiquement avant restauration.',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Annuler'),
-          ),
-          FilledButton.icon(
-            onPressed: () => Navigator.of(context).pop(true),
-            icon: const Icon(Icons.restore_outlined),
-            label: const Text('Continuer'),
-          ),
-        ],
-      ),
-    );
-    if (firstConfirmation != true || !mounted) {
-      return;
-    }
-
-    final controller = TextEditingController();
-    final finalConfirmation = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        insetPadding: responsiveDialogInsetPadding(context),
-        title: const Text('Confirmation finale'),
-        content: ResponsiveDialogContent(
-          maxWidth: 620,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Tape RESTAURER pour confirmer la restauration serveur.',
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: controller,
-                autofocus: shouldAutofocusTextField(context),
-                textInputAction: TextInputAction.done,
-                decoration: const InputDecoration(
-                  labelText: 'Confirmation',
-                  border: OutlineInputBorder(),
-                ),
-                onSubmitted: (_) => Navigator.of(
-                  context,
-                ).pop(controller.text.trim() == 'RESTAURER'),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Annuler'),
-          ),
-          FilledButton.icon(
-            onPressed: () => Navigator.of(
-              context,
-            ).pop(controller.text.trim() == 'RESTAURER'),
-            icon: const Icon(Icons.restore_outlined),
-            label: const Text('Restaurer'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-
-    if (finalConfirmation != true) {
-      return;
-    }
-
-    setState(() {
-      _isRestoring = true;
-      _errorMessage = null;
-      _successMessage = null;
-    });
-
-    try {
-      final encodedBackupName = Uri.encodeComponent(backup.name);
-      final body = await _postJson(
-        configuration,
-        '/maintenance/backups/$encodedBackupName/restore',
-        <String, dynamic>{
-          'tenantId': configuration.tenantId,
-          'triggeredByUserId': widget.activeUser.id,
-        },
-      );
-      if (!mounted) {
-        return;
-      }
-      final maintenance = _jsonObject(body['maintenance']);
-      setState(() {
-        _status = maintenance == null
-            ? _status
-            : _MaintenanceStatus.fromJson(maintenance);
-        _isRestoring = false;
-        _successMessage = 'Sauvegarde restaurée : ${backup.name}';
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _isRestoring = false;
-        _errorMessage = 'Impossible de restaurer la sauvegarde : $error';
       });
     }
   }
@@ -523,7 +394,6 @@ class _ServerMaintenanceScreenState extends State<ServerMaintenanceScreen> {
                 _BackupListCard(
                   backups: status.backup.backups,
                   isWorking: _isWorking,
-                  onRestore: _restoreBackup,
                   onDelete: _deleteBackup,
                 ),
                 const SizedBox(height: 12),
@@ -587,7 +457,7 @@ class _DatabaseCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ok = database.integrityCheck == 'ok';
+    final ok = database.backend == 'mariadb';
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -605,20 +475,17 @@ class _DatabaseCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Base SQLite',
+                    'Base MariaDB',
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 8),
-            _InfoRow(label: 'Intégrité', value: database.integrityCheck),
-            _InfoRow(
-              label: 'Taille DB',
-              value: _formatBytes(database.sizeBytes),
-            ),
-            _InfoRow(label: 'WAL', value: _formatBytes(database.walSizeBytes)),
-            _InfoRow(label: 'Chemin', value: database.path),
+            _InfoRow(label: 'Backend', value: database.backend),
+            _InfoRow(label: 'Cible', value: database.target),
+            _InfoRow(label: 'Version', value: database.serverVersion),
+            _InfoRow(label: 'Charset', value: database.charset),
             const Divider(height: 24),
             Wrap(
               spacing: 8,
@@ -727,13 +594,11 @@ class _BackupCard extends StatelessWidget {
 class _BackupListCard extends StatelessWidget {
   final List<_BackupEntry> backups;
   final bool isWorking;
-  final ValueChanged<_BackupEntry> onRestore;
   final ValueChanged<_BackupEntry> onDelete;
 
   const _BackupListCard({
     required this.backups,
     required this.isWorking,
-    required this.onRestore,
     required this.onDelete,
   });
 
@@ -769,23 +634,11 @@ class _BackupListCard extends StatelessWidget {
                     enabled: !isWorking,
                     tooltip: 'Actions sauvegarde',
                     onSelected: (value) {
-                      if (value == 'restore') {
-                        onRestore(backup);
-                      } else if (value == 'delete') {
+                      if (value == 'delete') {
                         onDelete(backup);
                       }
                     },
                     itemBuilder: (context) => [
-                      const PopupMenuItem(
-                        value: 'restore',
-                        child: Row(
-                          children: [
-                            Icon(Icons.restore_outlined),
-                            SizedBox(width: 10),
-                            Text('Restaurer'),
-                          ],
-                        ),
-                      ),
                       PopupMenuItem(
                         value: 'delete',
                         child: Row(
@@ -943,30 +796,27 @@ class _MaintenanceStatus {
 }
 
 class _MaintenanceDatabase {
-  final String path;
-  final int sizeBytes;
-  final int walSizeBytes;
-  final int shmSizeBytes;
-  final String integrityCheck;
+  final String backend;
+  final String target;
+  final String serverVersion;
+  final String charset;
   final Map<String, int?> counts;
 
   const _MaintenanceDatabase({
-    required this.path,
-    required this.sizeBytes,
-    required this.walSizeBytes,
-    required this.shmSizeBytes,
-    required this.integrityCheck,
+    required this.backend,
+    required this.target,
+    required this.serverVersion,
+    required this.charset,
     required this.counts,
   });
 
   factory _MaintenanceDatabase.fromJson(Map<String, dynamic> json) {
     final rawCounts = _jsonObject(json['counts']) ?? const <String, dynamic>{};
     return _MaintenanceDatabase(
-      path: json['path']?.toString() ?? '',
-      sizeBytes: _intFromJson(json['sizeBytes']),
-      walSizeBytes: _intFromJson(json['walSizeBytes']),
-      shmSizeBytes: _intFromJson(json['shmSizeBytes']),
-      integrityCheck: json['integrityCheck']?.toString() ?? 'unknown',
+      backend: json['backend']?.toString() ?? 'mariadb',
+      target: json['target']?.toString() ?? '',
+      serverVersion: json['serverVersion']?.toString() ?? 'unknown',
+      charset: json['charset']?.toString() ?? 'utf8mb4',
       counts: rawCounts.map(
         (key, value) =>
             MapEntry(key, value == null ? null : _intFromJson(value)),

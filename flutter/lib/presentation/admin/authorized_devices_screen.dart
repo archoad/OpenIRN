@@ -609,13 +609,15 @@ class _DeviceCard extends StatelessWidget {
                           ),
                         ),
                       ),
-                      if (device.tenantId.trim().isNotEmpty)
+                      for (final workspace in device.effectiveWorkspaces)
                         Chip(
-                          avatar: const Icon(
-                            Icons.account_tree_outlined,
+                          avatar: Icon(
+                            workspace.isActive
+                                ? Icons.account_tree_outlined
+                                : Icons.block_outlined,
                             size: 18,
                           ),
-                          label: Text(device.tenantLabel),
+                          label: Text(workspace.tenantLabel),
                         ),
                       if (isCurrentDevice)
                         DecoratedBox(
@@ -644,6 +646,18 @@ class _DeviceCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text('${device.platformLabel} — $lastSeen'),
+                  const SizedBox(height: 4),
+                  Text(
+                    device.workspaceCount > 1
+                        ? 'Enrollé dans ${device.workspaceCount} espaces : ${device.workspaceSummary}'
+                        : 'Enrollé dans ${device.workspaceSummary}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Identifiant terminal : ${device.deviceId}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                   const SizedBox(height: 4),
                   Text(
                     'Créé le ${_formatDateTime(device.createdAt)}',
@@ -677,7 +691,11 @@ class _DeviceCard extends StatelessWidget {
                 PopupMenuItem<String>(
                   value: 'revoke',
                   enabled: device.isActive,
-                  child: const Text('Révoquer'),
+                  child: Text(
+                    device.workspaceCount > 1
+                        ? 'Révoquer dans cet espace'
+                        : 'Révoquer',
+                  ),
                 ),
               ],
             ),

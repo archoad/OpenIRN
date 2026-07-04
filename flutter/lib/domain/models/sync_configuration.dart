@@ -76,9 +76,9 @@ class SyncConfiguration {
       return 'Session serveur en mémoire';
     }
     if (usesDeviceToken) {
-      return 'Jeton terminal de transition';
+      return 'Jeton terminal serveur';
     }
-    return 'Bearer de transition en mémoire';
+    return 'Jeton legacy en mémoire';
   }
 
   String get authorizationModeDescription {
@@ -95,9 +95,9 @@ class SyncConfiguration {
       return 'La session serveur est conservée uniquement en mémoire et sera perdue à la fermeture de l’application.';
     }
     if (usesDeviceToken) {
-      return 'Ce terminal utilise encore un ancien jeton terminal. Il ne sera plus réenregistré localement.';
+      return 'Ce terminal utilise un jeton serveur révocable associé au terminal.';
     }
-    return 'Bearer utilisé uniquement pour cette session courante. Il ne sera pas stocké localement.';
+    return 'Jeton legacy accepté uniquement en mémoire. Il ne sera pas stocké localement et ne doit pas servir à l’administration.';
   }
 
   bool get isConfigured =>

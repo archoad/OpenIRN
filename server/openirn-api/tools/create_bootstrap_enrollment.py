@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a one-time OpenIRN device enrollment code directly in SQLite.
+"""Create a one-time OpenIRN device enrollment code directly in MariaDB.
 
 This is a break-glass tool for the case where no active terminal can open
 Administration -> Terminaux autorisés.
@@ -14,14 +14,12 @@ import json
 import os
 import re
 import secrets
-import sqlite3
 import sys
 import uuid
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, Iterable
+from urllib.parse import parse_qs, unquote, urlparse
 
-DEFAULT_DB = Path(os.environ.get("OPENIRN_API_DB", "/var/lib/openirn-api/openirn.sqlite3"))
 BOOTSTRAP_PEPPER = "openirn-device-enrollment-bootstrap-v1"
 ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 ALLOWED_EXPIRATIONS = {5, 10, 15}
@@ -62,93 +60,166 @@ def tenant_argument(value: str | None) -> str:
     return requested or "default"
 
 
-def table_exists(con: sqlite3.Connection, table_name: str) -> bool:
-    row = con.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-        (table_name,),
-    ).fetchone()
-    return row is not None
-
-
-def table_columns(con: sqlite3.Connection, table_name: str) -> set[str]:
+def import_pymysql() -> Any:
     try:
-        return {str(row[1]) for row in con.execute(f"PRAGMA table_info({table_name})").fetchall()}
-    except sqlite3.Error:
+        import pymysql  # type: ignore
+        from pymysql.cursors import DictCursor  # type: ignore
+    except ImportError:
+        print("ERROR: PyMySQL is missing. Install requirements-mariadb.txt in the server venv.", file=sys.stderr)
+        raise SystemExit(1)
+    return pymysql, DictCursor
+
+
+def parse_mysql_url(raw: str) -> dict[str, Any]:
+    if not raw:
+        print("ERROR: OPENIRN_API_MYSQL_URL is required.", file=sys.stderr)
+        raise SystemExit(2)
+    parsed = urlparse(raw)
+    if parsed.scheme not in {"mysql", "mysql+pymysql", "mariadb", "mariadb+pymysql"}:
+        print("ERROR: MariaDB URL must use mysql+pymysql:// or mariadb+pymysql://", file=sys.stderr)
+        raise SystemExit(2)
+    query = parse_qs(parsed.query)
+    database = parsed.path.lstrip("/")
+    if not database:
+        print("ERROR: database name missing in OPENIRN_API_MYSQL_URL.", file=sys.stderr)
+        raise SystemExit(2)
+    return {
+        "host": parsed.hostname or "127.0.0.1",
+        "port": int(parsed.port or 3306),
+        "user": unquote(parsed.username or ""),
+        "password": unquote(parsed.password or ""),
+        "database": database,
+        "charset": (query.get("charset") or ["utf8mb4"])[0] or "utf8mb4",
+    }
+
+
+def connect(mysql_url: str) -> Any:
+    pymysql, DictCursor = import_pymysql()
+    config = parse_mysql_url(mysql_url)
+    try:
+        return pymysql.connect(**config, autocommit=False, cursorclass=DictCursor)
+    except Exception as exc:
+        print(f"ERROR: MariaDB connection failed: {exc}", file=sys.stderr)
+        raise SystemExit(2)
+
+
+def table_exists(con: Any, table_name: str) -> bool:
+    with con.cursor() as cur:
+        cur.execute(
+            """
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE() AND table_name = %s
+            """,
+            (table_name,),
+        )
+        return cur.fetchone() is not None
+
+
+def table_columns(con: Any, table_name: str) -> set[str]:
+    try:
+        with con.cursor() as cur:
+            cur.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE() AND table_name = %s
+                """,
+                (table_name,),
+            )
+            return {str(row["column_name"]) for row in cur.fetchall()}
+    except Exception:
         return set()
 
 
-def alias_target(con: sqlite3.Connection, entity_type: str, old_id: str, scope_id: str = "") -> str:
+def fetchone(con: Any, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
+    with con.cursor() as cur:
+        cur.execute(sql, params)
+        return cur.fetchone()
+
+
+def fetchall(con: Any, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+    with con.cursor() as cur:
+        cur.execute(sql, params)
+        return list(cur.fetchall())
+
+
+def execute(con: Any, sql: str, params: tuple[Any, ...] = ()) -> None:
+    with con.cursor() as cur:
+        cur.execute(sql, params)
+
+
+def alias_target(con: Any, entity_type: str, old_id: str, scope_id: str = "") -> str:
     if not old_id or not table_exists(con, "id_aliases"):
         return ""
     try:
-        row = con.execute(
+        row = fetchone(
+            con,
             """
             SELECT new_id FROM id_aliases
-            WHERE entity_type = ? AND scope_id = ? AND old_id = ?
+            WHERE entity_type = %s AND scope_id = %s AND old_id = %s
             """,
             (entity_type, scope_id, old_id),
-        ).fetchone()
-    except sqlite3.Error:
+        )
+    except Exception:
         return ""
-    return str(row["new_id"] or "") if row else ""
+    return str(row.get("new_id") or "") if row else ""
 
 
-def resolve_tenant_id(con: sqlite3.Connection, requested: str) -> str:
+def resolve_tenant_id(con: Any, requested: str) -> str:
     tenant_id = tenant_argument(requested)
-    row = con.execute("SELECT id FROM tenants WHERE id = ?", (tenant_id,)).fetchone()
+    row = fetchone(con, "SELECT id FROM tenants WHERE id = %s", (tenant_id,))
     if row:
-        return str(row["id"] or tenant_id)
+        return str(row.get("id") or tenant_id)
 
     aliased = alias_target(con, "tenant", tenant_id)
     if aliased:
-        row = con.execute("SELECT id FROM tenants WHERE id = ?", (aliased,)).fetchone()
+        row = fetchone(con, "SELECT id FROM tenants WHERE id = %s", (aliased,))
         if row:
-            return str(row["id"] or aliased)
+            return str(row.get("id") or aliased)
 
     return tenant_id
 
 
-def tenant_display_name(row: sqlite3.Row) -> str:
-    columns = set(row.keys())
-    display_name = str(row["display_name"] or "").strip() if "display_name" in columns else ""
+def tenant_display_name(row: dict[str, Any]) -> str:
+    display_name = str(row.get("display_name") or "").strip()
     if display_name:
         return display_name
-    tenant_id = str(row["id"] or "").strip()
+    tenant_id = str(row.get("id") or "").strip()
     return "Défaut" if tenant_id == "default" else tenant_id
 
 
-def tenant_counts(con: sqlite3.Connection, tenant_id: str) -> dict[str, int]:
+def tenant_counts(con: Any, tenant_id: str) -> dict[str, int]:
     counts = {
         "active_users": 0,
         "active_devices": 0,
         "pending_requests": 0,
     }
     if table_exists(con, "users"):
-        row = con.execute(
-            "SELECT count(*) FROM users WHERE tenant_id = ? AND active = 1",
-            (tenant_id,),
-        ).fetchone()
-        counts["active_users"] = int(row[0] if row else 0)
+        row = fetchone(con, "SELECT count(*) AS total FROM users WHERE tenant_id = %s AND active = 1", (tenant_id,))
+        counts["active_users"] = int(row.get("total") if row else 0)
     if table_exists(con, "authorized_devices"):
-        row = con.execute(
+        row = fetchone(
+            con,
             """
-            SELECT count(*)
+            SELECT count(*) AS total
             FROM authorized_devices
-            WHERE tenant_id = ? AND status = 'active' AND revoked_at IS NULL
+            WHERE tenant_id = %s AND status = 'active' AND revoked_at IS NULL
             """,
             (tenant_id,),
-        ).fetchone()
-        counts["active_devices"] = int(row[0] if row else 0)
+        )
+        counts["active_devices"] = int(row.get("total") if row else 0)
     if table_exists(con, "device_enrollment_requests"):
-        row = con.execute(
+        row = fetchone(
+            con,
             """
-            SELECT count(*)
+            SELECT count(*) AS total
             FROM device_enrollment_requests
-            WHERE tenant_id = ? AND status = 'pending'
+            WHERE tenant_id = %s AND status = 'pending'
             """,
             (tenant_id,),
-        ).fetchone()
-        counts["pending_requests"] = int(row[0] if row else 0)
+        )
+        counts["pending_requests"] = int(row.get("total") if row else 0)
     return counts
 
 
@@ -169,7 +240,7 @@ def print_table(headers: Iterable[str], rows: list[list[str]]) -> None:
         print(fmt(row))
 
 
-def list_tenants(con: sqlite3.Connection) -> None:
+def list_tenants(con: Any) -> None:
     if not table_exists(con, "tenants"):
         print("Aucun espace de travail : la table tenants n’existe pas encore.")
         return
@@ -179,9 +250,7 @@ def list_tenants(con: sqlite3.Connection) -> None:
     for column in ("display_name", "description", "permanent", "created_at", "updated_at"):
         if column in columns:
             select_parts.append(column)
-    rows = con.execute(
-        f"SELECT {', '.join(select_parts)} FROM tenants ORDER BY display_name COLLATE NOCASE, id COLLATE NOCASE"
-    ).fetchall()
+    rows = fetchall(con, f"SELECT {', '.join(select_parts)} FROM tenants ORDER BY display_name ASC, id ASC")
 
     if not rows:
         print("Aucun espace de travail trouvé dans la base.")
@@ -189,9 +258,9 @@ def list_tenants(con: sqlite3.Connection) -> None:
 
     table_rows: list[list[str]] = []
     for row in rows:
-        tenant_id = str(row["id"] or "")
+        tenant_id = str(row.get("id") or "")
         counts = tenant_counts(con, tenant_id)
-        permanent = "oui" if "permanent" in row.keys() and int(row["permanent"] or 0) else "non"
+        permanent = "oui" if int(row.get("permanent") or 0) else "non"
         table_rows.append([
             tenant_display_name(row),
             tenant_id,
@@ -207,36 +276,60 @@ def list_tenants(con: sqlite3.Connection) -> None:
     )
 
 
-def ensure_tenant(con: sqlite3.Connection, tenant_id: str) -> None:
+def ensure_tenant(con: Any, tenant_id: str) -> None:
+    """Ensure a tenant row exists without relying on partial INSERT defaults.
+
+    MariaDB runs in strict mode in production. Even an INSERT ... ON DUPLICATE KEY
+    UPDATE statement must provide values for NOT NULL columns without defaults
+    before the duplicate-key branch can run. Check first, then insert a complete
+    tenant row only when the tenant is genuinely missing.
+    """
     now = utc_now().isoformat()
-    con.execute(
+    existing = fetchone(con, "SELECT id FROM tenants WHERE id = %s", (tenant_id,))
+    if existing:
+        execute(
+            con,
+            """
+            UPDATE tenants
+            SET updated_at = CASE WHEN updated_at = '' THEN %s ELSE updated_at END
+            WHERE id = %s
+            """,
+            (now, tenant_id),
+        )
+        return
+
+    display_name = "Défaut" if tenant_id == "default" else tenant_id
+    permanent = 1 if tenant_id == "default" else 0
+    execute(
+        con,
         """
-        INSERT INTO tenants(id, created_at, updated_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at
+        INSERT INTO tenants(id, created_at, updated_at, display_name, description, permanent)
+        VALUES (%s, %s, %s, %s, %s, %s)
         """,
-        (tenant_id, now, now),
+        (tenant_id, now, now, display_name, "", permanent),
     )
 
 
-def count_active_devices(con: sqlite3.Connection, tenant_id: str) -> int:
-    row = con.execute(
+def count_active_devices(con: Any, tenant_id: str) -> int:
+    row = fetchone(
+        con,
         """
-        SELECT count(*)
+        SELECT count(*) AS total
         FROM authorized_devices
-        WHERE tenant_id = ? AND status = 'active' AND revoked_at IS NULL
+        WHERE tenant_id = %s AND status = 'active' AND revoked_at IS NULL
         """,
         (tenant_id,),
-    ).fetchone()
-    return int(row[0] if row else 0)
+    )
+    return int(row.get("total") if row else 0)
 
 
-def record_audit(con: sqlite3.Connection, tenant_id: str, enrollment_id: str, label: str, expires_at: str) -> None:
+def record_audit(con: Any, tenant_id: str, enrollment_id: str, label: str, expires_at: str) -> None:
     try:
-        con.execute(
+        execute(
+            con,
             """
             INSERT INTO device_audit_log(tenant_id, device_id, event_type, created_at, payload_json)
-            VALUES (?, NULL, ?, ?, ?)
+            VALUES (%s, NULL, %s, %s, %s)
             """,
             (
                 tenant_id,
@@ -250,18 +343,24 @@ def record_audit(con: sqlite3.Connection, tenant_id: str, enrollment_id: str, la
                 }),
             ),
         )
-    except sqlite3.Error:
+    except Exception:
         # The enrollment itself is more important than the audit line in a recovery path.
         pass
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Create a temporary OpenIRN enrollment code directly in the server SQLite database.",
+        description="Create a temporary OpenIRN enrollment code directly in MariaDB.",
     )
-    parser.add_argument("--db", default=str(DEFAULT_DB), help="SQLite database path. Default: %(default)s")
+    parser.add_argument(
+        "--mysql-url",
+        default=os.environ.get("OPENIRN_API_MYSQL_URL", ""),
+        help="MariaDB URL. Default: OPENIRN_API_MYSQL_URL",
+    )
     parser.add_argument(
         "--list-tenants",
+        "--list-tenant",
+        dest="list_tenants",
         action="store_true",
         help="List existing tenants with their id, then exit without creating an enrollment code.",
     )
@@ -281,22 +380,13 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    db_path = Path(args.db).expanduser()
     requested_tenant_id = tenant_argument(args.tenant)
-
-    if not db_path.exists():
-        print(f"ERROR: SQLite database not found: {db_path}", file=sys.stderr)
-        print("Start the OpenIRN API once first, or pass --db /path/to/openirn.sqlite3.", file=sys.stderr)
-        return 2
-
-    with sqlite3.connect(db_path) as con:
-        con.row_factory = sqlite3.Row
-        con.execute("PRAGMA foreign_keys = ON")
-
+    con = connect(args.mysql_url)
+    try:
         if args.list_tenants:
             print("OpenIRN tenants")
             print("---------------")
-            print(f"Database: {db_path}")
+            print("Database: MariaDB")
             print()
             list_tenants(con)
             return 0
@@ -323,12 +413,13 @@ def main() -> int:
             )
             return 3
 
-        con.execute(
+        execute(
+            con,
             """
             INSERT INTO device_enrollment_codes(
                 tenant_id, enrollment_id, code_hash, created_by_user_id, label,
                 expires_at, consumed_at, consumed_by_device_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?)
+            ) VALUES (%s, %s, %s, %s, %s, %s, NULL, NULL, %s)
             """,
             (
                 tenant_id,
@@ -342,6 +433,8 @@ def main() -> int:
         )
         record_audit(con, tenant_id, enrollment_id, str(args.label or "Bootstrap terminal")[:120], expires_at)
         con.commit()
+    finally:
+        con.close()
 
     qr_payload = {
         "type": "openirn.deviceEnrollment",
@@ -354,7 +447,7 @@ def main() -> int:
     print("OpenIRN bootstrap enrollment code")
     print("--------------------------------")
     print(f"Tenant       : {tenant_id}")
-    print(f"Database     : {db_path}")
+    print("Database     : MariaDB")
     print(f"Enrollment ID: {enrollment_id}")
     print(f"Expires at   : {expires_at}")
     print(f"Code         : {display_code}")

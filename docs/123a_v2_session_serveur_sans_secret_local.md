@@ -13,7 +13,7 @@ Le client conserve localement uniquement des métadonnées non sensibles :
 
 Le client ne conserve plus localement :
 
-- bearer global ;
+- ancien secret global historique ;
 - jeton terminal ;
 - jeton de session.
 
@@ -26,14 +26,14 @@ Après authentification d’un utilisateur serveur, l’API délivre un jeton de
 - `LocalSyncConfigurationRepository` revient à `SharedPreferences`, mais uniquement pour les métadonnées publiques du terminal.
 - Les anciens secrets de fallback créés par le patch 123A sont purgés.
 - L’appairage terminal n’enregistre plus de jeton terminal local.
-- La saisie bearer d’urgence reste possible mais n’est conservée qu’en mémoire.
+- Les jetons legacy éventuellement saisis pour migration restent en mémoire et ne constituent plus un accès d’administration.
 
 ## Changements API
 
 - Ajout de la table `api_sessions`.
 - `/auth/verify` vérifie le terminal actif via `deviceId`, valide le code utilisateur, puis crée une session courte.
 - Les endpoints protégés acceptent :
-  - bearer global historique ;
+  - ancien secret global historique ;
   - ancien jeton terminal de transition ;
   - nouveau jeton de session `ost_*`.
 - `/users` peut être lu par un terminal autorisé sans session afin d’afficher la liste des profils à déverrouiller.

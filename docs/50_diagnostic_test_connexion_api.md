@@ -25,11 +25,10 @@ OpenIRN a aussi besoin des entitlements de fichiers utilisateur pour l’export/
 <true/>
 ```
 
-Appliquer :
+Vérifier ensuite que les entitlements sont bien présents, puis reconstruire l’application macOS :
 
 ```bash
-chmod +x tools/ensure_openirn_network_permissions.sh
-./tools/ensure_openirn_network_permissions.sh
+grep -R "com.apple.security.network.client" flutter/macos/Runner/*.entitlements
 cd flutter
 flutter clean
 flutter pub get

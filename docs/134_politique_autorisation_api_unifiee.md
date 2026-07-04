@@ -1,87 +1,56 @@
 # Patch 134 — Politique d’autorisation API unifiée
 
-Ce patch centralise les règles d’autorisation côté API OpenIRN.
-
 ## Objectif
 
-OpenIRN fonctionne maintenant avec :
+Centraliser les décisions d’autorisation serveur afin de distinguer clairement :
 
-- un `deviceId` public qui identifie un terminal enrôlé ;
-- une session serveur courte conservée uniquement en mémoire côté client ;
-- un bearer serveur de transition pour les opérations d’administration d’urgence.
+- les sessions serveur courtes associées à un utilisateur et à un rôle ;
+- les jetons de terminal, limités à l’identité technique du terminal ;
+- l’identifiant public du terminal, utilisable pour certains accès de lecture ;
+- les opérations d’administration et d’écriture, réservées aux sessions serveur autorisées.
 
-Le `deviceId` ne doit donc jamais donner de droits d’écriture ou d’administration.
+## Mise à jour 163B
 
-## Politique appliquée
+Le bearer global historique est déprécié :
 
-### Lecture simple
+- `Authorization: Bearer` reste le schéma HTTP utilisé par les sessions serveur ;
+- `OPENIRN_API_TOKEN` est désactivé par défaut ;
+- même réactivé explicitement pour migration, le bearer global legacy ne donne plus de droits d’écriture ni d’administration ;
+- les opérations sensibles exigent une session serveur `ost_…` et un rôle compatible ;
+- les sauvegardes utilisent `OPENIRN_API_BACKUP_SIGNATURE_SECRET`, jamais `OPENIRN_API_TOKEN` comme secret de secours.
 
-Acceptée avec :
+## Règles par niveau
 
-- bearer de transition ;
-- session serveur courte ;
-- ancien jeton terminal de transition ;
-- terminal actif via `X-OpenIRN-Device-Id`.
+### Lecture et connectivité
 
-Endpoints concernés :
+Les endpoints de lecture nécessaires au démarrage peuvent accepter :
 
-- `/sync/status` ;
-- `/sync/pull` ;
-- `/sync/events` ;
-- `/campaigns` ;
-- `/users` ;
-- `/referential/official/current`.
+- une session serveur valide ;
+- un jeton de terminal legacy encore actif ;
+- un terminal actif identifié par `X-OpenIRN-Device-Id` quand l’endpoint le permet ;
+- temporairement, le bearer global legacy si `OPENIRN_LEGACY_GLOBAL_BEARER_ENABLED=true` est configuré côté serveur.
 
 ### Écriture métier
 
-Acceptée uniquement avec :
-
-- bearer serveur de transition ;
-- session serveur courte d’un profil ayant des droits d’écriture.
-
-Rôles autorisés :
+Les opérations d’écriture exigent une session serveur avec l’un des rôles autorisés :
 
 - Administrateur ;
 - Pilote IRN ;
 - Évaluateur ;
-- Validateur.
+- Relecteur, selon l’opération.
 
-Endpoint concerné :
+### Administration
 
-- `/sync/push`.
+Les opérations d’administration exigent une session serveur d’un utilisateur Administrateur, ou Administrateur/Pilote IRN lorsque l’endpoint le prévoit explicitement.
 
-### Administration stricte
+Un jeton de terminal ou le bearer global legacy ne suffit pas.
 
-Acceptée uniquement avec :
+## Conséquence pratique
 
-- bearer serveur de transition ;
-- session serveur courte Administrateur.
+Le header reste visuellement identique :
 
-Endpoints concernés :
+```http
+Authorization: Bearer ost_...
+```
 
-- terminaux autorisés ;
-- utilisateurs ;
-- sessions serveur ;
-- journal sécurité ;
-- référentiel officiel ;
-- maintenance serveur.
-
-### Pilotage campagne
-
-Accepté uniquement avec :
-
-- bearer serveur de transition ;
-- session serveur courte Administrateur ou Pilote IRN.
-
-Endpoints concernés :
-
-- `/campaigns/revisions` ;
-- `/campaigns/conflicts` ;
-- `/campaigns/revision` ;
-- `/campaigns/restore`.
-
-## Compatibilité
-
-Le bearer de transition reste accepté pour les opérations d’administration et d’écriture afin de conserver une procédure d’urgence côté serveur.
-
-Les anciens jetons terminaux restent acceptés uniquement pour les lectures pendant la période de transition. Ils ne sont plus acceptés pour les endpoints d’écriture ou d’administration.
+La différence est dans la nature du token : il s’agit maintenant d’une session courte contrôlée par le serveur, et non d’un secret global partagé.

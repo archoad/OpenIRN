@@ -2,7 +2,7 @@
 
 ## Objectif
 
-Ce patch ajoute le parcours côté nouveau terminal : l'utilisateur ne saisit plus le bearer global. Il saisit uniquement un code d'appairage généré depuis :
+Ce patch ajoute le parcours côté nouveau terminal : l'utilisateur ne saisit aucun secret global. Il saisit uniquement un code d'appairage généré depuis :
 
 ```text
 Administration → Terminaux autorisés → Autoriser un nouveau terminal
@@ -49,7 +49,7 @@ Après validation, l'application :
 
 ## Sécurité
 
-- le bearer global n'est pas saisi sur le nouveau terminal ;
+- aucun secret global n'est saisi sur le nouveau terminal ;
 - le code d'appairage est à usage unique ;
 - le code expire côté serveur ;
 - le terminal reçoit son propre jeton révocable ;

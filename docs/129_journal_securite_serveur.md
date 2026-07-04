@@ -20,7 +20,7 @@ Ajouter une page d'administration pour consulter les événements de sécurité 
 GET /security/audit?tenantId=archoad&limit=100&includeAuthAttempts=true&includeDeviceAudit=true
 ```
 
-L'endpoint exige une session serveur courte ou un bearer de transition. Il n'est pas accessible avec un simple terminal enrôlé sans authentification d'administration.
+L'endpoint exige une session serveur courte d’administration. Il n'est pas accessible avec un simple terminal enrôlé sans authentification d'administration.
 
 ## Fichiers
 

@@ -595,7 +595,7 @@ class _ServerSummaryCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'État serveur SQLite',
+              'État serveur MariaDB',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 8),

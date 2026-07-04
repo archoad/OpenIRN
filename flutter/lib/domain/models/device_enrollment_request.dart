@@ -1,6 +1,7 @@
 class DeviceEnrollmentRequest {
   final String tenantId;
   final String requestId;
+  final String deviceId;
   final String tenantDisplayName;
   final String deviceName;
   final String platform;
@@ -16,6 +17,7 @@ class DeviceEnrollmentRequest {
   const DeviceEnrollmentRequest({
     required this.tenantId,
     required this.requestId,
+    this.deviceId = '',
     this.tenantDisplayName = '',
     required this.deviceName,
     required this.platform,
@@ -89,6 +91,7 @@ class DeviceEnrollmentRequest {
     return DeviceEnrollmentRequest(
       tenantId: json['tenantId']?.toString() ?? '',
       requestId: json['requestId']?.toString() ?? '',
+      deviceId: json['deviceId']?.toString() ?? '',
       tenantDisplayName: json['tenantDisplayName']?.toString().trim() ?? '',
       deviceName: json['deviceName']?.toString() ?? '',
       platform: json['platform']?.toString() ?? '',

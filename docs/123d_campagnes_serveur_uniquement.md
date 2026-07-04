@@ -38,7 +38,7 @@ GET /sync/pull
 GET /campaigns
 ```
 
-Les écritures restent protégées par une session/bearer valide.
+Les écritures restent protégées par une session serveur valide.
 
 ## Limites assumées
 

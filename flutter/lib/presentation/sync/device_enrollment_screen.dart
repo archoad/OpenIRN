@@ -32,6 +32,8 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
   late final TextEditingController _codeController;
   late final TextEditingController _deviceNameController;
   bool _working = false;
+  bool _terminalNameLocked = false;
+  String _localDeviceId = '';
   OpenIrnApiConnectionResult? _connectionResult;
   OpenIrnApiEnrollmentResult? _enrollmentResult;
 
@@ -42,6 +44,7 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
     _tenantIdController = TextEditingController(text: initialTenantId);
     _codeController = TextEditingController();
     _deviceNameController = TextEditingController(text: _defaultDeviceName());
+    _loadLocalTerminalIdentity();
   }
 
   @override
@@ -50,6 +53,26 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
     _codeController.dispose();
     _deviceNameController.dispose();
     super.dispose();
+  }
+
+  String _shortDeviceId(String value) {
+    final trimmed = value.trim();
+    if (trimmed.length <= 12) {
+      return trimmed;
+    }
+    return '${trimmed.substring(0, 6)}…${trimmed.substring(trimmed.length - 4)}';
+  }
+
+  Future<void> _loadLocalTerminalIdentity() async {
+    final configuration = await _configurationRepository.loadConfiguration();
+    if (!mounted) {
+      return;
+    }
+    final deviceId = configuration.deviceId.trim();
+    setState(() {
+      _localDeviceId = deviceId;
+      _terminalNameLocked = deviceId.isNotEmpty;
+    });
   }
 
   Future<void> _testServer() async {
@@ -75,8 +98,14 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
 
   Future<void> _requestEnrollmentApproval() async {
     final tenantId = _tenantIdController.text.trim();
-    final deviceName = _deviceNameController.text.trim();
-    if (tenantId.isEmpty || deviceName.isEmpty || _working) {
+    final deviceName = _terminalNameLocked
+        ? (_deviceNameController.text.trim().isEmpty
+              ? 'Terminal OpenIRN'
+              : _deviceNameController.text.trim())
+        : _deviceNameController.text.trim();
+    if (tenantId.isEmpty ||
+        (!_terminalNameLocked && deviceName.isEmpty) ||
+        _working) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -93,11 +122,14 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
       _enrollmentResult = null;
     });
 
+    final currentConfiguration = await _configurationRepository
+        .loadConfiguration();
     final result = await _apiClient.requestDeviceEnrollmentApproval(
       baseUrl: SyncConfiguration.fixedApiBaseUrl,
       tenantId: tenantId,
       deviceName: deviceName,
       platform: _platformName(),
+      deviceId: currentConfiguration.deviceId,
     );
 
     if (!mounted) {
@@ -125,12 +157,15 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
       _enrollmentResult = null;
     });
 
+    final currentConfiguration = await _configurationRepository
+        .loadConfiguration();
     final result = await _apiClient.consumeDeviceEnrollment(
       baseUrl: SyncConfiguration.fixedApiBaseUrl,
       tenantId: _tenantIdController.text,
       code: _codeController.text,
       deviceName: _deviceNameController.text,
       platform: _platformName(),
+      deviceId: currentConfiguration.deviceId,
     );
 
     if (!mounted) {
@@ -148,7 +183,8 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
       return;
     }
 
-    final deviceId = result.device?.deviceId.trim() ?? '';
+    final deviceId =
+        result.device?.deviceId.trim() ?? currentConfiguration.deviceId.trim();
     if (deviceId.isEmpty) {
       setState(() {
         _working = false;
@@ -340,17 +376,28 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
                         const SizedBox(height: 18),
                         TextFormField(
                           controller: _deviceNameController,
-                          autofocus: shouldAutofocusTextField(context),
+                          enabled: !_terminalNameLocked,
+                          autofocus:
+                              !_terminalNameLocked &&
+                              shouldAutofocusTextField(context),
                           textInputAction: TextInputAction.next,
                           autocorrect: false,
                           enableSuggestions: false,
-                          decoration: const InputDecoration(
+                          decoration: InputDecoration(
                             labelText: 'Nom de ce terminal',
                             hintText: 'Ex. iPhone Michel, PC Salle 1...',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.devices_other_outlined),
+                            helperText: _terminalNameLocked
+                                ? 'Terminal déjà identifié ${_shortDeviceId(_localDeviceId)} : le nom canonique serveur sera conservé.'
+                                : null,
+                            border: const OutlineInputBorder(),
+                            prefixIcon: const Icon(
+                              Icons.devices_other_outlined,
+                            ),
                           ),
                           validator: (value) {
+                            if (_terminalNameLocked) {
+                              return null;
+                            }
                             if ((value ?? '').trim().isEmpty) {
                               return 'Indique un nom reconnaissable pour ce terminal.';
                             }
@@ -548,7 +595,7 @@ class _IntroColumn extends StatelessWidget {
         Text('Appairage sécurisé', style: theme.textTheme.headlineSmall),
         const SizedBox(height: 8),
         const Text(
-          'Ce terminal va recevoir son propre jeton serveur. Le bearer global n’est pas saisi par l’utilisateur.',
+          'Ce terminal va recevoir son propre jeton serveur révocable. Aucun secret global n’est saisi par l’utilisateur.',
         ),
         const SizedBox(height: 12),
         const Wrap(

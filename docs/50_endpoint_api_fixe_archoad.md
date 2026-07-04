@@ -44,7 +44,9 @@ Réponse recommandée :
 
 ## Plateformes
 
-Le patch ajoute un script `tools/enable_openirn_network_permissions.sh` pour autoriser les connexions sortantes :
+Les connexions sortantes nécessitent :
 
 - Android : permission `android.permission.INTERNET` dans le manifest principal ;
 - macOS : entitlement `com.apple.security.network.client` dans les entitlements debug/release.
+
+Le script d’assistance initial ajouté par ce patch est historique et a été retiré du dépôt lors du nettoyage 163A.

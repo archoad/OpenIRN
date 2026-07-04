@@ -7,7 +7,9 @@ import json
 import os
 import re
 import secrets
-import sqlite3
+import shutil
+import subprocess
+import tempfile
 import uuid
 import urllib.error
 import urllib.parse
@@ -24,15 +26,18 @@ from fastapi.responses import StreamingResponse
 
 APP_VERSION = "0.10.0"
 DATA_DIR = Path(os.environ.get("OPENIRN_API_DATA_DIR", "/var/lib/openirn-api"))
-DB_PATH = Path(os.environ.get("OPENIRN_API_DB", str(DATA_DIR / "openirn.sqlite3")))
+MYSQL_URL = os.environ.get("OPENIRN_API_MYSQL_URL", "").strip()
 BACKUP_DIR = Path(os.environ.get("OPENIRN_API_BACKUP_DIR", str(DATA_DIR / "backups")))
 BACKUP_KEEP = int(os.environ.get("OPENIRN_API_BACKUP_KEEP", "30"))
 BACKUP_AUTO_ENABLED = os.environ.get("OPENIRN_API_BACKUP_AUTO_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
 BACKUP_PROTECTIVE_ENABLED = os.environ.get("OPENIRN_API_BACKUP_PROTECTIVE_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
 BACKUP_PROTECTIVE_MIN_INTERVAL_MINUTES = int(os.environ.get("OPENIRN_API_BACKUP_PROTECTIVE_MIN_INTERVAL_MINUTES", "30"))
 BACKUP_SIGNATURE_SECRET = os.environ.get("OPENIRN_API_BACKUP_SIGNATURE_SECRET", "").strip()
-SCHEMA_PATH = Path(os.environ.get("OPENIRN_API_SCHEMA", str(Path(__file__).resolve().parents[1] / "sql" / "schema.sql")))
+MARIADB_SCHEMA_PATH = Path(os.environ.get("OPENIRN_API_MARIADB_SCHEMA", str(Path(__file__).resolve().parents[1] / "sql" / "schema_mariadb.sql")))
+MARIADB_SCHEMA_COMPAT_PATH = Path(os.environ.get("OPENIRN_API_MARIADB_SCHEMA_COMPAT", str(Path(__file__).resolve().parents[1] / "sql" / "165a1_widen_sync_events.sql")))
+MARIADB_DUMP_BIN = os.environ.get("OPENIRN_MARIADB_DUMP_BIN", "").strip()
 TENANT_RE = re.compile(r"[^a-zA-Z0-9_.-]+")
+DEVICE_ID_RE = re.compile(r"[^a-zA-Z0-9_.:-]+")
 DEFAULT_TENANT_ID = "default"
 SOLUTION_ADMIN_TENANT_ID = (
     TENANT_RE.sub("_", os.environ.get("OPENIRN_SOLUTION_ADMIN_TENANT_ID", "archoad").strip())[:80]
@@ -54,19 +59,242 @@ AUTH_MAX_FAILED_BY_IP = int(os.environ.get("OPENIRN_AUTH_MAX_FAILED_BY_IP", "20"
 AUTH_ATTEMPT_RETENTION_DAYS = int(os.environ.get("OPENIRN_AUTH_ATTEMPT_RETENTION_DAYS", "30"))
 SESSION_TTL_MINUTES = int(os.environ.get("OPENIRN_SESSION_TTL_MINUTES", "480"))
 SESSION_IDLE_TIMEOUT_MINUTES = int(os.environ.get("OPENIRN_SESSION_IDLE_TIMEOUT_MINUTES", "30"))
+LEGACY_GLOBAL_BEARER_ENABLED = os.environ.get("OPENIRN_LEGACY_GLOBAL_BEARER_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
 
 # Unified API authorization policy.
 #
 # The device id is deliberately public: it identifies an enrolled terminal but
-# does not prove an authenticated user session.  Read-only connectivity and
-# synchronization checks may use an active terminal id, while every write or
-# administration operation must use a short-lived server session or the
-# transition bearer configured on the server.
+# does not prove an authenticated user session. Read-only connectivity and
+# synchronization checks may use an active terminal id. Every write or
+# administration operation must use a short-lived server session with the
+# appropriate user role. The historical global bearer is disabled by default
+# and never grants write or administration rights.
 API_ROLE_ADMIN = {"administrator"}
 API_ROLE_CAMPAIGN_MANAGER = {"administrator", "campaign_manager"}
 API_ROLE_WRITE = {"administrator", "campaign_manager", "evaluator", "reviewer"}
 API_ROLE_READ = {"administrator", "campaign_manager", "evaluator", "reviewer", "reader"}
 
+
+def _db_backend() -> str:
+    return "mariadb"
+
+
+def _using_mariadb() -> bool:
+    return True
+
+
+def _load_pymysql() -> Any:
+    try:
+        import pymysql  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError(
+            "Backend MariaDB demandé mais PyMySQL n'est pas installé. "
+            "Installez server/openirn-api/requirements-mariadb.txt dans le venv."
+        ) from exc
+    return pymysql
+
+
+def _parse_mysql_url() -> dict[str, Any]:
+    if not MYSQL_URL:
+        raise RuntimeError("OPENIRN_API_MYSQL_URL est requis pour démarrer OpenIRN")
+    parsed = urllib.parse.urlparse(MYSQL_URL)
+    if parsed.scheme not in {"mysql", "mysql+pymysql", "mariadb", "mariadb+pymysql"}:
+        raise RuntimeError("OPENIRN_API_MYSQL_URL doit utiliser mysql+pymysql:// ou mariadb+pymysql://")
+    database = parsed.path.lstrip("/")
+    if not database:
+        raise RuntimeError("OPENIRN_API_MYSQL_URL ne contient pas de nom de base")
+    query = urllib.parse.parse_qs(parsed.query)
+    return {
+        "host": parsed.hostname or "127.0.0.1",
+        "port": int(parsed.port or 3306),
+        "user": urllib.parse.unquote(parsed.username or ""),
+        "password": urllib.parse.unquote(parsed.password or ""),
+        "database": database,
+        "charset": (query.get("charset") or ["utf8mb4"])[0] or "utf8mb4",
+    }
+
+
+def _mariadb_target_label() -> str:
+    try:
+        config = _parse_mysql_url()
+        return f"{config['user']}@{config['host']}:{config['port']}/{config['database']}"
+    except Exception:
+        return "mariadb:configuration-incomplete"
+
+
+class _DbRow:
+    def __init__(self, values: tuple[Any, ...], columns: list[str]):
+        self._values = tuple(values)
+        self._columns = list(columns)
+        self._mapping = {column: self._values[index] for index, column in enumerate(self._columns)}
+
+    def __getitem__(self, key: int | str) -> Any:
+        if isinstance(key, str):
+            return self._mapping[key]
+        return self._values[key]
+
+    def __iter__(self):
+        return iter(self._values)
+
+    def __len__(self) -> int:
+        return len(self._values)
+
+    def keys(self) -> list[str]:
+        return list(self._columns)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._mapping.get(key, default)
+
+    def __repr__(self) -> str:
+        return repr(self._mapping)
+
+
+class _MySQLCursorResult:
+    def __init__(self, cursor: Any):
+        self._cursor = cursor
+        self._columns = [item[0] for item in (cursor.description or [])]
+
+    def _wrap(self, row: Any) -> _DbRow | None:
+        if row is None:
+            return None
+        if isinstance(row, dict):
+            columns = list(row.keys())
+            return _DbRow(tuple(row[column] for column in columns), columns)
+        return _DbRow(tuple(row), self._columns)
+
+    def fetchone(self) -> _DbRow | None:
+        return self._wrap(self._cursor.fetchone())
+
+    def fetchall(self) -> list[_DbRow]:
+        return [row for raw in self._cursor.fetchall() if (row := self._wrap(raw)) is not None]
+
+    def __iter__(self):
+        return iter(self.fetchall())
+
+
+class DbError(RuntimeError):
+    pass
+
+
+class _MySQLConnection:
+    def __init__(self):
+        pymysql = _load_pymysql()
+        config = _parse_mysql_url()
+        try:
+            self._con = pymysql.connect(
+                host=config["host"],
+                port=int(config["port"]),
+                user=config["user"],
+                password=config["password"],
+                database=config["database"],
+                charset=config.get("charset") or "utf8mb4",
+                autocommit=False,
+            )
+        except Exception as exc:
+            raise DbError(f"Connexion MariaDB impossible: {exc}") from exc
+
+    def execute(self, sql: str, parameters: Any = None) -> _MySQLCursorResult:
+        translated = _translate_mysql_sql(sql)
+        cursor = self._con.cursor()
+        try:
+            cursor.execute(translated, parameters or None)
+        except Exception as exc:
+            try:
+                self._con.rollback()
+            except Exception:
+                pass
+            raise DbError(f"Erreur MariaDB: {exc}; SQL={translated}") from exc
+        return _MySQLCursorResult(cursor)
+
+    def executescript(self, script: str) -> None:
+        for statement in _split_sql_script(_strip_sql_comments(script)):
+            if statement.strip():
+                self.execute(statement)
+
+    def commit(self) -> None:
+        self._con.commit()
+
+    def rollback(self) -> None:
+        self._con.rollback()
+
+    def close(self) -> None:
+        self._con.close()
+
+    def __enter__(self) -> "_MySQLConnection":
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        if exc_type is None:
+            self.commit()
+        else:
+            self.rollback()
+
+
+def _strip_sql_comments(script: str) -> str:
+    lines: list[str] = []
+    for line in script.splitlines():
+        if line.strip().startswith("--"):
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _split_sql_script(script: str) -> list[str]:
+    statements: list[str] = []
+    current: list[str] = []
+    in_single = False
+    in_double = False
+    escape = False
+    for char in script:
+        current.append(char)
+        if escape:
+            escape = False
+            continue
+        if char == "\\":
+            escape = True
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+            continue
+        if char == '"' and not in_single:
+            in_double = not in_double
+            continue
+        if char == ";" and not in_single and not in_double:
+            statement = "".join(current).strip()
+            current = []
+            if statement:
+                statements.append(statement[:-1].strip())
+    tail = "".join(current).strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
+
+def _translate_mysql_sql(sql: str) -> str:
+    translated = sql.strip()
+    low = translated.lower()
+    if low.startswith("pragma foreign_keys"):
+        return "SET FOREIGN_KEY_CHECKS = 0" if "off" in low else "SET FOREIGN_KEY_CHECKS = 1"
+    if low.startswith("pragma journal_mode"):
+        return "SELECT 1"
+
+    translated = re.sub(r"\bINSERT\s+OR\s+IGNORE\s+INTO\b", "INSERT IGNORE INTO", translated, flags=re.IGNORECASE)
+    translated = re.sub(r"\bINSERT\s+OR\s+REPLACE\s+INTO\b", "REPLACE INTO", translated, flags=re.IGNORECASE)
+
+    if re.search(r"ON\s+CONFLICT\s*\([^)]*\)\s*DO\s+NOTHING", translated, flags=re.IGNORECASE | re.DOTALL):
+        translated = re.sub(r"\bINSERT\s+INTO\b", "INSERT IGNORE INTO", translated, count=1, flags=re.IGNORECASE)
+        translated = re.sub(r"\s*ON\s+CONFLICT\s*\([^)]*\)\s*DO\s+NOTHING\s*", "", translated, flags=re.IGNORECASE | re.DOTALL)
+
+    if re.search(r"ON\s+CONFLICT\s*\([^)]*\)\s*DO\s+UPDATE\s+SET", translated, flags=re.IGNORECASE | re.DOTALL):
+        translated = re.sub(
+            r"\s*ON\s+CONFLICT\s*\([^)]*\)\s*DO\s+UPDATE\s+SET\s*",
+            " ON DUPLICATE KEY UPDATE ",
+            translated,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        translated = re.sub(r"\bexcluded\.([A-Za-z_][A-Za-z0-9_]*)\b", r"VALUES(\1)", translated, flags=re.IGNORECASE)
+
+    return translated.replace("?", "%s")
 
 
 app = FastAPI(
@@ -95,6 +323,14 @@ def _safe_segment(value: Any, fallback: str) -> str:
         return fallback
     cleaned = TENANT_RE.sub("_", raw)
     return cleaned[:80] or fallback
+
+
+def _normalize_device_id(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    cleaned = DEVICE_ID_RE.sub("_", raw)
+    return cleaned[:160].strip("._-:") or ""
 
 
 UUID_RE = re.compile(
@@ -128,10 +364,10 @@ def _json_sha256(value: Any) -> str:
 
 
 def _backup_signing_secret() -> str:
-    # Prefer an explicit backup secret. Fall back to the API bearer during the
-    # transition so existing installations get signed backups without another
-    # mandatory setting.
-    return BACKUP_SIGNATURE_SECRET or _configured_api_token()
+    # Backups use their own dedicated secret. OPENIRN_API_TOKEN is deliberately
+    # not reused here: the historical global bearer is deprecated and must not
+    # remain a hidden signing dependency.
+    return BACKUP_SIGNATURE_SECRET
 
 
 def _backup_signature_payload(metadata: dict[str, Any]) -> dict[str, Any]:
@@ -197,8 +433,14 @@ def _parse_datetime(value: Any) -> datetime:
         return datetime.fromtimestamp(0, timezone.utc)
 
 
-def _configured_api_token() -> str:
+def _raw_configured_api_token() -> str:
     return os.environ.get("OPENIRN_API_TOKEN", "").strip()
+
+
+def _configured_api_token() -> str:
+    if not LEGACY_GLOBAL_BEARER_ENABLED:
+        return ""
+    return _raw_configured_api_token()
 
 
 def _extract_bearer_token(request: Request) -> str:
@@ -225,8 +467,13 @@ def _enrollment_code_hash_with_pepper(tenant_id: str, code: str, pepper: str) ->
 
 
 def _enrollment_code_hash(tenant_id: str, code: str) -> str:
-    pepper = _configured_api_token() or "openirn-device-enrollment"
-    return _enrollment_code_hash_with_pepper(tenant_id, code, pepper)
+    # New enrollment codes no longer depend on OPENIRN_API_TOKEN. This keeps
+    # terminal pairing independent from the deprecated global bearer.
+    return _enrollment_code_hash_with_pepper(
+        tenant_id,
+        code,
+        "openirn-device-enrollment-v2",
+    )
 
 
 def _bootstrap_enrollment_code_hash(tenant_id: str, code: str) -> str:
@@ -241,9 +488,13 @@ def _enrollment_code_hash_candidates(tenant_id: str, code: str) -> list[str]:
     hashes = [
         _enrollment_code_hash(tenant_id, code),
         _bootstrap_enrollment_code_hash(tenant_id, code),
+        _enrollment_code_hash_with_pepper(tenant_id, code, "openirn-device-enrollment"),
     ]
-    fallback_hash = _enrollment_code_hash_with_pepper(tenant_id, code, "openirn-device-enrollment")
-    hashes.append(fallback_hash)
+    legacy_api_token = _raw_configured_api_token()
+    if legacy_api_token:
+        # Compatibility only for already-issued codes created before the
+        # bearer-global deprecation. This does not re-enable API bearer access.
+        hashes.append(_enrollment_code_hash_with_pepper(tenant_id, code, legacy_api_token))
     return list(dict.fromkeys(hashes))
 
 
@@ -341,6 +592,7 @@ def _session_auth_context(provided_token: str) -> dict[str, Any] | None:
                 """,
                 (now.isoformat(), row["tenant_id"], row["device_id"]),
             )
+            _touch_terminal(con, str(row["device_id"] or ""), now.isoformat())
             con.commit()
             return {
                 "authMode": "session",
@@ -350,7 +602,7 @@ def _session_auth_context(provided_token: str) -> dict[str, Any] | None:
                 "userId": row["user_id"],
                 "userRole": _role_normalize(row["user_role"]),
             }
-    except sqlite3.Error:
+    except DbError:
         return None
 
 
@@ -381,6 +633,7 @@ def _device_token_auth_context(provided_token: str) -> dict[str, Any] | None:
                 """,
                 (now, row["tenant_id"], row["device_id"]),
             )
+            _touch_terminal(con, str(row["device_id"] or ""), now)
             con.commit()
             return {
                 "authMode": "legacy_device_token",
@@ -389,7 +642,7 @@ def _device_token_auth_context(provided_token: str) -> dict[str, Any] | None:
                 "userId": "",
                 "userRole": "",
             }
-    except sqlite3.Error:
+    except DbError:
         return None
 
 
@@ -398,28 +651,30 @@ def _request_auth_context(request: Request) -> dict[str, Any] | None:
     if not provided_token:
         return None
 
-    expected_token = _configured_api_token()
-    if expected_token and hmac.compare_digest(provided_token, expected_token):
-        return {
-            "authMode": "server_bearer",
-            "tenantId": "",
-            "deviceId": "",
-            "userId": "server",
-            "userRole": "administrator",
-        }
-
     session_context = _session_auth_context(provided_token)
     if session_context is not None:
         return session_context
 
-    return _device_token_auth_context(provided_token)
+    device_context = _device_token_auth_context(provided_token)
+    if device_context is not None:
+        return device_context
+
+    expected_token = _configured_api_token()
+    if expected_token and hmac.compare_digest(provided_token, expected_token):
+        return {
+            "authMode": "legacy_global_bearer",
+            "tenantId": "",
+            "deviceId": "",
+            "userId": "",
+            "userRole": "",
+        }
+
+    return None
 
 
 def _is_administrator_context(context: dict[str, Any] | None) -> bool:
     if context is None:
         return False
-    if str(context.get("authMode") or "") == "server_bearer":
-        return True
     return (
         str(context.get("authMode") or "") == "session"
         and _role_normalize(context.get("userRole")) == "administrator"
@@ -443,9 +698,7 @@ def _request_has_api_authorization(request: Request) -> bool:
 
 
 def _authorization_unavailable_exception() -> HTTPException:
-    if not _configured_api_token():
-        return HTTPException(status_code=503, detail="Le jeton API OpenIRN n’est pas configuré sur le serveur")
-    return HTTPException(status_code=403, detail="Session expirée ou jeton API invalide")
+    return HTTPException(status_code=403, detail="Session expirée ou autorisation OpenIRN invalide")
 
 
 def _require_role_authorization(
@@ -460,13 +713,15 @@ def _require_role_authorization(
         raise _authorization_unavailable_exception()
 
     auth_mode = str(context.get("authMode") or "")
-    if auth_mode == "server_bearer":
-        return context
-
     if auth_mode == "legacy_device_token":
         raise HTTPException(
             status_code=403,
             detail="Ce terminal n’est pas autorisé pour modifier les données ou administrer OpenIRN",
+        )
+    if auth_mode == "legacy_global_bearer":
+        raise HTTPException(
+            status_code=403,
+            detail="Le bearer global legacy ne donne plus de droits d’écriture ou d’administration",
         )
 
     role = _role_normalize(context.get("userRole"))
@@ -512,7 +767,7 @@ def _require_device_or_authorized_read(request: Request, tenant_id: str) -> dict
     context = _request_auth_context(request)
     if context is not None:
         auth_mode = str(context.get("authMode") or "")
-        if auth_mode == "server_bearer":
+        if auth_mode == "legacy_global_bearer":
             return context
         if not tenant_id or str(context.get("tenantId") or "") == tenant_id:
             return context
@@ -547,7 +802,7 @@ def _request_client_ip(request: Request) -> str:
 
 
 def _record_auth_attempt(
-    con: sqlite3.Connection,
+    con: Any,
     tenant_id: str,
     *,
     device_id: str,
@@ -586,7 +841,7 @@ def _record_auth_attempt(
 
 
 def _recent_auth_failures(
-    con: sqlite3.Connection,
+    con: Any,
     tenant_id: str,
     column: str,
     value: str,
@@ -610,7 +865,7 @@ def _recent_auth_failures(
 
 
 def _enforce_auth_rate_limit(
-    con: sqlite3.Connection,
+    con: Any,
     tenant_id: str,
     *,
     device_id: str,
@@ -689,7 +944,7 @@ def _require_active_device(
 
 
 def _create_api_session(
-    con: sqlite3.Connection,
+    con: Any,
     tenant_id: str,
     device_id: str,
     user_id: str,
@@ -740,8 +995,9 @@ def _require_api_token(request: Request) -> None:
 def _require_sync_read_access(request: Request, tenant_id: str) -> None:
     """Authorize read-only synchronization endpoints.
 
-    Read-only endpoints accept either a transition bearer/session token or an
-    enrolled, active terminal id in X-OpenIRN-Device-Id.  A terminal id is not a
+    Read-only endpoints accept a session token, a legacy device token, an
+    enrolled active terminal id in X-OpenIRN-Device-Id, or, only when explicitly
+    re-enabled server-side, the deprecated global bearer. A terminal id is not a
     secret and never grants write or administration rights.
     """
     _require_device_or_authorized_read(request, tenant_id)
@@ -757,26 +1013,26 @@ def _pin_hash(pin: str, salt: str, iterations: int = PIN_ITERATIONS) -> str:
 
 
 @contextmanager
-def _db() -> Iterator[sqlite3.Connection]:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
+def _db() -> Iterator[Any]:
+    con = _MySQLConnection()
     try:
-        con.execute("PRAGMA foreign_keys = ON")
-        con.execute("PRAGMA journal_mode = WAL")
         yield con
     finally:
         con.close()
 
 
 def _apply_schema() -> None:
-    if not SCHEMA_PATH.exists():
-        raise RuntimeError(f"OpenIRN SQLite schema not found: {SCHEMA_PATH}")
+    if not MARIADB_SCHEMA_PATH.exists():
+        raise RuntimeError(f"OpenIRN MariaDB schema not found: {MARIADB_SCHEMA_PATH}")
     with _db() as con:
-        con.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        con.executescript(MARIADB_SCHEMA_PATH.read_text(encoding="utf-8"))
+        if MARIADB_SCHEMA_COMPAT_PATH.exists():
+            con.executescript(MARIADB_SCHEMA_COMPAT_PATH.read_text(encoding="utf-8"))
         _migrate_tenants_schema(con)
         _migrate_existing_entity_ids_to_uuid(con)
         _delete_legacy_revoked_authorized_devices(con)
+        _migrate_authorized_device_identity_schema(con)
+        _migrate_terminal_identity_schema(con)
         _ensure_tenant(con, DEFAULT_TENANT_ID)
         _backfill_default_tenant_display_name(con)
         _sync_solution_administrators_to_all_tenants(con)
@@ -790,22 +1046,42 @@ def _startup() -> None:
 
 
 
-def _table_columns(con: sqlite3.Connection, table_name: str) -> set[str]:
-    rows = con.execute(f"PRAGMA table_info({table_name})").fetchall()
-    return {str(row[1]) for row in rows}
+def _table_exists(con: Any, table_name: str) -> bool:
+    row = con.execute(
+        """
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = DATABASE() AND table_name = ?
+        """,
+        (table_name,),
+    ).fetchone()
+    return row is not None
 
 
-def _migrate_tenants_schema(con: sqlite3.Connection) -> None:
+def _table_columns(con: Any, table_name: str) -> set[str]:
+    rows = con.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = DATABASE() AND table_name = ?
+        ORDER BY ordinal_position
+        """,
+        (table_name,),
+    ).fetchall()
+    return {str(row[0]) for row in rows}
+
+
+def _migrate_tenants_schema(con: Any) -> None:
     columns = _table_columns(con, "tenants")
     if "display_name" not in columns:
-        con.execute("ALTER TABLE tenants ADD COLUMN display_name TEXT NOT NULL DEFAULT ''")
+        con.execute("ALTER TABLE tenants ADD COLUMN display_name VARCHAR(255) NOT NULL DEFAULT ''" if isinstance(con, _MySQLConnection) else "ALTER TABLE tenants ADD COLUMN display_name TEXT NOT NULL DEFAULT ''")
     if "description" not in columns:
-        con.execute("ALTER TABLE tenants ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+        con.execute("ALTER TABLE tenants ADD COLUMN description TEXT NOT NULL" if isinstance(con, _MySQLConnection) else "ALTER TABLE tenants ADD COLUMN description TEXT NOT NULL DEFAULT ''")
     if "permanent" not in columns:
-        con.execute("ALTER TABLE tenants ADD COLUMN permanent INTEGER NOT NULL DEFAULT 0")
+        con.execute("ALTER TABLE tenants ADD COLUMN permanent TINYINT(1) NOT NULL DEFAULT 0" if isinstance(con, _MySQLConnection) else "ALTER TABLE tenants ADD COLUMN permanent INTEGER NOT NULL DEFAULT 0")
 
 
-def _migration_applied(con: sqlite3.Connection, version: int) -> bool:
+def _migration_applied(con: Any, version: int) -> bool:
     row = con.execute(
         "SELECT 1 FROM schema_migrations WHERE version = ?",
         (version,),
@@ -813,14 +1089,14 @@ def _migration_applied(con: sqlite3.Connection, version: int) -> bool:
     return row is not None
 
 
-def _record_migration(con: sqlite3.Connection, version: int, name: str) -> None:
+def _record_migration(con: Any, version: int, name: str) -> None:
     con.execute(
         "INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (?, ?)",
         (version, name),
     )
 
 
-def _alias_target(con: sqlite3.Connection, entity_type: str, old_id: str, scope_id: str = "") -> str:
+def _alias_target(con: Any, entity_type: str, old_id: str, scope_id: str = "") -> str:
     row = con.execute(
         """
         SELECT new_id FROM id_aliases
@@ -832,7 +1108,7 @@ def _alias_target(con: sqlite3.Connection, entity_type: str, old_id: str, scope_
 
 
 def _store_alias(
-    con: sqlite3.Connection,
+    con: Any,
     *,
     entity_type: str,
     old_id: str,
@@ -877,7 +1153,7 @@ def _rewrite_json_text(raw_text: str, mappings: dict[str, str]) -> str:
 
 
 def _rewrite_json_column(
-    con: sqlite3.Connection,
+    con: Any,
     table: str,
     pk_columns: list[str],
     json_column: str,
@@ -904,7 +1180,7 @@ def _rewrite_json_column(
         )
 
 
-def _resolve_tenant_id(con: sqlite3.Connection, tenant_id: Any, fallback: str = DEFAULT_TENANT_ID) -> str:
+def _resolve_tenant_id(con: Any, tenant_id: Any, fallback: str = DEFAULT_TENANT_ID) -> str:
     requested = _safe_segment(tenant_id, fallback)
     row = con.execute("SELECT id FROM tenants WHERE id = ?", (requested,)).fetchone()
     if row is not None:
@@ -928,7 +1204,7 @@ def _resolve_tenant_id_for_request(value: Any, fallback: str = DEFAULT_TENANT_ID
         return requested
 
 
-def _default_tenant_id(con: sqlite3.Connection) -> str:
+def _default_tenant_id(con: Any) -> str:
     row = con.execute(
         "SELECT id FROM tenants WHERE permanent = 1 ORDER BY created_at ASC LIMIT 1"
     ).fetchone()
@@ -943,7 +1219,7 @@ def _tenant_id_for_creation(value: Any = None) -> str:
     return requested or _new_uuid()
 
 
-def _user_id_for_save(con: sqlite3.Connection, tenant_id: str, user_id: Any) -> str:
+def _user_id_for_save(con: Any, tenant_id: str, user_id: Any) -> str:
     requested = str(user_id or "").strip()
     if not requested:
         return _new_uuid()
@@ -958,7 +1234,7 @@ def _user_id_for_save(con: sqlite3.Connection, tenant_id: str, user_id: Any) -> 
     return created
 
 
-def _campaign_id_for_save(con: sqlite3.Connection, tenant_id: str, campaign_id: Any) -> str:
+def _campaign_id_for_save(con: Any, tenant_id: str, campaign_id: Any) -> str:
     requested = str(campaign_id or "").strip()
     if not requested:
         return _new_uuid()
@@ -973,11 +1249,11 @@ def _campaign_id_for_save(con: sqlite3.Connection, tenant_id: str, campaign_id: 
     return created
 
 
-def _migrate_existing_entity_ids_to_uuid(con: sqlite3.Connection) -> None:
+def _migrate_existing_entity_ids_to_uuid(con: Any) -> None:
     if _migration_applied(con, 156):
         return
 
-    con.execute("PRAGMA foreign_keys = OFF")
+    con.execute("SET FOREIGN_KEY_CHECKS = 0")
 
     tenant_map: dict[str, str] = {}
     tenant_rows = con.execute("SELECT id FROM tenants ORDER BY id ASC").fetchall()
@@ -1011,7 +1287,7 @@ def _migrate_existing_entity_ids_to_uuid(con: sqlite3.Connection) -> None:
             continue
         con.execute("UPDATE tenants SET id = ? WHERE id = ?", (new_id, old_id))
         for table in tenant_tables:
-            if table in {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}:
+            if _table_exists(con, table):
                 columns = _table_columns(con, table)
                 if "tenant_id" in columns:
                     con.execute(f"UPDATE {table} SET tenant_id = ? WHERE tenant_id = ?", (new_id, old_id))
@@ -1049,7 +1325,7 @@ def _migrate_existing_entity_ids_to_uuid(con: sqlite3.Connection) -> None:
         if old_user_id == new_user_id:
             continue
         for table, column in user_fk_tables:
-            columns = _table_columns(con, table) if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone() else set()
+            columns = _table_columns(con, table) if _table_exists(con, table) else set()
             if column in columns:
                 con.execute(f"UPDATE {table} SET {column} = ? WHERE {column} = ?", (new_user_id, old_user_id))
 
@@ -1075,7 +1351,7 @@ def _migrate_existing_entity_ids_to_uuid(con: sqlite3.Connection) -> None:
         if old_campaign_id == new_campaign_id:
             continue
         for table in ["campaign_states", "campaign_revisions", "sync_events"]:
-            columns = _table_columns(con, table) if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone() else set()
+            columns = _table_columns(con, table) if _table_exists(con, table) else set()
             if "campaign_id" in columns:
                 con.execute(
                     f"UPDATE {table} SET campaign_id = ? WHERE campaign_id = ?",
@@ -1100,21 +1376,19 @@ def _migrate_existing_entity_ids_to_uuid(con: sqlite3.Connection) -> None:
         ("sync_events", ["id"], "payload_json"),
         ("backup_audit_log", ["id"], "payload_json"),
     ]:
-        if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+        if _table_exists(con, table):
             _rewrite_json_column(con, table, pk_columns, json_column, mappings)
 
     _record_migration(con, 156, "uuid_entity_ids_runtime_migration")
-    con.execute("PRAGMA foreign_keys = ON")
+    con.execute("SET FOREIGN_KEY_CHECKS = 1")
 
 
 
-def _delete_legacy_revoked_authorized_devices(con: sqlite3.Connection) -> None:
+def _delete_legacy_revoked_authorized_devices(con: Any) -> None:
     """Remove devices that were soft-revoked by older OpenIRN versions."""
     if _migration_applied(con, 161):
         return
-    if not con.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='authorized_devices'"
-    ).fetchone():
+    if not _table_exists(con, "authorized_devices"):
         _record_migration(con, 161, "delete_legacy_revoked_authorized_devices")
         return
 
@@ -1150,6 +1424,125 @@ def _delete_legacy_revoked_authorized_devices(con: sqlite3.Connection) -> None:
     _record_migration(con, 161, "delete_legacy_revoked_authorized_devices")
 
 
+def _index_exists(con: Any, table_name: str, index_name: str) -> bool:
+    row = con.execute(
+        """
+        SELECT index_name
+        FROM information_schema.statistics
+        WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?
+        LIMIT 1
+        """,
+        (table_name, index_name),
+    ).fetchone()
+    return row is not None
+
+
+def _migrate_authorized_device_identity_schema(con: Any) -> None:
+    if not _table_exists(con, "authorized_devices"):
+        return
+    if not _index_exists(con, "authorized_devices", "idx_authorized_devices_device_identity"):
+        con.execute(
+            """
+            CREATE INDEX idx_authorized_devices_device_identity
+            ON authorized_devices(device_id, status, last_seen_at)
+            """
+        )
+    if not _migration_applied(con, 167):
+        _record_migration(con, 167, "authorized_device_unique_identity_view")
+
+
+
+def _migrate_terminal_identity_schema(con: Any) -> None:
+    """Create and backfill the global terminal identity table.
+
+    ``terminals`` stores the canonical identity of a physical terminal. The
+    ``authorized_devices`` table remains the tenant-scoped authorization table.
+    Enrollment may add a new authorization, but it must never rename an already
+    known terminal.
+    """
+    if not _table_exists(con, "terminals"):
+        con.execute(
+            """
+            CREATE TABLE terminals (
+                device_id VARCHAR(160) NOT NULL,
+                name VARCHAR(255) NOT NULL DEFAULT '',
+                platform VARCHAR(64) NOT NULL DEFAULT '',
+                created_at VARCHAR(40) NOT NULL,
+                updated_at VARCHAR(40) NOT NULL,
+                last_seen_at VARCHAR(40) NULL,
+                PRIMARY KEY (device_id),
+                KEY idx_terminals_updated (updated_at),
+                KEY idx_terminals_last_seen (last_seen_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+    if _table_exists(con, "device_enrollment_requests"):
+        request_columns = _table_columns(con, "device_enrollment_requests")
+        if "device_id" not in request_columns:
+            con.execute(
+                """
+                ALTER TABLE device_enrollment_requests
+                ADD COLUMN device_id VARCHAR(160) NOT NULL DEFAULT '' AFTER request_id
+                """
+            )
+
+    if _migration_applied(con, 168):
+        return
+    if not _table_exists(con, "authorized_devices"):
+        _record_migration(con, 168, "terminal_identity_table")
+        return
+
+    rows = con.execute(
+        """
+        SELECT device_id, name, platform, status, created_at, last_seen_at
+        FROM authorized_devices
+        WHERE device_id IS NOT NULL AND device_id <> ''
+        ORDER BY device_id ASC,
+                 CASE WHEN status = 'active' THEN 0 ELSE 1 END ASC,
+                 COALESCE(last_seen_at, created_at) DESC,
+                 created_at ASC
+        """
+    ).fetchall()
+    canonical: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        device_id = str(row["device_id"] or "").strip()
+        if not device_id or device_id in canonical:
+            continue
+        now = _utc_now().isoformat()
+        canonical[device_id] = {
+            "name": str(row["name"] or "").strip()[:120] or "Terminal OpenIRN",
+            "platform": str(row["platform"] or "").strip()[:80],
+            "created_at": str(row["created_at"] or now),
+            "updated_at": str(row["last_seen_at"] or row["created_at"] or now),
+            "last_seen_at": row["last_seen_at"],
+        }
+
+    for device_id, data in canonical.items():
+        con.execute(
+            """
+            INSERT IGNORE INTO terminals(device_id, name, platform, created_at, updated_at, last_seen_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                device_id,
+                data["name"],
+                data["platform"],
+                data["created_at"],
+                data["updated_at"],
+                data["last_seen_at"],
+            ),
+        )
+        con.execute(
+            """
+            UPDATE authorized_devices
+            SET name = ?, platform = ?
+            WHERE device_id = ?
+            """,
+            (data["name"], data["platform"], device_id),
+        )
+    _record_migration(con, 168, "terminal_identity_table")
+
+
 def _tenant_business_label_from_alias(value: str) -> str:
     raw = str(value or "").strip()
     if not raw:
@@ -1162,7 +1555,7 @@ def _tenant_business_label_from_alias(value: str) -> str:
     return " ".join(part[:1].upper() + part[1:] for part in label.split())
 
 
-def _tenant_alias_label(con: sqlite3.Connection, tenant_id: str) -> str:
+def _tenant_alias_label(con: Any, tenant_id: str) -> str:
     row = con.execute(
         """
         SELECT old_id
@@ -1186,7 +1579,7 @@ def _is_generic_tenant_display_name(value: str, tenant_id: str = "") -> bool:
     return normalized == "espace de travail" or (tenant_id and label == tenant_id)
 
 
-def _tenant_payload_from_row(con: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
+def _tenant_payload_from_row(con: Any, row: Any) -> dict[str, Any]:
     tenant_id = str(row["id"] or "")
     raw_display_name = str(_row_value(row, "display_name", "") or "").strip()
     display_name = raw_display_name
@@ -1244,7 +1637,7 @@ def _tenant_payload_from_row(con: sqlite3.Connection, row: sqlite3.Row) -> dict[
 
 
 
-def _tenant_display_name(con: sqlite3.Connection, tenant_id: str) -> str:
+def _tenant_display_name(con: Any, tenant_id: str) -> str:
     safe_tenant_id = str(tenant_id or "").strip()
     if not safe_tenant_id:
         return "Espace de travail"
@@ -1278,7 +1671,7 @@ def _user_display_name_from_parts(first_name: Any, last_name: Any, email: Any, f
         return email_value
     return fallback
 
-def _list_tenants(con: sqlite3.Connection) -> list[dict[str, Any]]:
+def _list_tenants(con: Any) -> list[dict[str, Any]]:
     _ensure_tenant(con, DEFAULT_TENANT_ID)
     rows = con.execute(
         """
@@ -1306,7 +1699,7 @@ def _safe_tenant_id_for_creation(value: Any) -> str:
 
 
 def _copy_user_to_tenant(
-    con: sqlite3.Connection,
+    con: Any,
     *,
     source_tenant_id: str,
     target_tenant_id: str,
@@ -1392,68 +1785,7 @@ def _copy_user_to_tenant(
         )
 
 
-def _ensure_device_access_for_tenant(
-    con: sqlite3.Connection,
-    *,
-    source_tenant_id: str,
-    target_tenant_id: str,
-    device_id: str,
-    actor_user_id: str,
-) -> None:
-    if not device_id:
-        return
-    existing = con.execute(
-        """
-        SELECT name, platform
-        FROM authorized_devices
-        WHERE tenant_id = ? AND device_id = ? AND status = 'active' AND revoked_at IS NULL
-        """,
-        (target_tenant_id, device_id),
-    ).fetchone()
-    if existing is not None:
-        return
-
-    source = con.execute(
-        """
-        SELECT name, platform
-        FROM authorized_devices
-        WHERE tenant_id = ? AND device_id = ? AND status = 'active' AND revoked_at IS NULL
-        """,
-        (source_tenant_id, device_id),
-    ).fetchone()
-    now = _utc_now().isoformat()
-    con.execute(
-        """
-        INSERT INTO authorized_devices(
-            tenant_id, device_id, name, platform, token_hash, status,
-            created_at, last_seen_at, revoked_at, invited_by_user_id, enrollment_id
-        ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, NULL, ?, ?)
-        ON CONFLICT(tenant_id, device_id) DO UPDATE SET
-            status = 'active',
-            revoked_at = NULL,
-            last_seen_at = excluded.last_seen_at
-        """,
-        (
-            target_tenant_id,
-            device_id,
-            str(source["name"] if source else "Terminal OpenIRN")[:120],
-            str(source["platform"] if source else "")[:80],
-            _secret_hash(f"tenant-device:{target_tenant_id}:{device_id}:{uuid.uuid4().hex}"),
-            now,
-            now,
-            actor_user_id,
-            "tenant-bootstrap",
-        ),
-    )
-    _record_device_audit(
-        con,
-        target_tenant_id,
-        "tenant.device_authorized",
-        device_id=device_id,
-        payload={"sourceTenantId": source_tenant_id, "actorUserId": actor_user_id},
-    )
-
-def _ensure_tenant(con: sqlite3.Connection, tenant_id: str) -> None:
+def _ensure_tenant(con: Any, tenant_id: str) -> None:
     now = _utc_now().isoformat()
     requested_tenant_id = _safe_segment(tenant_id, DEFAULT_TENANT_ID)
     resolved_tenant_id = _resolve_tenant_id(con, requested_tenant_id, DEFAULT_TENANT_ID)
@@ -1485,7 +1817,7 @@ def _ensure_tenant(con: sqlite3.Connection, tenant_id: str) -> None:
 
 
 
-def _backfill_default_tenant_display_name(con: sqlite3.Connection) -> None:
+def _backfill_default_tenant_display_name(con: Any) -> None:
     default_tenant_id = _resolve_tenant_id(con, DEFAULT_TENANT_ID, DEFAULT_TENANT_ID)
     if not default_tenant_id:
         return
@@ -1504,14 +1836,13 @@ def _backfill_default_tenant_display_name(con: sqlite3.Connection) -> None:
         )
 
 
-def _sync_solution_administrators_to_all_tenants(con: sqlite3.Connection) -> None:
-    """Replicate solution administrators from the solution tenant to tenants.
+def _sync_solution_administrators_to_all_tenants(con: Any) -> None:
+    """Replicate solution administrator accounts to tenants.
 
-    This is a bootstrap convenience, not a data merge between tenants: only
-    active administrator identities, their PIN credentials and active terminals
-    from the solution tenant are copied. Campaigns and ordinary users remain
-    tenant-local. Cross-tenant API authorization still relies on the original
-    solution-tenant session token.
+    Terminal authorizations are intentionally not replicated here. A physical
+    device may have a stable identity across the OpenIRN instance, but its
+    enrollment remains tenant-scoped: being enrolled in one workspace never
+    grants access to another workspace.
     """
     source_tenant_id = _resolve_tenant_id(con, SOLUTION_ADMIN_TENANT_ID, DEFAULT_TENANT_ID)
     if not source_tenant_id:
@@ -1543,17 +1874,6 @@ def _sync_solution_administrators_to_all_tenants(con: sqlite3.Connection) -> Non
     if not tenants:
         return
 
-    active_devices = con.execute(
-        """
-        SELECT device_id
-        FROM authorized_devices
-        WHERE tenant_id = ? AND status = 'active' AND revoked_at IS NULL
-        ORDER BY device_id ASC
-        """,
-        (source_tenant_id,),
-    ).fetchall()
-    actor_user_id = str(administrators[0]["user_id"] or "solution-admin")
-
     for tenant_row in tenants:
         target_tenant_id = str(tenant_row["id"] or "").strip()
         if not target_tenant_id:
@@ -1565,23 +1885,110 @@ def _sync_solution_administrators_to_all_tenants(con: sqlite3.Connection) -> Non
                 target_tenant_id=target_tenant_id,
                 user_id=str(administrator["user_id"] or ""),
             )
-        for device in active_devices:
-            _ensure_device_access_for_tenant(
-                con,
-                source_tenant_id=source_tenant_id,
-                target_tenant_id=target_tenant_id,
-                device_id=str(device["device_id"] or ""),
-                actor_user_id=actor_user_id,
+
+
+
+def _terminal_name_from_row(row: Any) -> str:
+    return str(_row_value(row, "terminal_name", "") or _row_value(row, "name", "") or "").strip()[:120] or "Terminal OpenIRN"
+
+
+def _terminal_platform_from_row(row: Any) -> str:
+    return str(_row_value(row, "terminal_platform", "") or _row_value(row, "platform", "") or "").strip()[:80]
+
+
+def _terminal_identity(con: Any, device_id: str) -> dict[str, Any] | None:
+    normalized_device_id = _normalize_device_id(device_id)
+    if not normalized_device_id or not _table_exists(con, "terminals"):
+        return None
+    row = con.execute(
+        """
+        SELECT device_id, name, platform, created_at, updated_at, last_seen_at
+        FROM terminals
+        WHERE device_id = ?
+        """,
+        (normalized_device_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "deviceId": str(row["device_id"] or ""),
+        "name": str(row["name"] or "").strip()[:120] or "Terminal OpenIRN",
+        "platform": str(row["platform"] or "").strip()[:80],
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+        "lastSeenAt": row["last_seen_at"],
+    }
+
+
+def _ensure_terminal_identity(
+    con: Any,
+    *,
+    device_id: str,
+    name: str,
+    platform: str = "",
+) -> tuple[dict[str, Any], bool]:
+    """Ensure a global terminal identity exists.
+
+    Returns ``(identity, already_known)``. Existing terminal names are never
+    overwritten by enrollment: explicit renaming must go through the dedicated
+    rename endpoint.
+    """
+    normalized_device_id = _normalize_device_id(device_id)
+    if not normalized_device_id:
+        raise HTTPException(status_code=400, detail="Invalid device id")
+    clean_name = str(name or "").strip()[:120] or "Terminal OpenIRN"
+    clean_platform = str(platform or "").strip()[:80]
+    now = _utc_now().isoformat()
+    existing = _terminal_identity(con, normalized_device_id)
+    if existing is not None:
+        canonical_platform = str(existing.get("platform") or "").strip()[:80]
+        if not canonical_platform and clean_platform:
+            con.execute(
+                """
+                UPDATE terminals
+                SET platform = ?, updated_at = ?
+                WHERE device_id = ?
+                """,
+                (clean_platform, now, normalized_device_id),
             )
+            existing = _terminal_identity(con, normalized_device_id) or existing
+        return existing, True
+    con.execute(
+        """
+        INSERT INTO terminals(device_id, name, platform, created_at, updated_at, last_seen_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (normalized_device_id, clean_name, clean_platform, now, now, now),
+    )
+    return {
+        "deviceId": normalized_device_id,
+        "name": clean_name,
+        "platform": clean_platform,
+        "createdAt": now,
+        "updatedAt": now,
+        "lastSeenAt": now,
+    }, False
 
 
-def _device_from_row(row: sqlite3.Row) -> dict[str, Any]:
+def _touch_terminal(con: Any, device_id: str, when: str | None = None) -> None:
+    normalized_device_id = _normalize_device_id(device_id)
+    if not normalized_device_id:
+        return
+    seen_at = when or _utc_now().isoformat()
+    con.execute(
+        """
+        UPDATE terminals
+        SET last_seen_at = ?, updated_at = ?
+        WHERE device_id = ?
+        """,
+        (seen_at, seen_at, normalized_device_id),
+    )
+
+
+def _device_tenant_membership_from_row(row: Any) -> dict[str, Any]:
     return {
         "tenantId": row["tenant_id"],
         "tenantDisplayName": str(_row_value(row, "tenant_display_name", "") or "").strip() or "Espace de travail",
-        "deviceId": row["device_id"],
-        "name": row["name"],
-        "platform": row["platform"],
         "status": row["status"],
         "createdAt": row["created_at"],
         "lastSeenAt": row["last_seen_at"],
@@ -1597,8 +2004,102 @@ def _device_from_row(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
+def _device_from_row(row: Any) -> dict[str, Any]:
+    membership = _device_tenant_membership_from_row(row)
+    return {
+        "tenantId": row["tenant_id"],
+        "tenantDisplayName": membership["tenantDisplayName"],
+        "deviceId": row["device_id"],
+        "name": _terminal_name_from_row(row),
+        "platform": _terminal_platform_from_row(row),
+        "status": row["status"],
+        "createdAt": row["created_at"],
+        "lastSeenAt": row["last_seen_at"],
+        "revokedAt": row["revoked_at"],
+        "invitedByUserId": row["invited_by_user_id"],
+        "invitedByUserDisplayName": membership["invitedByUserDisplayName"],
+        "enrollmentId": row["enrollment_id"],
+        "tenantIds": [membership["tenantId"]],
+        "tenantLabels": [membership["tenantDisplayName"]],
+        "tenantCount": 1,
+        "tenants": [membership],
+    }
+
+
+def _is_newer_device_row(candidate: dict[str, Any], current: dict[str, Any]) -> bool:
+    candidate_time = _parse_datetime(candidate.get("lastSeenAt") or candidate.get("createdAt"))
+    current_time = _parse_datetime(current.get("lastSeenAt") or current.get("createdAt"))
+    return candidate_time > current_time
+
+
+def _merge_device_identity(existing: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+    existing_tenants = list(existing.get("tenants") or [])
+    candidate_tenants = list(candidate.get("tenants") or [])
+    for membership in candidate_tenants:
+        tenant_id = str(membership.get("tenantId") or "").strip()
+        if not tenant_id:
+            continue
+        already = any(str(item.get("tenantId") or "").strip() == tenant_id for item in existing_tenants)
+        if not already:
+            existing_tenants.append(membership)
+
+    representative = candidate if _is_newer_device_row(candidate, existing) else existing
+    active_memberships = [item for item in existing_tenants if str(item.get("status") or "").lower() == "active" and not str(item.get("revokedAt") or "").strip()]
+    status = "active" if active_memberships else "revoked"
+    last_seen_values = [item.get("lastSeenAt") for item in existing_tenants if str(item.get("lastSeenAt") or "").strip()]
+    created_values = [item.get("createdAt") for item in existing_tenants if str(item.get("createdAt") or "").strip()]
+    revoked_values = [item.get("revokedAt") for item in existing_tenants if str(item.get("revokedAt") or "").strip()]
+    last_seen_at = max(last_seen_values, key=_parse_datetime) if last_seen_values else representative.get("lastSeenAt")
+    created_at = min(created_values, key=_parse_datetime) if created_values else representative.get("createdAt")
+    revoked_at = "" if status == "active" else (max(revoked_values, key=_parse_datetime) if revoked_values else representative.get("revokedAt"))
+
+    tenant_ids = [str(item.get("tenantId") or "").strip() for item in existing_tenants if str(item.get("tenantId") or "").strip()]
+    tenant_labels = [str(item.get("tenantDisplayName") or "").strip() or "Espace de travail" for item in existing_tenants]
+    existing.update(
+        {
+            "tenantId": representative.get("tenantId") or existing.get("tenantId"),
+            "tenantDisplayName": representative.get("tenantDisplayName") or existing.get("tenantDisplayName"),
+            "name": representative.get("name") or existing.get("name"),
+            "platform": representative.get("platform") or existing.get("platform"),
+            "status": status,
+            "createdAt": created_at,
+            "lastSeenAt": last_seen_at,
+            "revokedAt": revoked_at,
+            "invitedByUserId": representative.get("invitedByUserId") or existing.get("invitedByUserId"),
+            "invitedByUserDisplayName": representative.get("invitedByUserDisplayName") or existing.get("invitedByUserDisplayName"),
+            "enrollmentId": representative.get("enrollmentId") or existing.get("enrollmentId"),
+            "tenantIds": tenant_ids,
+            "tenantLabels": tenant_labels,
+            "tenantCount": len(tenant_ids),
+            "tenants": existing_tenants,
+        }
+    )
+    return existing
+
+
+def _group_devices_by_identity(devices: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for device in devices:
+        device_id = str(device.get("deviceId") or "").strip()
+        if not device_id:
+            continue
+        if device_id not in grouped:
+            grouped[device_id] = dict(device)
+            continue
+        grouped[device_id] = _merge_device_identity(grouped[device_id], device)
+    return sorted(
+        grouped.values(),
+        key=lambda item: (
+            1 if str(item.get("status") or "").lower() == "active" else 0,
+            _parse_datetime(item.get("lastSeenAt") or item.get("createdAt")),
+            str(item.get("name") or "").lower(),
+        ),
+        reverse=True,
+    )
+
+
 def _record_device_audit(
-    con: sqlite3.Connection,
+    con: Any,
     tenant_id: str,
     event_type: str,
     *,
@@ -1621,78 +2122,131 @@ def _record_device_audit(
 
 
 def _create_device(
-    con: sqlite3.Connection,
+    con: Any,
     tenant_id: str,
     *,
     name: str,
     platform: str = "",
     invited_by_user_id: str = "",
     enrollment_id: str = "",
+    device_id: str = "",
 ) -> tuple[dict[str, Any], str]:
-    device_id = f"device_{uuid.uuid4().hex}"
+    requested_device_id = _normalize_device_id(device_id)
+    effective_device_id = requested_device_id or f"device_{uuid.uuid4().hex}"
+    terminal_identity, terminal_already_known = _ensure_terminal_identity(
+        con,
+        device_id=effective_device_id,
+        name=name,
+        platform=platform,
+    )
     token = _new_device_token()
     now = _utc_now().isoformat()
-    clean_name = str(name or "").strip()[:120] or "Terminal OpenIRN"
-    clean_platform = str(platform or "").strip()[:80]
-    con.execute(
+    canonical_name = str(terminal_identity.get("name") or "").strip()[:120] or "Terminal OpenIRN"
+    canonical_platform = str(terminal_identity.get("platform") or platform or "").strip()[:80]
+    existing = con.execute(
         """
-        INSERT INTO authorized_devices(
-            tenant_id, device_id, name, platform, token_hash, status,
-            created_at, last_seen_at, revoked_at, invited_by_user_id, enrollment_id
-        ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, NULL, ?, ?)
+        SELECT 1
+        FROM authorized_devices
+        WHERE tenant_id = ? AND device_id = ?
         """,
-        (
-            tenant_id,
-            device_id,
-            clean_name,
-            clean_platform,
-            _secret_hash(token),
-            now,
-            now,
-            str(invited_by_user_id or "").strip(),
-            str(enrollment_id or "").strip(),
-        ),
-    )
+        (tenant_id, effective_device_id),
+    ).fetchone()
+    if existing is None:
+        con.execute(
+            """
+            INSERT INTO authorized_devices(
+                tenant_id, device_id, name, platform, token_hash, status,
+                created_at, last_seen_at, revoked_at, invited_by_user_id, enrollment_id
+            ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, NULL, ?, ?)
+            """,
+            (
+                tenant_id,
+                effective_device_id,
+                canonical_name,
+                canonical_platform,
+                _secret_hash(token),
+                now,
+                now,
+                str(invited_by_user_id or "").strip(),
+                str(enrollment_id or "").strip(),
+            ),
+        )
+        event_type = "device.created"
+    else:
+        con.execute(
+            """
+            UPDATE authorized_devices
+            SET name = ?, platform = ?, token_hash = ?, status = 'active',
+                last_seen_at = ?, revoked_at = NULL, invited_by_user_id = ?, enrollment_id = ?
+            WHERE tenant_id = ? AND device_id = ?
+            """,
+            (
+                canonical_name,
+                canonical_platform,
+                _secret_hash(token),
+                now,
+                str(invited_by_user_id or "").strip(),
+                str(enrollment_id or "").strip(),
+                tenant_id,
+                effective_device_id,
+            ),
+        )
+        event_type = "device.reenrolled"
+    _touch_terminal(con, effective_device_id, now)
     _record_device_audit(
         con,
         tenant_id,
-        "device.created",
-        device_id=device_id,
+        event_type,
+        device_id=effective_device_id,
         payload={
-            "name": clean_name,
-            "platform": clean_platform,
+            "name": canonical_name,
+            "platform": canonical_platform,
             "invitedByUserId": invited_by_user_id or "",
             "enrollmentId": enrollment_id or "",
+            "clientProvidedDeviceId": bool(requested_device_id),
+            "terminalAlreadyKnown": terminal_already_known,
+            "submittedNameIgnored": bool(terminal_already_known and str(name or "").strip() and str(name or "").strip()[:120] != canonical_name),
         },
     )
     row = con.execute(
         """
         SELECT d.tenant_id, COALESCE(NULLIF(t.display_name, ''), 'Espace de travail') AS tenant_display_name,
-               d.device_id, d.name, d.platform, d.status, d.created_at,
+               d.device_id,
+               COALESCE(NULLIF(tr.name, ''), d.name) AS name,
+               COALESCE(NULLIF(tr.platform, ''), d.platform) AS platform,
+               tr.name AS terminal_name,
+               tr.platform AS terminal_platform,
+               d.status, d.created_at,
                d.last_seen_at, d.revoked_at, d.invited_by_user_id, d.enrollment_id,
                u.first_name AS invited_by_first_name, u.last_name AS invited_by_last_name,
                u.email AS invited_by_email
         FROM authorized_devices d
+        LEFT JOIN terminals tr ON tr.device_id = d.device_id
         LEFT JOIN tenants t ON t.id = d.tenant_id
         LEFT JOIN users u ON u.tenant_id = d.tenant_id AND u.user_id = d.invited_by_user_id
         WHERE d.tenant_id = ? AND d.device_id = ?
         """,
-        (tenant_id, device_id),
+        (tenant_id, effective_device_id),
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=500, detail="Device creation failed")
     return (_device_from_row(row), token)
 
-
-def _list_devices(con: sqlite3.Connection, tenant_id: str) -> list[dict[str, Any]]:
+def _list_devices(con: Any, tenant_id: str) -> list[dict[str, Any]]:
     rows = con.execute(
         """
         SELECT d.tenant_id, COALESCE(NULLIF(t.display_name, ''), 'Espace de travail') AS tenant_display_name,
-               d.device_id, d.name, d.platform, d.status, d.created_at,
+               d.device_id,
+               COALESCE(NULLIF(tr.name, ''), d.name) AS name,
+               COALESCE(NULLIF(tr.platform, ''), d.platform) AS platform,
+               tr.name AS terminal_name,
+               tr.platform AS terminal_platform,
+               d.status, d.created_at,
                d.last_seen_at, d.revoked_at, d.invited_by_user_id, d.enrollment_id,
                u.first_name AS invited_by_first_name, u.last_name AS invited_by_last_name,
                u.email AS invited_by_email
         FROM authorized_devices d
+        LEFT JOIN terminals tr ON tr.device_id = d.device_id
         LEFT JOIN tenants t ON t.id = d.tenant_id
         LEFT JOIN users u ON u.tenant_id = d.tenant_id AND u.user_id = d.invited_by_user_id
         WHERE d.tenant_id = ?
@@ -1703,29 +2257,35 @@ def _list_devices(con: sqlite3.Connection, tenant_id: str) -> list[dict[str, Any
     return [_device_from_row(row) for row in rows]
 
 
-def _list_all_devices(con: sqlite3.Connection) -> list[dict[str, Any]]:
+def _list_all_devices(con: Any) -> list[dict[str, Any]]:
     rows = con.execute(
         """
         SELECT d.tenant_id, COALESCE(NULLIF(t.display_name, ''), 'Espace de travail') AS tenant_display_name,
-               d.device_id, d.name, d.platform, d.status, d.created_at,
+               d.device_id,
+               COALESCE(NULLIF(tr.name, ''), d.name) AS name,
+               COALESCE(NULLIF(tr.platform, ''), d.platform) AS platform,
+               tr.name AS terminal_name,
+               tr.platform AS terminal_platform,
+               d.status, d.created_at,
                d.last_seen_at, d.revoked_at, d.invited_by_user_id, d.enrollment_id,
                u.first_name AS invited_by_first_name, u.last_name AS invited_by_last_name,
                u.email AS invited_by_email
         FROM authorized_devices d
+        LEFT JOIN terminals tr ON tr.device_id = d.device_id
         LEFT JOIN tenants t ON t.id = d.tenant_id
         LEFT JOIN users u ON u.tenant_id = d.tenant_id AND u.user_id = d.invited_by_user_id
-        ORDER BY COALESCE(NULLIF(t.display_name, ''), 'Espace de travail') ASC, d.status ASC,
-                 COALESCE(d.last_seen_at, d.created_at) DESC, d.name ASC
+        ORDER BY d.device_id ASC, d.status ASC, COALESCE(d.last_seen_at, d.created_at) DESC, d.name ASC
         """
     ).fetchall()
-    return [_device_from_row(row) for row in rows]
+    return _group_devices_by_identity([_device_from_row(row) for row in rows])
 
 
-def _enrollment_request_from_row(row: sqlite3.Row) -> dict[str, Any]:
+def _enrollment_request_from_row(row: Any) -> dict[str, Any]:
     return {
         "tenantId": row["tenant_id"],
         "tenantDisplayName": str(_row_value(row, "tenant_display_name", "") or "").strip() or "Espace de travail",
         "requestId": row["request_id"],
+        "deviceId": str(_row_value(row, "device_id", "") or ""),
         "deviceName": row["device_name"],
         "platform": row["platform"],
         "requesterNote": row["requester_note"],
@@ -1745,7 +2305,7 @@ def _enrollment_request_from_row(row: sqlite3.Row) -> dict[str, Any]:
 
 
 def _list_device_enrollment_requests(
-    con: sqlite3.Connection,
+    con: Any,
     tenant_id: str,
     *,
     include_all_tenants: bool = False,
@@ -1755,7 +2315,7 @@ def _list_device_enrollment_requests(
         rows = con.execute(
             """
             SELECT r.tenant_id, COALESCE(NULLIF(t.display_name, ''), 'Espace de travail') AS tenant_display_name,
-                   r.request_id, r.device_name, r.platform, r.requester_note,
+                   r.request_id, r.device_id, r.device_name, r.platform, r.requester_note,
                    r.status, r.requested_at, r.decided_at, r.decided_by_user_id,
                    u.first_name AS decided_by_first_name, u.last_name AS decided_by_last_name,
                    u.email AS decided_by_email,
@@ -1773,7 +2333,7 @@ def _list_device_enrollment_requests(
         rows = con.execute(
             """
             SELECT r.tenant_id, COALESCE(NULLIF(t.display_name, ''), 'Espace de travail') AS tenant_display_name,
-                   r.request_id, r.device_name, r.platform, r.requester_note,
+                   r.request_id, r.device_id, r.device_name, r.platform, r.requester_note,
                    r.status, r.requested_at, r.decided_at, r.decided_by_user_id,
                    u.first_name AS decided_by_first_name, u.last_name AS decided_by_last_name,
                    u.email AS decided_by_email,
@@ -2236,7 +2796,7 @@ def _download_official_adri_xlsx(remote: dict[str, Any]) -> bytes:
 
 
 
-def _row_value(row: sqlite3.Row, key: str, fallback: Any = "") -> Any:
+def _row_value(row: Any, key: str, fallback: Any = "") -> Any:
     return row[key] if key in row.keys() else fallback
 
 
@@ -2249,7 +2809,7 @@ def _official_referential_web_url(source_url: Any, default_branch: Any, file_pat
     return f"{base}/-/blob/{urllib.parse.quote(branch, safe='')}/{urllib.parse.quote(path)}"
 
 
-def _official_referential_summary_from_row(row: sqlite3.Row | None) -> dict[str, Any] | None:
+def _official_referential_summary_from_row(row: Any | None) -> dict[str, Any] | None:
     if row is None:
         return None
     report = _parse_json(row["validation_report_json"], {})
@@ -2290,10 +2850,10 @@ def _official_referential_summary_from_row(row: sqlite3.Row | None) -> dict[str,
 
 
 def _load_global_official_referential(
-    con: sqlite3.Connection,
+    con: Any,
     *,
     preferred_tenant_id: str = "",
-) -> sqlite3.Row | None:
+) -> Any | None:
     """Return the active official referential shared by the OpenIRN instance.
 
     Users, campaigns, sessions and devices remain tenant-scoped, but the
@@ -2327,7 +2887,7 @@ def _load_global_official_referential(
     return rows
 
 
-def _load_current_official_referential(con: sqlite3.Connection, tenant_id: str) -> sqlite3.Row | None:
+def _load_current_official_referential(con: Any, tenant_id: str) -> Any | None:
     requested_tenant_id = _resolve_tenant_id(con, tenant_id, DEFAULT_TENANT_ID)
     local = con.execute(
         """
@@ -2357,7 +2917,7 @@ def _official_referential_history_id(referential_id: str, canonical_sha256: str,
     return f"{safe_referential_id}-{normalized_imported_at}-{digest}"[:180]
 
 
-def _backfill_official_referential_history(con: sqlite3.Connection) -> None:
+def _backfill_official_referential_history(con: Any) -> None:
     rows = con.execute(
         """
         SELECT tenant_id, referential_id, version, active, source_url, project_path,
@@ -2430,7 +2990,7 @@ def _backfill_official_referential_history(con: sqlite3.Connection) -> None:
 
 
 def _seed_official_referential_from_default(
-    con: sqlite3.Connection,
+    con: Any,
     tenant_id: str,
     *,
     source_tenant_id: str = DEFAULT_TENANT_ID,
@@ -2574,7 +3134,7 @@ def _seed_official_referential_from_default(
     return True
 
 def _list_official_referential_history(
-    con: sqlite3.Connection,
+    con: Any,
     tenant_id: str,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
@@ -2602,7 +3162,7 @@ def _list_official_referential_history(
 
 
 def _store_official_referential(
-    con: sqlite3.Connection,
+    con: Any,
     tenant_id: str,
     referential: dict[str, Any],
     remote: dict[str, Any],
@@ -2810,7 +3370,7 @@ def _sort_users(users: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(users, key=key)
 
 
-def _row_to_user(row: sqlite3.Row) -> dict[str, Any]:
+def _row_to_user(row: Any) -> dict[str, Any]:
     payload = _parse_json(row["payload_json"], {})
     if not isinstance(payload, dict):
         payload = {}
@@ -2831,7 +3391,7 @@ def _row_to_user(row: sqlite3.Row) -> dict[str, Any]:
     return payload
 
 
-def _load_central_users(con: sqlite3.Connection, tenant_id: str) -> list[dict[str, Any]]:
+def _load_central_users(con: Any, tenant_id: str) -> list[dict[str, Any]]:
     rows = con.execute(
         """
         SELECT u.tenant_id, COALESCE(NULLIF(t.display_name, ''), 'Espace de travail') AS tenant_display_name,
@@ -2850,7 +3410,7 @@ def _load_central_users(con: sqlite3.Connection, tenant_id: str) -> list[dict[st
     return _sort_users(users)
 
 
-def _save_user(con: sqlite3.Connection, tenant_id: str, user: dict[str, Any]) -> None:
+def _save_user(con: Any, tenant_id: str, user: dict[str, Any]) -> None:
     con.execute(
         """
         INSERT INTO users(
@@ -2882,7 +3442,7 @@ def _save_user(con: sqlite3.Connection, tenant_id: str, user: dict[str, Any]) ->
     )
 
 
-def _ensure_user_credentials(con: sqlite3.Connection, tenant_id: str, users: list[dict[str, Any]]) -> None:
+def _ensure_user_credentials(con: Any, tenant_id: str, users: list[dict[str, Any]]) -> None:
     for user in users:
         user_id = str(user.get("id") or "").strip()
         if not user_id:
@@ -2905,7 +3465,7 @@ def _ensure_user_credentials(con: sqlite3.Connection, tenant_id: str, users: lis
         )
 
 
-def _merge_central_users(con: sqlite3.Connection, tenant_id: str, raw_users: Any) -> int:
+def _merge_central_users(con: Any, tenant_id: str, raw_users: Any) -> int:
     if not isinstance(raw_users, list):
         return 0
 
@@ -2926,7 +3486,7 @@ def _merge_central_users(con: sqlite3.Connection, tenant_id: str, raw_users: Any
     return changed
 
 
-def _set_user_pin(con: sqlite3.Connection, tenant_id: str, user_id: str, pin: str, *, requires_change: bool) -> None:
+def _set_user_pin(con: Any, tenant_id: str, user_id: str, pin: str, *, requires_change: bool) -> None:
     cleaned_pin = str(pin or "").strip()
     if len(cleaned_pin) < 4 or len(cleaned_pin) > 32:
         raise HTTPException(status_code=400, detail="Le code personnel doit contenir entre 4 et 32 caractères")
@@ -2965,7 +3525,7 @@ def _set_user_pin(con: sqlite3.Connection, tenant_id: str, user_id: str, pin: st
     )
 
 
-def _verify_user_pin(con: sqlite3.Connection, tenant_id: str, user_id: str, pin: str) -> tuple[bool, bool]:
+def _verify_user_pin(con: Any, tenant_id: str, user_id: str, pin: str) -> tuple[bool, bool]:
     credential = con.execute(
         """
         SELECT salt, pin_hash, iterations, requires_change
@@ -3060,7 +3620,7 @@ def _extract_campaigns(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _record_campaign_revisions(
-    con: sqlite3.Connection,
+    con: Any,
     tenant_id: str,
     server_sync_id: str,
     device_id: str,
@@ -3244,7 +3804,7 @@ def _record_campaign_revisions(
     }
 
 
-def _public_snapshot_from_row(row: sqlite3.Row) -> dict[str, Any]:
+def _public_snapshot_from_row(row: Any) -> dict[str, Any]:
     payload = _parse_json(row["payload_json"], {})
     return {
         "serverSyncId": row["server_sync_id"],
@@ -3257,7 +3817,7 @@ def _public_snapshot_from_row(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def _snapshot_summary_from_row(row: sqlite3.Row | None) -> dict[str, Any] | None:
+def _snapshot_summary_from_row(row: Any | None) -> dict[str, Any] | None:
     if row is None:
         return None
     public = _public_snapshot_from_row(row)
@@ -3276,7 +3836,7 @@ def _campaign_title_from_payload(payload: Any, fallback: str) -> str:
     return fallback
 
 
-def _public_campaign_state_from_row(row: sqlite3.Row) -> dict[str, Any]:
+def _public_campaign_state_from_row(row: Any) -> dict[str, Any]:
     payload = _parse_json(row["payload_json"], {})
     campaign_id = str(row["campaign_id"] or "")
     return {
@@ -3294,7 +3854,7 @@ def _public_campaign_state_from_row(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def _public_campaign_revision_from_row(row: sqlite3.Row, *, include_payload: bool = False) -> dict[str, Any]:
+def _public_campaign_revision_from_row(row: Any, *, include_payload: bool = False) -> dict[str, Any]:
     payload = _parse_json(row["payload_json"], {})
     campaign_id = str(row["campaign_id"] or "")
     public = {
@@ -3325,7 +3885,7 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _table_counts(con: sqlite3.Connection) -> dict[str, int | None]:
+def _table_counts(con: Any) -> dict[str, int | None]:
     counts: dict[str, int | None] = {}
     for table in [
         "tenants",
@@ -3344,20 +3904,9 @@ def _table_counts(con: sqlite3.Connection) -> dict[str, int | None]:
     ]:
         try:
             counts[table] = int(con.execute(f"select count(*) from {table}").fetchone()[0])
-        except sqlite3.Error:
+        except DbError:
             counts[table] = None
     return counts
-
-
-def _sqlite_integrity_check(path: Path) -> str:
-    if not path.exists():
-        return "missing"
-    try:
-        with sqlite3.connect(path) as con:
-            row = con.execute("pragma integrity_check").fetchone()
-            return str(row[0]) if row else "unknown"
-    except sqlite3.Error as exc:
-        return f"error: {exc}"
 
 
 def _write_private_text(path: Path, content: str) -> None:
@@ -3399,18 +3948,19 @@ def _backup_metadata_from_file(path: Path) -> dict[str, Any]:
     }
 
 
-def _list_backups(limit: int = 10) -> list[dict[str, Any]]:
+def _backup_files() -> list[Path]:
     if not BACKUP_DIR.exists():
         return []
-    backups = sorted(
-        BACKUP_DIR.glob("openirn-*.sqlite3"),
-        key=lambda item: item.stat().st_mtime,
-        reverse=True,
-    )
+    candidates = list(BACKUP_DIR.glob("openirn-*.mariadb.sql"))
+    return sorted(candidates, key=lambda item: item.stat().st_mtime, reverse=True)
+
+
+def _list_backups(limit: int = 10) -> list[dict[str, Any]]:
+    backups = _backup_files()
     return [_backup_metadata_from_file(path) for path in backups[: max(1, min(limit, 100))]]
 
 
-def _backup_audit_events(con: sqlite3.Connection, tenant_id: str, limit: int = 20) -> list[dict[str, Any]]:
+def _backup_audit_events(con: Any, tenant_id: str, limit: int = 20) -> list[dict[str, Any]]:
     rows = con.execute(
         """
         SELECT backup_name, event_type, reason, triggered_by_user_id,
@@ -3440,7 +3990,7 @@ def _backup_audit_events(con: sqlite3.Connection, tenant_id: str, limit: int = 2
 
 
 def _record_backup_audit(
-    con: sqlite3.Connection,
+    con: Any,
     tenant_id: str,
     event_type: str,
     *,
@@ -3472,7 +4022,7 @@ def _record_backup_audit(
     )
 
 
-def _last_protective_backup_at(con: sqlite3.Connection, tenant_id: str, reason: str) -> datetime | None:
+def _last_protective_backup_at(con: Any, tenant_id: str, reason: str) -> datetime | None:
     row = con.execute(
         """
         SELECT created_at
@@ -3494,11 +4044,7 @@ def _cleanup_old_backups(protected_names: set[str] | None = None) -> list[str]:
     if BACKUP_KEEP <= 0 or not BACKUP_DIR.exists():
         return []
     protected_names = protected_names or set()
-    backups = sorted(
-        BACKUP_DIR.glob("openirn-*.sqlite3"),
-        key=lambda item: item.stat().st_mtime,
-        reverse=True,
-    )
+    backups = _backup_files()
     removed: list[str] = []
     for old in backups[BACKUP_KEEP:]:
         if old.name in protected_names:
@@ -3510,7 +4056,13 @@ def _cleanup_old_backups(protected_names: set[str] | None = None) -> list[str]:
     return removed
 
 
-def _create_sqlite_backup(
+def _mariadb_dump_binary() -> str:
+    if MARIADB_DUMP_BIN:
+        return MARIADB_DUMP_BIN
+    return shutil.which("mariadb-dump") or shutil.which("mysqldump") or ""
+
+
+def _create_mariadb_backup(
     triggered_by_user_id: str | None = None,
     protected_names: set[str] | None = None,
     *,
@@ -3518,44 +4070,70 @@ def _create_sqlite_backup(
     reason: str = "manual",
     automatic: bool = False,
 ) -> dict[str, Any]:
-    if not DB_PATH.exists():
-        raise HTTPException(status_code=503, detail="OpenIRN SQLite database does not exist yet")
-
-    integrity = _sqlite_integrity_check(DB_PATH)
-    if integrity != "ok":
-        raise HTTPException(status_code=500, detail=f"SQLite integrity_check failed before backup: {integrity}")
+    config = _parse_mysql_url()
+    dump_binary = _mariadb_dump_binary()
+    if not dump_binary:
+        raise HTTPException(status_code=503, detail="mariadb-dump/mysqldump is not available on the server")
 
     _ensure_private_backup_dir()
     stamp = _utc_now().strftime("%Y%m%dT%H%M%SZ")
-    backup_path = BACKUP_DIR / f"openirn-{stamp}.sqlite3"
+    backup_path = BACKUP_DIR / f"openirn-{stamp}.mariadb.sql"
     suffix = 1
     while backup_path.exists():
-        backup_path = BACKUP_DIR / f"openirn-{stamp}-{suffix}.sqlite3"
+        backup_path = BACKUP_DIR / f"openirn-{stamp}-{suffix}.mariadb.sql"
         suffix += 1
 
-    with sqlite3.connect(DB_PATH) as con:
-        con.execute("pragma busy_timeout = 10000")
-        con.execute(f"vacuum main into {_canonical_json(str(backup_path))}")
+    defaults_path = BACKUP_DIR / f".openirn-mariadb-client-{uuid.uuid4().hex}.cnf"
+    defaults_content = "\n".join(
+        [
+            "[client]",
+            f"host={config['host']}",
+            f"port={config['port']}",
+            f"user={config['user']}",
+            f"password={config['password']}",
+            f"default-character-set={config.get('charset') or 'utf8mb4'}",
+            "",
+        ]
+    )
+    _write_private_text(defaults_path, defaults_content)
+    cmd = [
+        dump_binary,
+        f"--defaults-extra-file={defaults_path}",
+        "--single-transaction",
+        "--quick",
+        "--skip-comments",
+        "--hex-blob",
+        config["database"],
+    ]
+    try:
+        with backup_path.open("wb") as output:
+            proc = subprocess.run(cmd, stdout=output, stderr=subprocess.PIPE, check=False)
+        if proc.returncode != 0:
+            stderr = proc.stderr.decode("utf-8", errors="replace") if isinstance(proc.stderr, bytes) else str(proc.stderr or "")
+            if backup_path.exists():
+                backup_path.unlink()
+            raise HTTPException(status_code=500, detail=f"MariaDB dump failed: {stderr[-600:]}")
+    finally:
+        try:
+            defaults_path.unlink()
+        except OSError:
+            pass
 
     _chmod_private(backup_path, 0o600)
-    backup_integrity = _sqlite_integrity_check(backup_path)
-    if backup_integrity != "ok":
-        raise HTTPException(status_code=500, detail=f"SQLite integrity_check failed for produced backup: {backup_integrity}")
-
     digest = _file_sha256(backup_path)
     sha_path = backup_path.with_suffix(backup_path.suffix + ".sha256")
     _write_private_text(sha_path, f"{digest}  {backup_path.name}\n")
 
-    counts: dict[str, int | None] = {}
-    with sqlite3.connect(backup_path) as con:
-        con.row_factory = sqlite3.Row
+    with _db() as con:
         counts = _table_counts(con)
+        con.commit()
 
     metadata = {
-        "type": "openirn.sqliteBackup",
-        "formatVersion": 2,
+        "type": "openirn.mariadbDumpBackup",
+        "formatVersion": 1,
+        "backend": "mariadb",
         "createdAt": _utc_now().isoformat(),
-        "sourceDb": str(DB_PATH),
+        "sourceDb": _mariadb_target_label(),
         "backupDb": str(backup_path),
         "backupName": backup_path.name,
         "tenantId": tenant_id,
@@ -3564,7 +4142,7 @@ def _create_sqlite_backup(
         "triggeredByUserId": triggered_by_user_id or "",
         "sha256": digest,
         "sizeBytes": backup_path.stat().st_size,
-        "integrityCheck": backup_integrity,
+        "integrityCheck": "logical_dump_created",
         "retentionKeep": BACKUP_KEEP,
         "counts": counts,
     }
@@ -3595,6 +4173,7 @@ def _create_sqlite_backup(
                 sha256=digest,
                 size_bytes=backup_path.stat().st_size,
                 payload={
+                    "backend": "mariadb",
                     "automatic": automatic,
                     "signatureStatus": metadata["signatureStatus"],
                     "removedOldBackups": removed,
@@ -3602,6 +4181,23 @@ def _create_sqlite_backup(
             )
 
     return {**metadata, "name": backup_path.name, "removedOldBackups": removed}
+
+
+def _create_database_backup(
+    triggered_by_user_id: str | None = None,
+    protected_names: set[str] | None = None,
+    *,
+    tenant_id: str = "default",
+    reason: str = "manual",
+    automatic: bool = False,
+) -> dict[str, Any]:
+    return _create_mariadb_backup(
+        tenant_id=tenant_id,
+        triggered_by_user_id=triggered_by_user_id,
+        protected_names=protected_names,
+        reason=reason,
+        automatic=automatic,
+    )
 
 
 def _create_protective_backup(
@@ -3630,7 +4226,7 @@ def _create_protective_backup(
                 "minIntervalMinutes": min_interval,
             }
 
-    backup = _create_sqlite_backup(
+    backup = _create_database_backup(
         tenant_id=tenant_id,
         triggered_by_user_id=triggered_by_user_id,
         reason=reason,
@@ -3657,7 +4253,8 @@ def _create_protective_backup(
 def _backup_path_from_name(backup_name: str) -> Path:
     raw_name = str(backup_name or "").strip()
     safe_name = Path(raw_name).name
-    if raw_name != safe_name or not safe_name.startswith("openirn-") or not safe_name.endswith(".sqlite3"):
+    valid_extension = safe_name.endswith(".mariadb.sql")
+    if raw_name != safe_name or not safe_name.startswith("openirn-") or not valid_extension:
         raise HTTPException(status_code=400, detail="Invalid backup name")
 
     backup_dir = BACKUP_DIR.resolve()
@@ -3673,10 +4270,6 @@ def _backup_path_from_name(backup_name: str) -> Path:
 
 
 def _verify_backup_file(backup_path: Path) -> dict[str, Any]:
-    integrity = _sqlite_integrity_check(backup_path)
-    if integrity != "ok":
-        raise HTTPException(status_code=500, detail=f"SQLite integrity_check failed for backup: {integrity}")
-
     digest = _file_sha256(backup_path)
     sha_path = backup_path.with_suffix(backup_path.suffix + ".sha256")
     if sha_path.exists():
@@ -3692,75 +4285,10 @@ def _verify_backup_file(backup_path: Path) -> dict[str, Any]:
     signature_status = _backup_signature_status(metadata) if metadata else "unsigned"
     if signature_status == "invalid":
         raise HTTPException(status_code=500, detail="Backup manifest HMAC signature mismatch")
-    return {"sha256": digest, "integrityCheck": integrity, "signatureStatus": signature_status}
+    return {"sha256": digest, "integrityCheck": "logical_dump", "signatureStatus": signature_status}
 
 
-def _restore_sqlite_backup(
-    backup_name: str,
-    triggered_by_user_id: str | None = None,
-    *,
-    tenant_id: str = "default",
-) -> dict[str, Any]:
-    backup_path = _backup_path_from_name(backup_name)
-    verification = _verify_backup_file(backup_path)
-    digest = str(verification.get("sha256") or "")
-
-    safety_backup = _create_sqlite_backup(
-        tenant_id=tenant_id,
-        triggered_by_user_id=triggered_by_user_id,
-        protected_names={backup_path.name},
-        reason="pre_restore_safety",
-        automatic=True,
-    )
-
-    try:
-        with sqlite3.connect(backup_path) as source, sqlite3.connect(DB_PATH) as target:
-            source.execute("pragma busy_timeout = 10000")
-            target.execute("pragma busy_timeout = 10000")
-            target.execute("pragma foreign_keys = OFF")
-            source.backup(target)
-            target.execute("pragma wal_checkpoint(truncate)")
-    except sqlite3.Error as exc:
-        raise HTTPException(status_code=500, detail=f"SQLite restore failed: {exc}") from exc
-
-    restored_integrity = _sqlite_integrity_check(DB_PATH)
-    if restored_integrity != "ok":
-        raise HTTPException(status_code=500, detail=f"SQLite integrity_check failed after restore: {restored_integrity}")
-
-    with _db() as con:
-        counts = _table_counts(con)
-        try:
-            with con:
-                _ensure_tenant(con, tenant_id)
-                _record_backup_audit(
-                    con,
-                    tenant_id,
-                    "backup.restored",
-                    backup_name=backup_path.name,
-                    reason="manual_restore",
-                    triggered_by_user_id=triggered_by_user_id,
-                    sha256=digest,
-                    size_bytes=backup_path.stat().st_size,
-                    payload={"signatureStatus": verification.get("signatureStatus"), "preRestoreBackup": safety_backup.get("name")},
-                )
-        except sqlite3.Error:
-            pass
-
-    return {
-        "status": "ok",
-        "type": "openirn.sqliteBackupRestored",
-        "restoredAt": _utc_now().isoformat(),
-        "backup": _backup_metadata_from_file(backup_path),
-        "backupSha256": digest,
-        "signatureStatus": verification.get("signatureStatus"),
-        "preRestoreBackup": safety_backup,
-        "triggeredByUserId": triggered_by_user_id or "",
-        "integrityCheck": restored_integrity,
-        "counts": counts,
-    }
-
-
-def _delete_sqlite_backup(
+def _delete_database_backup(
     backup_name: str,
     *,
     tenant_id: str = "default",
@@ -3793,10 +4321,28 @@ def _delete_sqlite_backup(
             )
     return {
         "status": "ok",
-        "type": "openirn.sqliteBackupDeleted",
+        "type": "openirn.databaseBackupDeleted",
         "deletedAt": _utc_now().isoformat(),
         "backupName": backup_path.name,
         "deletedFiles": deleted,
+    }
+
+
+def _database_status_payload(counts: dict[str, int | None]) -> dict[str, Any]:
+    version = "unknown"
+    try:
+        with _db() as con:
+            row = con.execute("SELECT VERSION()").fetchone()
+            version = str(row[0]) if row else "unknown"
+            con.commit()
+    except Exception:
+        version = "unavailable"
+    return {
+        "backend": "mariadb",
+        "target": _mariadb_target_label(),
+        "serverVersion": version,
+        "charset": "utf8mb4",
+        "counts": counts,
     }
 
 
@@ -3807,8 +4353,6 @@ def _maintenance_status(limit: int = 10, tenant_id: str = "default") -> dict[str
         audit_events = _backup_audit_events(con, tenant_id, limit=limit)
         con.commit()
 
-    wal_path = Path(str(DB_PATH) + "-wal")
-    shm_path = Path(str(DB_PATH) + "-shm")
     backups = _list_backups(limit=limit)
     signature_secret_configured = bool(_backup_signing_secret())
     unsigned_count = sum(1 for backup in backups if backup.get("signatureStatus") != "valid")
@@ -3818,19 +4362,11 @@ def _maintenance_status(limit: int = 10, tenant_id: str = "default") -> dict[str
         "application": "OpenIRN API",
         "version": APP_VERSION,
         "serverTime": _utc_now().isoformat(),
-        "database": {
-            "path": str(DB_PATH),
-            "exists": DB_PATH.exists(),
-            "sizeBytes": DB_PATH.stat().st_size if DB_PATH.exists() else 0,
-            "walSizeBytes": wal_path.stat().st_size if wal_path.exists() else 0,
-            "shmSizeBytes": shm_path.stat().st_size if shm_path.exists() else 0,
-            "integrityCheck": _sqlite_integrity_check(DB_PATH),
-            "counts": counts,
-        },
+        "database": _database_status_payload(counts),
         "backup": {
             "directory": str(BACKUP_DIR),
             "keep": BACKUP_KEEP,
-            "count": len(list(BACKUP_DIR.glob("openirn-*.sqlite3"))) if BACKUP_DIR.exists() else 0,
+            "count": len(_backup_files()),
             "latest": backups[0] if backups else None,
             "backups": backups,
             "auditEvents": audit_events,
@@ -3942,13 +4478,6 @@ async def tenant_create(request: Request) -> dict[str, Any]:
             )
             _save_user(con, tenant_id, pilot_user)
             _set_user_pin(con, tenant_id, pilot_user["id"], pilot_pin, requires_change=False)
-            _ensure_device_access_for_tenant(
-                con,
-                source_tenant_id=requester_tenant_id,
-                target_tenant_id=tenant_id,
-                device_id=device_id,
-                actor_user_id=actor_user_id,
-            )
             _seed_official_referential_from_default(
                 con,
                 tenant_id,
@@ -3964,6 +4493,7 @@ async def tenant_create(request: Request) -> dict[str, Any]:
                     "displayName": display_name or "Espace de travail",
                     "pilotUserId": pilot_user["id"],
                     "actorUserId": actor_user_id,
+                    "deviceEnrollmentIsolation": "tenant-scoped",
                 },
             )
             _sync_solution_administrators_to_all_tenants(con)
@@ -4193,6 +4723,7 @@ async def devices_enrollment_request(request: Request) -> dict[str, Any]:
     tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
     device_name = str(payload.get("deviceName") or "").strip()[:120] or "Terminal OpenIRN"
     platform = str(payload.get("platform") or "").strip()[:80]
+    requested_device_id = _normalize_device_id(payload.get("deviceId"))
     requester_note = str(payload.get("note") or payload.get("requesterNote") or "").strip()[:500]
     request_id = f"enrollment_request_{uuid.uuid4().hex}"
     now = _utc_now().isoformat()
@@ -4201,17 +4732,22 @@ async def devices_enrollment_request(request: Request) -> dict[str, Any]:
         tenant_exists = con.execute("SELECT 1 FROM tenants WHERE id = ?", (tenant_id,)).fetchone()
         if tenant_exists is None:
             raise HTTPException(status_code=404, detail="Espace de travail introuvable")
+        known_terminal = _terminal_identity(con, requested_device_id) if requested_device_id else None
+        if known_terminal is not None:
+            device_name = str(known_terminal.get("name") or "").strip()[:120] or device_name
+            platform = str(known_terminal.get("platform") or "").strip()[:80] or platform
         con.execute(
             """
             INSERT INTO device_enrollment_requests(
-                tenant_id, request_id, device_name, platform, requester_note,
+                tenant_id, request_id, device_id, device_name, platform, requester_note,
                 requester_ip, status, requested_at, decided_at, decided_by_user_id,
                 decision_note, enrollment_id
-            ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, NULL, NULL, '', NULL)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, NULL, NULL, '', NULL)
             """,
             (
                 tenant_id,
                 request_id,
+                requested_device_id,
                 device_name,
                 platform,
                 requester_note,
@@ -4225,8 +4761,10 @@ async def devices_enrollment_request(request: Request) -> dict[str, Any]:
             "enrollment_request.created",
             payload={
                 "requestId": request_id,
+                "deviceId": requested_device_id,
                 "deviceName": device_name,
                 "platform": platform,
+                "knownTerminal": known_terminal is not None,
             },
         )
         con.commit()
@@ -4236,6 +4774,7 @@ async def devices_enrollment_request(request: Request) -> dict[str, Any]:
         "type": "openirn.deviceEnrollmentRequest",
         "tenantId": tenant_id,
         "requestId": request_id,
+        "deviceId": requested_device_id,
         "deviceName": device_name,
         "platform": platform,
         "serverTime": _utc_now().isoformat(),
@@ -4517,6 +5056,7 @@ async def devices_enrollment_consume(request: Request) -> dict[str, Any]:
 
     device_name = str(payload.get("deviceName") or "").strip()[:120] or "Terminal OpenIRN"
     platform = str(payload.get("platform") or "").strip()[:80]
+    requested_device_id = _normalize_device_id(payload.get("deviceId"))
     now = _utc_now()
     code_hashes = _enrollment_code_hash_candidates(tenant_id, code)
     placeholders = ", ".join("?" for _ in code_hashes)
@@ -4546,6 +5086,7 @@ async def devices_enrollment_consume(request: Request) -> dict[str, Any]:
             platform=platform,
             invited_by_user_id=str(enrollment["created_by_user_id"] or ""),
             enrollment_id=str(enrollment["enrollment_id"] or ""),
+            device_id=requested_device_id,
         )
         con.execute(
             """
@@ -4572,6 +5113,7 @@ async def devices_enrollment_consume(request: Request) -> dict[str, Any]:
                 "enrollmentId": enrollment["enrollment_id"],
                 "deviceName": device_name,
                 "platform": platform,
+                "requestedDeviceId": requested_device_id,
             },
         )
         con.commit()
@@ -4607,9 +5149,18 @@ async def device_rename(device_id: str, request: Request) -> dict[str, Any]:
         ).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="Device not found")
+        normalized_device_id = _normalize_device_id(device_id)
+        now = _utc_now().isoformat()
+        if _terminal_identity(con, normalized_device_id) is None:
+            _ensure_terminal_identity(con, device_id=normalized_device_id, name=name, platform="")
+        else:
+            con.execute(
+                "UPDATE terminals SET name = ?, updated_at = ? WHERE device_id = ?",
+                (name, now, normalized_device_id),
+            )
         con.execute(
-            "UPDATE authorized_devices SET name = ? WHERE tenant_id = ? AND device_id = ?",
-            (name, tenant_id, device_id),
+            "UPDATE authorized_devices SET name = ? WHERE device_id = ?",
+            (name, normalized_device_id),
         )
         _record_device_audit(
             con,
@@ -4896,34 +5447,23 @@ async def official_referential_update(request: Request) -> dict[str, Any]:
 
 @app.get("/health")
 def health() -> dict[str, Any]:
-    """
-    Public, compact health check for monitoring.
-
-    The endpoint exposes stable product-level metadata and a coarse calculated
-    tenant count. It deliberately does not expose route inventory, database
-    paths, tenant names, users, campaigns, device identifiers or diagnostic
-    error details.
-    """
+    """Public, compact health check for monitoring."""
     status = "ok"
     tenant_number = 0
-
-    if not DB_PATH.exists():
+    try:
+        with _db() as con:
+            row = con.execute("SELECT COUNT(*) FROM tenants").fetchone()
+            tenant_number = int(row[0]) if row and row[0] is not None else 0
+            con.commit()
+    except Exception:
         status = "degraded"
-    else:
-        try:
-            db_uri = "file:" + urllib.parse.quote(str(DB_PATH), safe="/:") + "?mode=ro"
-            with sqlite3.connect(db_uri, uri=True) as con:
-                row = con.execute("SELECT COUNT(*) FROM tenants").fetchone()
-                tenant_number = int(row[0]) if row and row[0] is not None else 0
-        except sqlite3.Error:
-            status = "degraded"
-            tenant_number = 0
+        tenant_number = 0
 
     return {
         "status": status,
         "application": "OpenIRN API",
         "version": APP_VERSION,
-        "storage": "sqlite",
+        "storage": _db_backend(),
         "tenantNumber": tenant_number,
         "authRequired": True,
         "authMode": "server_session_with_role_policy",
@@ -5015,7 +5555,7 @@ async def sync_push(request: Request) -> dict[str, Any]:
         "status": "accepted",
         "application": "OpenIRN API",
         "version": APP_VERSION,
-        "storage": "sqlite",
+        "storage": "mariadb",
         "serverSyncId": server_sync_id,
         "receivedAt": received_at,
         "tenantId": tenant_id,
@@ -5284,7 +5824,7 @@ async def auth_change_pin(request: Request) -> dict[str, Any]:
     }
 
 
-def _session_row_to_payload(row: sqlite3.Row, *, current_token_hash: str = '') -> dict[str, Any]:
+def _session_row_to_payload(row: Any, *, current_token_hash: str = '') -> dict[str, Any]:
     now = _utc_now()
     expires_at = _parse_datetime(row["expires_at"])
     revoked_at_raw = row["revoked_at"]
@@ -5827,7 +6367,7 @@ def sync_status(request: Request, tenantId: str = Query(default="default", min_l
         "type": "openirn.syncStatus",
         "application": "OpenIRN API",
         "version": APP_VERSION,
-        "storage": "sqlite",
+        "storage": "mariadb",
         "tenantId": tenant_id,
         "serverTime": _utc_now().isoformat(),
         "snapshotCount": snapshot_count,
@@ -5871,7 +6411,7 @@ def sync_pull(
         "type": "openirn.syncPull",
         "application": "OpenIRN API",
         "version": APP_VERSION,
-        "storage": "sqlite",
+        "storage": "mariadb",
         "tenantId": tenant_id,
         "serverTime": _utc_now().isoformat(),
         "snapshotCount": len(snapshots),
@@ -5922,7 +6462,7 @@ def campaigns(
         "type": "openirn.campaignStates",
         "application": "OpenIRN API",
         "version": APP_VERSION,
-        "storage": "sqlite",
+        "storage": "mariadb",
         "tenantId": tenant_id,
         "serverTime": _utc_now().isoformat(),
         "campaignCount": len(items),
@@ -5975,7 +6515,7 @@ def campaign_revisions(
         "type": "openirn.campaignRevisions",
         "application": "OpenIRN API",
         "version": APP_VERSION,
-        "storage": "sqlite",
+        "storage": "mariadb",
         "tenantId": tenant_id,
         "serverTime": _utc_now().isoformat(),
         "campaignId": campaign_id,
@@ -6029,7 +6569,7 @@ def campaign_conflicts(
         "type": "openirn.campaignConflicts",
         "application": "OpenIRN API",
         "version": APP_VERSION,
-        "storage": "sqlite",
+        "storage": "mariadb",
         "tenantId": tenant_id,
         "serverTime": _utc_now().isoformat(),
         "campaignId": campaign_id or None,
@@ -6069,7 +6609,7 @@ def campaign_revision(
         "type": "openirn.campaignRevision",
         "application": "OpenIRN API",
         "version": APP_VERSION,
-        "storage": "sqlite",
+        "storage": "mariadb",
         "tenantId": tenant_id,
         "serverTime": _utc_now().isoformat(),
         "revision": _public_campaign_revision_from_row(row, include_payload=True),
@@ -6152,7 +6692,7 @@ async def campaign_restore(request: Request) -> dict[str, Any]:
                     "type": "openirn.campaignRestore",
                     "application": "OpenIRN API",
                     "version": APP_VERSION,
-                    "storage": "sqlite",
+                    "storage": "mariadb",
                     "tenantId": tenant_id,
                     "serverTime": _utc_now().isoformat(),
                     "campaignId": campaign_id,
@@ -6283,7 +6823,7 @@ async def campaign_restore(request: Request) -> dict[str, Any]:
         "type": "openirn.campaignRestore",
         "application": "OpenIRN API",
         "version": APP_VERSION,
-        "storage": "sqlite",
+        "storage": "mariadb",
         "tenantId": tenant_id,
         "serverTime": _utc_now().isoformat(),
         "campaignId": campaign_id,
@@ -6323,7 +6863,7 @@ async def maintenance_backup(request: Request) -> dict[str, Any]:
         or str(auth_context.get("userId") or "").strip()
         or None
     )
-    backup = _create_sqlite_backup(
+    backup = _create_database_backup(
         tenant_id=tenant_id,
         triggered_by_user_id=triggered_by_user_id,
         reason="manual",
@@ -6331,42 +6871,11 @@ async def maintenance_backup(request: Request) -> dict[str, Any]:
     )
     return {
         "status": "ok",
-        "type": "openirn.sqliteBackupCreated",
+        "type": "openirn.mariadbDumpBackupCreated",
         "application": "OpenIRN API",
         "version": APP_VERSION,
         "serverTime": _utc_now().isoformat(),
         "backup": backup,
-        "maintenance": _maintenance_status(limit=10, tenant_id=tenant_id),
-    }
-
-
-@app.post("/maintenance/backups/{backup_name}/restore")
-async def maintenance_restore_backup(backup_name: str, request: Request) -> dict[str, Any]:
-    try:
-        payload = await request.json()
-    except json.JSONDecodeError:
-        payload = {}
-    if not isinstance(payload, dict):
-        payload = {}
-    tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId") or request.headers.get("x-openirn-tenant-id"), DEFAULT_TENANT_ID)
-    auth_context = _require_admin_authorization(request, tenant_id)
-    triggered_by_user_id = (
-        str(payload.get("triggeredByUserId") or "").strip()
-        or str(auth_context.get("userId") or "").strip()
-        or None
-    )
-    restore = _restore_sqlite_backup(
-        backup_name,
-        triggered_by_user_id=triggered_by_user_id,
-        tenant_id=tenant_id,
-    )
-    return {
-        "status": "ok",
-        "type": "openirn.sqliteBackupRestored",
-        "application": "OpenIRN API",
-        "version": APP_VERSION,
-        "serverTime": _utc_now().isoformat(),
-        "restore": restore,
         "maintenance": _maintenance_status(limit=10, tenant_id=tenant_id),
     }
 
@@ -6379,14 +6888,14 @@ def maintenance_delete_backup(
 ) -> dict[str, Any]:
     tenant_id = _resolve_tenant_id_for_request(tenantId or request.headers.get("x-openirn-tenant-id"), DEFAULT_TENANT_ID)
     auth_context = _require_admin_authorization(request, tenant_id)
-    deletion = _delete_sqlite_backup(
+    deletion = _delete_database_backup(
         backup_name,
         tenant_id=tenant_id,
         triggered_by_user_id=str(auth_context.get("userId") or "").strip() or None,
     )
     return {
         "status": "ok",
-        "type": "openirn.sqliteBackupDeleted",
+        "type": "openirn.databaseBackupDeleted",
         "application": "OpenIRN API",
         "version": APP_VERSION,
         "serverTime": _utc_now().isoformat(),
@@ -6436,7 +6945,7 @@ async def sync_events(
                     "event": "snapshot",
                     "application": "OpenIRN API",
                     "version": APP_VERSION,
-                    "storage": "sqlite",
+                    "storage": "mariadb",
                     "tenantId": tenant_id,
                     "serverTime": server_time,
                     "latestSnapshot": latest_snapshot,
@@ -6448,7 +6957,7 @@ async def sync_events(
                     "event": "heartbeat",
                     "application": "OpenIRN API",
                     "version": APP_VERSION,
-                    "storage": "sqlite",
+                    "storage": "mariadb",
                     "tenantId": tenant_id,
                     "serverTime": server_time,
                     "latestServerSyncId": current_server_sync_id or None,

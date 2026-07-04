@@ -275,7 +275,7 @@ class AdministrationScreen extends StatelessWidget {
           icon: Icons.storage_outlined,
           title: 'Maintenance serveur',
           subtitle:
-              'Contrôler SQLite, créer une sauvegarde, restaurer ou supprimer une sauvegarde serveur.',
+              'Contrôler MariaDB, créer une sauvegarde ou supprimer une sauvegarde serveur.',
           buttonLabel: 'Ouvrir',
           onPressed: () => _openServerMaintenance(context),
         ),

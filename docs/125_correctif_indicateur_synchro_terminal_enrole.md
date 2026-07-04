@@ -13,12 +13,12 @@ Ces endpoints exigeaient encore un bearer ou un jeton de session, alors que le n
 
 Ajout d'un garde d'accès lecture seule :
 
-- bearer historique accepté pendant la transition ;
+- jeton legacy accepté uniquement pour compatibilité contrôlée ;
 - session courte en mémoire acceptée ;
 - ancien jeton terminal accepté pendant la transition ;
 - terminal actif accepté via `X-OpenIRN-Device-Id` pour les endpoints de lecture de synchronisation.
 
-Les endpoints d'écriture restent protégés par un bearer/session token.
+Les endpoints d'écriture restent protégés par une session serveur.
 
 ## Endpoints concernés
 

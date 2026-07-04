@@ -132,16 +132,13 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
     }
   }
 
-
   Future<void> _deleteTenant(_TenantManagementStateData state) async {
     final deletableTenants = state.tenants
         .where((tenant) => !tenant.permanent && !tenant.isDefault)
         .toList(growable: false);
     if (deletableTenants.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Aucun espace de travail supprimable.'),
-        ),
+        const SnackBar(content: Text('Aucun espace de travail supprimable.')),
       );
       return;
     }
@@ -333,15 +330,20 @@ class _TenantIntroCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isNarrow = MediaQuery.sizeOf(context).width < 680;
-    final canDeleteTenant = state.solutionAdministrator &&
+    final canDeleteTenant =
+        state.solutionAdministrator &&
         state.tenants.any((tenant) => !tenant.permanent && !tenant.isDefault);
     final deleteButton = FilledButton.icon(
       onPressed: canDeleteTenant ? onDeleteTenant : null,
       style: FilledButton.styleFrom(
         backgroundColor: theme.colorScheme.error,
-        disabledBackgroundColor: theme.colorScheme.error.withValues(alpha: 0.24),
+        disabledBackgroundColor: theme.colorScheme.error.withValues(
+          alpha: 0.24,
+        ),
         foregroundColor: theme.colorScheme.onError,
-        disabledForegroundColor: theme.colorScheme.onError.withValues(alpha: 0.54),
+        disabledForegroundColor: theme.colorScheme.onError.withValues(
+          alpha: 0.54,
+        ),
       ),
       icon: const Icon(Icons.delete_forever_outlined),
       label: const Text('Supprimer un espace'),
@@ -554,7 +556,6 @@ class _TenantCard extends StatelessWidget {
   }
 }
 
-
 class _TenantDeleteSelectionDialog extends StatelessWidget {
   final List<TenantInfo> tenants;
 
@@ -611,10 +612,7 @@ class _TenantDeleteConfirmationDialog extends StatelessWidget {
     final theme = Theme.of(context);
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
-      icon: Icon(
-        Icons.warning_amber_rounded,
-        color: theme.colorScheme.error,
-      ),
+      icon: Icon(Icons.warning_amber_rounded, color: theme.colorScheme.error),
       title: const Text('Êtes-vous sûr ?'),
       content: ResponsiveDialogContent(
         maxWidth: 560,
@@ -638,7 +636,11 @@ class _TenantDeleteConfirmationDialog extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                Chip(label: Text('${tenant.activeUserCount} utilisateur(s) actif(s)')),
+                Chip(
+                  label: Text(
+                    '${tenant.activeUserCount} utilisateur(s) actif(s)',
+                  ),
+                ),
                 Chip(label: Text('${tenant.campaignCount} campagne(s)')),
               ],
             ),
@@ -686,9 +688,7 @@ class _TenantRenameDialogState extends State<_TenantRenameDialog> {
   @override
   void initState() {
     super.initState();
-    _displayNameController = TextEditingController(
-      text: widget.tenant.label,
-    );
+    _displayNameController = TextEditingController(text: widget.tenant.label);
   }
 
   @override
@@ -702,9 +702,7 @@ class _TenantRenameDialogState extends State<_TenantRenameDialog> {
       return;
     }
     Navigator.of(context).pop(
-      _TenantRenameFormResult(
-        displayName: _displayNameController.text.trim(),
-      ),
+      _TenantRenameFormResult(displayName: _displayNameController.text.trim()),
     );
   }
 
