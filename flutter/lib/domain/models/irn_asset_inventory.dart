@@ -21,8 +21,12 @@ class CriticalFunctionInfo {
       tenantId: json['tenantId']?.toString() ?? '',
       name: json['name']?.toString().trim() ?? '',
       description: json['description']?.toString().trim() ?? '',
-      createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '')?.toUtc(),
-      updatedAt: DateTime.tryParse(json['updatedAt']?.toString() ?? '')?.toUtc(),
+      createdAt: DateTime.tryParse(
+        json['createdAt']?.toString() ?? '',
+      )?.toUtc(),
+      updatedAt: DateTime.tryParse(
+        json['updatedAt']?.toString() ?? '',
+      )?.toUtc(),
     );
   }
 }
@@ -56,8 +60,12 @@ class InformationSystemInfo {
       name: json['name']?.toString().trim() ?? '',
       description: json['description']?.toString().trim() ?? '',
       owner: json['owner']?.toString().trim() ?? '',
-      createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '')?.toUtc(),
-      updatedAt: DateTime.tryParse(json['updatedAt']?.toString() ?? '')?.toUtc(),
+      createdAt: DateTime.tryParse(
+        json['createdAt']?.toString() ?? '',
+      )?.toUtc(),
+      updatedAt: DateTime.tryParse(
+        json['updatedAt']?.toString() ?? '',
+      )?.toUtc(),
     );
   }
 }
@@ -94,8 +102,12 @@ class InformationAssetInfo {
       assetType: json['assetType']?.toString().trim() ?? '',
       description: json['description']?.toString().trim() ?? '',
       criticality: json['criticality']?.toString().trim() ?? '',
-      createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '')?.toUtc(),
-      updatedAt: DateTime.tryParse(json['updatedAt']?.toString() ?? '')?.toUtc(),
+      createdAt: DateTime.tryParse(
+        json['createdAt']?.toString() ?? '',
+      )?.toUtc(),
+      updatedAt: DateTime.tryParse(
+        json['updatedAt']?.toString() ?? '',
+      )?.toUtc(),
     );
   }
 }
@@ -115,7 +127,10 @@ class IrnAssetInventory {
     required this.assets,
   });
 
-  factory IrnAssetInventory.empty({String tenantId = '', String tenantDisplayName = ''}) {
+  factory IrnAssetInventory.empty({
+    String tenantId = '',
+    String tenantDisplayName = '',
+  }) {
     return IrnAssetInventory(
       tenantId: tenantId,
       tenantDisplayName: tenantDisplayName,
@@ -134,24 +149,36 @@ class IrnAssetInventory {
       tenantDisplayName: json['tenantDisplayName']?.toString().trim() ?? '',
       criticalFunctions: rawFunctions is List
           ? rawFunctions
-              .whereType<Map>()
-              .map((item) => CriticalFunctionInfo.fromJson(Map<String, dynamic>.from(item)))
-              .where((item) => item.id.trim().isNotEmpty)
-              .toList(growable: false)
+                .whereType<Map>()
+                .map(
+                  (item) => CriticalFunctionInfo.fromJson(
+                    Map<String, dynamic>.from(item),
+                  ),
+                )
+                .where((item) => item.id.trim().isNotEmpty)
+                .toList(growable: false)
           : const <CriticalFunctionInfo>[],
       informationSystems: rawSystems is List
           ? rawSystems
-              .whereType<Map>()
-              .map((item) => InformationSystemInfo.fromJson(Map<String, dynamic>.from(item)))
-              .where((item) => item.id.trim().isNotEmpty)
-              .toList(growable: false)
+                .whereType<Map>()
+                .map(
+                  (item) => InformationSystemInfo.fromJson(
+                    Map<String, dynamic>.from(item),
+                  ),
+                )
+                .where((item) => item.id.trim().isNotEmpty)
+                .toList(growable: false)
           : const <InformationSystemInfo>[],
       assets: rawAssets is List
           ? rawAssets
-              .whereType<Map>()
-              .map((item) => InformationAssetInfo.fromJson(Map<String, dynamic>.from(item)))
-              .where((item) => item.id.trim().isNotEmpty)
-              .toList(growable: false)
+                .whereType<Map>()
+                .map(
+                  (item) => InformationAssetInfo.fromJson(
+                    Map<String, dynamic>.from(item),
+                  ),
+                )
+                .where((item) => item.id.trim().isNotEmpty)
+                .toList(growable: false)
           : const <InformationAssetInfo>[],
     );
   }
@@ -163,6 +190,8 @@ class IrnAssetInventory {
   }
 
   List<InformationAssetInfo> assetsForSystem(String systemId) {
-    return assets.where((asset) => asset.systemId == systemId).toList(growable: false);
+    return assets
+        .where((asset) => asset.systemId == systemId)
+        .toList(growable: false);
   }
 }

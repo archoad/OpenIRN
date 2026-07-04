@@ -111,7 +111,9 @@ class _QualityHeaderCard extends StatelessWidget {
                         ),
                       ),
                       Chip(
-                        label: Text('Non renseignés : ${report.missingAnswerCount}'),
+                        label: Text(
+                          'Non renseignés : ${report.missingAnswerCount}',
+                        ),
                       ),
                       Chip(
                         label: Text(

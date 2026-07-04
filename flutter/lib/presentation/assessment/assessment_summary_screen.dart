@@ -473,7 +473,11 @@ class _GlobalSummaryCard extends StatelessWidget {
                 Chip(label: Text('Intention : ${summary.intentionCriteria}')),
                 Chip(label: Text('Moyen : ${summary.mediumCriteria}')),
                 Chip(label: Text('Résultat : ${summary.resultCriteria}')),
-                Chip(label: Text('Non renseignés : ${summary.notAnsweredCriteria}')),
+                Chip(
+                  label: Text(
+                    'Non renseignés : ${summary.notAnsweredCriteria}',
+                  ),
+                ),
                 Chip(
                   label: Text(
                     'Complétude : ${(summary.completionRate * 100).toStringAsFixed(0)} %',

@@ -483,7 +483,10 @@ class _AssetInventoryManagementScreenState
             );
           }
           if (!state.available) {
-            return _InventoryErrorCard(title: state.title, message: state.message);
+            return _InventoryErrorCard(
+              title: state.title,
+              message: state.message,
+            );
           }
           return _InventoryContent(
             state: state,
@@ -494,8 +497,10 @@ class _AssetInventoryManagementScreenState
             onCreateSystem: (function) => _createSystem(state, function),
             onEditSystem: (system) => _editSystem(state, system),
             onDeleteSystem: (system) => _deleteSystem(state, system),
-            onImportSystemInventory: (system) => _importSystemInventory(state, system),
-            onExportSystemInventory: (system) => _exportSystemInventory(state, system),
+            onImportSystemInventory: (system) =>
+                _importSystemInventory(state, system),
+            onExportSystemInventory: (system) =>
+                _exportSystemInventory(state, system),
             onCreateAsset: (system) => _createAsset(state, system),
             onEditAsset: (asset) => _editAsset(state, asset),
             onDeleteAsset: (asset) => _deleteAsset(state, asset),
@@ -581,9 +586,19 @@ class _InventoryContent extends StatelessWidget {
                       spacing: 8,
                       runSpacing: 8,
                       children: [
-                        Chip(label: Text('${inventory.criticalFunctions.length} fonction(s) critique(s)')),
-                        Chip(label: Text('${inventory.informationSystems.length} système(s) d’information')),
-                        Chip(label: Text('${inventory.assets.length} actif(s)')),
+                        Chip(
+                          label: Text(
+                            '${inventory.criticalFunctions.length} fonction(s) critique(s)',
+                          ),
+                        ),
+                        Chip(
+                          label: Text(
+                            '${inventory.informationSystems.length} système(s) d’information',
+                          ),
+                        ),
+                        Chip(
+                          label: Text('${inventory.assets.length} actif(s)'),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 12),
@@ -914,7 +929,9 @@ class _FunctionDialogState extends State<_FunctionDialog> {
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.function?.name ?? '');
-    _descriptionController = TextEditingController(text: widget.function?.description ?? '');
+    _descriptionController = TextEditingController(
+      text: widget.function?.description ?? '',
+    );
   }
 
   @override
@@ -941,7 +958,11 @@ class _FunctionDialogState extends State<_FunctionDialog> {
     final editing = widget.function != null;
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
-      title: Text(editing ? 'Modifier la fonction critique' : 'Ajouter une fonction critique'),
+      title: Text(
+        editing
+            ? 'Modifier la fonction critique'
+            : 'Ajouter une fonction critique',
+      ),
       content: ResponsiveDialogContent(
         maxWidth: 560,
         child: Form(
@@ -956,7 +977,9 @@ class _FunctionDialogState extends State<_FunctionDialog> {
                   labelText: 'Nom de la fonction critique',
                   prefixIcon: Icon(Icons.account_tree_outlined),
                 ),
-                validator: (value) => (value ?? '').trim().isEmpty ? 'Le nom est obligatoire.' : null,
+                validator: (value) => (value ?? '').trim().isEmpty
+                    ? 'Le nom est obligatoire.'
+                    : null,
               ),
               const SizedBox(height: 12),
               TextFormField(
@@ -973,8 +996,15 @@ class _FunctionDialogState extends State<_FunctionDialog> {
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Annuler')),
-        FilledButton.icon(onPressed: _submit, icon: const Icon(Icons.check), label: const Text('Enregistrer')),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Annuler'),
+        ),
+        FilledButton.icon(
+          onPressed: _submit,
+          icon: const Icon(Icons.check),
+          label: const Text('Enregistrer'),
+        ),
       ],
     );
   }
@@ -1024,7 +1054,9 @@ class _SystemDialogState extends State<_SystemDialog> {
       _functionId = widget.functions.first.id;
     }
     _nameController = TextEditingController(text: widget.system?.name ?? '');
-    _descriptionController = TextEditingController(text: widget.system?.description ?? '');
+    _descriptionController = TextEditingController(
+      text: widget.system?.description ?? '',
+    );
     _ownerController = TextEditingController(text: widget.system?.owner ?? '');
   }
 
@@ -1055,7 +1087,11 @@ class _SystemDialogState extends State<_SystemDialog> {
     final editing = widget.system != null;
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
-      title: Text(editing ? 'Modifier le système d’information' : 'Ajouter un système d’information'),
+      title: Text(
+        editing
+            ? 'Modifier le système d’information'
+            : 'Ajouter un système d’information',
+      ),
       content: ResponsiveDialogContent(
         maxWidth: 620,
         child: Form(
@@ -1066,16 +1102,20 @@ class _SystemDialogState extends State<_SystemDialog> {
               DropdownButtonFormField<String>(
                 initialValue: _functionId.isEmpty ? null : _functionId,
                 items: widget.functions
-                    .map((function) => DropdownMenuItem<String>(
-                          value: function.id,
-                          child: Text(function.name),
-                        ))
+                    .map(
+                      (function) => DropdownMenuItem<String>(
+                        value: function.id,
+                        child: Text(function.name),
+                      ),
+                    )
                     .toList(growable: false),
                 decoration: const InputDecoration(
                   labelText: 'Fonction critique porteuse',
                   prefixIcon: Icon(Icons.account_tree_outlined),
                 ),
-                validator: (value) => (value ?? '').isEmpty ? 'La fonction critique est obligatoire.' : null,
+                validator: (value) => (value ?? '').isEmpty
+                    ? 'La fonction critique est obligatoire.'
+                    : null,
                 onChanged: (value) => setState(() => _functionId = value ?? ''),
               ),
               const SizedBox(height: 12),
@@ -1086,7 +1126,9 @@ class _SystemDialogState extends State<_SystemDialog> {
                   labelText: 'Nom du système d’information',
                   prefixIcon: Icon(Icons.dns_outlined),
                 ),
-                validator: (value) => (value ?? '').trim().isEmpty ? 'Le nom est obligatoire.' : null,
+                validator: (value) => (value ?? '').trim().isEmpty
+                    ? 'Le nom est obligatoire.'
+                    : null,
               ),
               const SizedBox(height: 12),
               TextFormField(
@@ -1111,8 +1153,15 @@ class _SystemDialogState extends State<_SystemDialog> {
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Annuler')),
-        FilledButton.icon(onPressed: _submit, icon: const Icon(Icons.check), label: const Text('Enregistrer')),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Annuler'),
+        ),
+        FilledButton.icon(
+          onPressed: _submit,
+          icon: const Icon(Icons.check),
+          label: const Text('Enregistrer'),
+        ),
       ],
     );
   }
@@ -1161,8 +1210,12 @@ class _AssetDialogState extends State<_AssetDialog> {
       _systemId = widget.systems.first.id;
     }
     _nameController = TextEditingController(text: widget.asset?.name ?? '');
-    _typeController = TextEditingController(text: widget.asset?.assetType ?? '');
-    _descriptionController = TextEditingController(text: widget.asset?.description ?? '');
+    _typeController = TextEditingController(
+      text: widget.asset?.assetType ?? '',
+    );
+    _descriptionController = TextEditingController(
+      text: widget.asset?.description ?? '',
+    );
   }
 
   @override
@@ -1203,16 +1256,20 @@ class _AssetDialogState extends State<_AssetDialog> {
               DropdownButtonFormField<String>(
                 initialValue: _systemId.isEmpty ? null : _systemId,
                 items: widget.systems
-                    .map((system) => DropdownMenuItem<String>(
-                          value: system.id,
-                          child: Text(system.name),
-                        ))
+                    .map(
+                      (system) => DropdownMenuItem<String>(
+                        value: system.id,
+                        child: Text(system.name),
+                      ),
+                    )
                     .toList(growable: false),
                 decoration: const InputDecoration(
                   labelText: 'Système d’information',
                   prefixIcon: Icon(Icons.dns_outlined),
                 ),
-                validator: (value) => (value ?? '').isEmpty ? 'Le système d’information est obligatoire.' : null,
+                validator: (value) => (value ?? '').isEmpty
+                    ? 'Le système d’information est obligatoire.'
+                    : null,
                 onChanged: (value) => setState(() => _systemId = value ?? ''),
               ),
               const SizedBox(height: 12),
@@ -1223,14 +1280,17 @@ class _AssetDialogState extends State<_AssetDialog> {
                   labelText: 'Nom de l’actif',
                   prefixIcon: Icon(Icons.inventory_2_outlined),
                 ),
-                validator: (value) => (value ?? '').trim().isEmpty ? 'Le nom est obligatoire.' : null,
+                validator: (value) => (value ?? '').trim().isEmpty
+                    ? 'Le nom est obligatoire.'
+                    : null,
               ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _typeController,
                 decoration: const InputDecoration(
                   labelText: 'Type d’actif',
-                  hintText: 'Ex. application, base de données, service, infrastructure…',
+                  hintText:
+                      'Ex. application, base de données, service, infrastructure…',
                   prefixIcon: Icon(Icons.category_outlined),
                 ),
               ),
@@ -1249,8 +1309,15 @@ class _AssetDialogState extends State<_AssetDialog> {
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Annuler')),
-        FilledButton.icon(onPressed: _submit, icon: const Icon(Icons.check), label: const Text('Enregistrer')),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Annuler'),
+        ),
+        FilledButton.icon(
+          onPressed: _submit,
+          icon: const Icon(Icons.check),
+          label: const Text('Enregistrer'),
+        ),
       ],
     );
   }

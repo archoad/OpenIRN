@@ -335,7 +335,6 @@ class OpenIrnApiInventoryResult {
   bool get isAvailable => status == OpenIrnApiDevicesStatus.available;
 }
 
-
 class OpenIrnApiInventoryExcelResult {
   final OpenIrnApiDevicesStatus status;
   final String url;
@@ -359,7 +358,8 @@ class OpenIrnApiInventoryExcelResult {
     this.responseBody,
   });
 
-  bool get isAvailable => status == OpenIrnApiDevicesStatus.available && bytes != null;
+  bool get isAvailable =>
+      status == OpenIrnApiDevicesStatus.available && bytes != null;
 }
 
 class OpenIrnApiDevicesResult {
@@ -2602,22 +2602,47 @@ class OpenIrnApiClient {
     final safeTenantId = tenantId.trim().isEmpty
         ? SyncConfiguration.defaultTenantId
         : tenantId.trim();
-    final uri = Uri.parse('$normalizedBaseUrl/inventory').replace(
-      queryParameters: <String, String>{'tenantId': safeTenantId},
-    );
+    final uri = Uri.parse(
+      '$normalizedBaseUrl/inventory',
+    ).replace(queryParameters: <String, String>{'tenantId': safeTenantId});
     try {
       final response = await _get(uri, bearerToken: apiToken);
       return _inventoryResultFromResponse(response, uri, safeTenantId);
     } on TimeoutException {
-      return _inventoryNetworkError(uri, safeTenantId, 'Délai dépassé', 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.');
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Délai dépassé',
+        'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+      );
     } on SocketException catch (error) {
-      return _inventoryNetworkError(uri, safeTenantId, 'Serveur injoignable', error.message);
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Serveur injoignable',
+        error.message,
+      );
     } on HandshakeException catch (error) {
-      return _inventoryNetworkError(uri, safeTenantId, 'Erreur TLS', error.message);
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur TLS',
+        error.message,
+      );
     } on FormatException catch (error) {
-      return _inventoryNetworkError(uri, safeTenantId, 'Adresse serveur invalide', error.message);
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Adresse serveur invalide',
+        error.message,
+      );
     } on HttpException catch (error) {
-      return _inventoryNetworkError(uri, safeTenantId, 'Erreur HTTP', error.message);
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur HTTP',
+        error.message,
+      );
     }
   }
 
@@ -2633,7 +2658,10 @@ class OpenIrnApiClient {
       tenantId: tenantId,
       apiToken: apiToken,
       path: '/inventory/critical-functions',
-      payload: <String, dynamic>{'name': name.trim(), 'description': description.trim()},
+      payload: <String, dynamic>{
+        'name': name.trim(),
+        'description': description.trim(),
+      },
       successTitle: 'Fonction critique créée',
     );
   }
@@ -2651,7 +2679,10 @@ class OpenIrnApiClient {
       tenantId: tenantId,
       apiToken: apiToken,
       path: '/inventory/critical-functions/$functionId',
-      payload: <String, dynamic>{'name': name.trim(), 'description': description.trim()},
+      payload: <String, dynamic>{
+        'name': name.trim(),
+        'description': description.trim(),
+      },
       successTitle: 'Fonction critique mise à jour',
     );
   }
@@ -2809,8 +2840,12 @@ class OpenIrnApiClient {
     String apiToken = '',
     String systemId = '',
   }) async {
-    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(baseUrl ?? SyncConfiguration.fixedApiBaseUrl);
-    final safeTenantId = tenantId.trim().isEmpty ? SyncConfiguration.defaultTenantId : tenantId.trim();
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
     final safeSystemId = systemId.trim();
     final uri = Uri.parse('$normalizedBaseUrl/inventory/export.xlsx').replace(
       queryParameters: <String, String>{
@@ -2829,7 +2864,9 @@ class OpenIrnApiClient {
           message: 'Actifs du SI exportés au format Excel.',
           tenantId: safeTenantId,
           bytes: response.bytes,
-          suggestedFileName: _contentDispositionFileName(response.headers) ?? _inventoryExcelFileName(safeTenantId),
+          suggestedFileName:
+              _contentDispositionFileName(response.headers) ??
+              _inventoryExcelFileName(safeTenantId),
         );
       }
       final decodedBody = _decodeJsonObject(response.bodyText);
@@ -2838,20 +2875,47 @@ class OpenIrnApiClient {
         url: uri.toString(),
         statusCode: response.statusCode,
         title: 'Export Excel refusé',
-        message: decodedBody?['detail']?.toString() ?? 'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        message:
+            decodedBody?['detail']?.toString() ??
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
         tenantId: safeTenantId,
         responseBody: decodedBody,
       );
     } on TimeoutException {
-      return _inventoryExcelNetworkError(uri, safeTenantId, 'Délai dépassé', 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.');
+      return _inventoryExcelNetworkError(
+        uri,
+        safeTenantId,
+        'Délai dépassé',
+        'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+      );
     } on SocketException catch (error) {
-      return _inventoryExcelNetworkError(uri, safeTenantId, 'Serveur injoignable', error.message);
+      return _inventoryExcelNetworkError(
+        uri,
+        safeTenantId,
+        'Serveur injoignable',
+        error.message,
+      );
     } on HandshakeException catch (error) {
-      return _inventoryExcelNetworkError(uri, safeTenantId, 'Erreur TLS', error.message);
+      return _inventoryExcelNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur TLS',
+        error.message,
+      );
     } on FormatException catch (error) {
-      return _inventoryExcelNetworkError(uri, safeTenantId, 'Adresse serveur invalide', error.message);
+      return _inventoryExcelNetworkError(
+        uri,
+        safeTenantId,
+        'Adresse serveur invalide',
+        error.message,
+      );
     } on HttpException catch (error) {
-      return _inventoryExcelNetworkError(uri, safeTenantId, 'Erreur HTTP', error.message);
+      return _inventoryExcelNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur HTTP',
+        error.message,
+      );
     }
   }
 
@@ -2862,8 +2926,12 @@ class OpenIrnApiClient {
     String systemId = '',
     required Uint8List bytes,
   }) async {
-    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(baseUrl ?? SyncConfiguration.fixedApiBaseUrl);
-    final safeTenantId = tenantId.trim().isEmpty ? SyncConfiguration.defaultTenantId : tenantId.trim();
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
     final safeSystemId = systemId.trim();
     final uri = Uri.parse('$normalizedBaseUrl/inventory/import.xlsx').replace(
       queryParameters: <String, String>{
@@ -2877,19 +2945,50 @@ class OpenIrnApiClient {
         uri,
         bytes,
         bearerToken: apiToken,
-        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        contentType:
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       );
-      return _inventoryResultFromResponse(response, uri, safeTenantId, successTitle: 'Actifs Excel importés');
+      return _inventoryResultFromResponse(
+        response,
+        uri,
+        safeTenantId,
+        successTitle: 'Actifs Excel importés',
+      );
     } on TimeoutException {
-      return _inventoryNetworkError(uri, safeTenantId, 'Délai dépassé', 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.');
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Délai dépassé',
+        'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+      );
     } on SocketException catch (error) {
-      return _inventoryNetworkError(uri, safeTenantId, 'Serveur injoignable', error.message);
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Serveur injoignable',
+        error.message,
+      );
     } on HandshakeException catch (error) {
-      return _inventoryNetworkError(uri, safeTenantId, 'Erreur TLS', error.message);
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur TLS',
+        error.message,
+      );
     } on FormatException catch (error) {
-      return _inventoryNetworkError(uri, safeTenantId, 'Adresse serveur invalide', error.message);
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Adresse serveur invalide',
+        error.message,
+      );
     } on HttpException catch (error) {
-      return _inventoryNetworkError(uri, safeTenantId, 'Erreur HTTP', error.message);
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur HTTP',
+        error.message,
+      );
     }
   }
 
@@ -2901,22 +3000,59 @@ class OpenIrnApiClient {
     required Map<String, dynamic> payload,
     required String successTitle,
   }) async {
-    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(baseUrl ?? SyncConfiguration.fixedApiBaseUrl);
-    final safeTenantId = tenantId.trim().isEmpty ? SyncConfiguration.defaultTenantId : tenantId.trim();
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
     final uri = Uri.parse('$normalizedBaseUrl$path');
     try {
-      final response = await _postJson(uri, <String, dynamic>{'tenantId': safeTenantId, ...payload}, bearerToken: apiToken);
-      return _inventoryResultFromResponse(response, uri, safeTenantId, successTitle: successTitle);
+      final response = await _postJson(uri, <String, dynamic>{
+        'tenantId': safeTenantId,
+        ...payload,
+      }, bearerToken: apiToken);
+      return _inventoryResultFromResponse(
+        response,
+        uri,
+        safeTenantId,
+        successTitle: successTitle,
+      );
     } on TimeoutException {
-      return _inventoryNetworkError(uri, safeTenantId, 'Délai dépassé', 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.');
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Délai dépassé',
+        'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+      );
     } on SocketException catch (error) {
-      return _inventoryNetworkError(uri, safeTenantId, 'Serveur injoignable', error.message);
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Serveur injoignable',
+        error.message,
+      );
     } on HandshakeException catch (error) {
-      return _inventoryNetworkError(uri, safeTenantId, 'Erreur TLS', error.message);
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur TLS',
+        error.message,
+      );
     } on FormatException catch (error) {
-      return _inventoryNetworkError(uri, safeTenantId, 'Adresse serveur invalide', error.message);
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Adresse serveur invalide',
+        error.message,
+      );
     } on HttpException catch (error) {
-      return _inventoryNetworkError(uri, safeTenantId, 'Erreur HTTP', error.message);
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur HTTP',
+        error.message,
+      );
     }
   }
 
@@ -2928,22 +3064,59 @@ class OpenIrnApiClient {
     required Map<String, dynamic> payload,
     required String successTitle,
   }) async {
-    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(baseUrl ?? SyncConfiguration.fixedApiBaseUrl);
-    final safeTenantId = tenantId.trim().isEmpty ? SyncConfiguration.defaultTenantId : tenantId.trim();
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
     final uri = Uri.parse('$normalizedBaseUrl$path');
     try {
-      final response = await _patchJson(uri, <String, dynamic>{'tenantId': safeTenantId, ...payload}, bearerToken: apiToken);
-      return _inventoryResultFromResponse(response, uri, safeTenantId, successTitle: successTitle);
+      final response = await _patchJson(uri, <String, dynamic>{
+        'tenantId': safeTenantId,
+        ...payload,
+      }, bearerToken: apiToken);
+      return _inventoryResultFromResponse(
+        response,
+        uri,
+        safeTenantId,
+        successTitle: successTitle,
+      );
     } on TimeoutException {
-      return _inventoryNetworkError(uri, safeTenantId, 'Délai dépassé', 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.');
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Délai dépassé',
+        'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+      );
     } on SocketException catch (error) {
-      return _inventoryNetworkError(uri, safeTenantId, 'Serveur injoignable', error.message);
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Serveur injoignable',
+        error.message,
+      );
     } on HandshakeException catch (error) {
-      return _inventoryNetworkError(uri, safeTenantId, 'Erreur TLS', error.message);
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur TLS',
+        error.message,
+      );
     } on FormatException catch (error) {
-      return _inventoryNetworkError(uri, safeTenantId, 'Adresse serveur invalide', error.message);
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Adresse serveur invalide',
+        error.message,
+      );
     } on HttpException catch (error) {
-      return _inventoryNetworkError(uri, safeTenantId, 'Erreur HTTP', error.message);
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur HTTP',
+        error.message,
+      );
     }
   }
 
@@ -2954,22 +3127,58 @@ class OpenIrnApiClient {
     required String path,
     required String successTitle,
   }) async {
-    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(baseUrl ?? SyncConfiguration.fixedApiBaseUrl);
-    final safeTenantId = tenantId.trim().isEmpty ? SyncConfiguration.defaultTenantId : tenantId.trim();
-    final uri = Uri.parse('$normalizedBaseUrl$path').replace(queryParameters: <String, String>{'tenantId': safeTenantId});
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final uri = Uri.parse(
+      '$normalizedBaseUrl$path',
+    ).replace(queryParameters: <String, String>{'tenantId': safeTenantId});
     try {
       final response = await _delete(uri, bearerToken: apiToken);
-      return _inventoryResultFromResponse(response, uri, safeTenantId, successTitle: successTitle);
+      return _inventoryResultFromResponse(
+        response,
+        uri,
+        safeTenantId,
+        successTitle: successTitle,
+      );
     } on TimeoutException {
-      return _inventoryNetworkError(uri, safeTenantId, 'Délai dépassé', 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.');
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Délai dépassé',
+        'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+      );
     } on SocketException catch (error) {
-      return _inventoryNetworkError(uri, safeTenantId, 'Serveur injoignable', error.message);
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Serveur injoignable',
+        error.message,
+      );
     } on HandshakeException catch (error) {
-      return _inventoryNetworkError(uri, safeTenantId, 'Erreur TLS', error.message);
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur TLS',
+        error.message,
+      );
     } on FormatException catch (error) {
-      return _inventoryNetworkError(uri, safeTenantId, 'Adresse serveur invalide', error.message);
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Adresse serveur invalide',
+        error.message,
+      );
     } on HttpException catch (error) {
-      return _inventoryNetworkError(uri, safeTenantId, 'Erreur HTTP', error.message);
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur HTTP',
+        error.message,
+      );
     }
   }
 
@@ -2989,7 +3198,9 @@ class OpenIrnApiClient {
         url: uri.toString(),
         statusCode: response.statusCode,
         title: successTitle,
-        message: decodedBody?['message']?.toString() ?? '${inventory.criticalFunctions.length} fonction(s), ${inventory.informationSystems.length} SI, ${inventory.assets.length} actif(s).',
+        message:
+            decodedBody?['message']?.toString() ??
+            '${inventory.criticalFunctions.length} fonction(s), ${inventory.informationSystems.length} SI, ${inventory.assets.length} actif(s).',
         tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
         inventory: inventory,
         responseBody: decodedBody,
@@ -3002,7 +3213,9 @@ class OpenIrnApiClient {
       url: uri.toString(),
       statusCode: response.statusCode,
       title: 'Inventaire SI refusé',
-      message: decodedBody?['detail']?.toString() ?? 'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+      message:
+          decodedBody?['detail']?.toString() ??
+          'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
       tenantId: safeTenantId,
       inventory: IrnAssetInventory.empty(tenantId: safeTenantId),
       responseBody: decodedBody,
@@ -3025,7 +3238,6 @@ class OpenIrnApiClient {
       inventory: IrnAssetInventory.empty(tenantId: tenantId),
     );
   }
-
 
   OpenIrnApiInventoryExcelResult _inventoryExcelNetworkError(
     Uri uri,
@@ -3056,7 +3268,10 @@ class OpenIrnApiClient {
       return null;
     }
     final value = values.join(';');
-    final match = RegExp(r'filename="?([^";]+)"?', caseSensitive: false).firstMatch(value);
+    final match = RegExp(
+      r'filename="?([^";]+)"?',
+      caseSensitive: false,
+    ).firstMatch(value);
     return match?.group(1)?.trim();
   }
 
@@ -4409,7 +4624,6 @@ class OpenIrnApiClient {
     }
   }
 
-
   Map<String, List<String>> _httpHeadersToMap(HttpHeaders headers) {
     final result = <String, List<String>>{};
     headers.forEach((name, values) {
@@ -4418,11 +4632,17 @@ class OpenIrnApiClient {
     return result;
   }
 
-  Future<_BinaryHttpResponse> _getBytes(Uri uri, {String bearerToken = ''}) async {
+  Future<_BinaryHttpResponse> _getBytes(
+    Uri uri, {
+    String bearerToken = '',
+  }) async {
     final client = HttpClient();
     try {
       final request = await client.getUrl(uri).timeout(timeout);
-      request.headers.set(HttpHeaders.acceptHeader, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/json');
+      request.headers.set(
+        HttpHeaders.acceptHeader,
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/json',
+      );
       request.headers.set(HttpHeaders.userAgentHeader, 'OpenIRN');
       _applyAuthorizationHeaders(request, bearerToken: bearerToken);
       final response = await request.close().timeout(timeout);
@@ -4455,7 +4675,10 @@ class OpenIrnApiClient {
       _applyAuthorizationHeaders(request, bearerToken: bearerToken);
       request.add(bytes);
       final response = await request.close().timeout(timeout);
-      final body = await response.transform(utf8.decoder).join().timeout(timeout);
+      final body = await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(timeout);
       return _HttpResponse(statusCode: response.statusCode, body: body);
     } finally {
       client.close(force: true);

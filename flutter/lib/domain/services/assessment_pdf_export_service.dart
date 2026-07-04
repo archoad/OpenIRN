@@ -239,7 +239,17 @@ class AssessmentPdfExportService {
         .toList(growable: false);
 
     return _table(
-      headers: const ['Portee', 'Score', 'NC', 'NR', 'Int.', 'Moy.', 'Res.', 'Rens.', 'Completude'],
+      headers: const [
+        'Portee',
+        'Score',
+        'NC',
+        'NR',
+        'Int.',
+        'Moy.',
+        'Res.',
+        'Rens.',
+        'Completude',
+      ],
       rows: rows,
       columnWidths: const <int, pw.TableColumnWidth>{
         0: pw.FlexColumnWidth(2),

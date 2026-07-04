@@ -130,10 +130,12 @@ class IrnScoringMethod {
   });
 
   const IrnScoringMethod.openIrnRnr()
-    : method = 'Moyenne des niveaux IRN : NR=10, Intention=25, Moyen=50, Résultat=95',
+    : method =
+          'Moyenne des niveaux IRN : NR=10, Intention=25, Moyen=50, Résultat=95',
       methodLabel = 'Score IRN',
       methodStatus = 'irn_scale_unweighted_v1',
-      notAnsweredPolicy = 'not_answered_excluded_nc_excluded_from_score_included_in_completion',
+      notAnsweredPolicy =
+          'not_answered_excluded_nc_excluded_from_score_included_in_completion',
       criteriaWeightPolicy = 'uniform_per_scored_criterion',
       globalAggregationPolicy = 'average_numeric_scored_criteria',
       weightedOfficialMethodImplemented = false,
