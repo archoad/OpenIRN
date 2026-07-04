@@ -85,7 +85,7 @@ void main() {
         criterionAnswers: const <String, CriterionAnswer>{
           'RES-1.1': CriterionAnswer(
             criterionId: 'RES-1.1',
-            answer: IrnAnswer.resilient,
+            answer: IrnAnswer.result,
             justification: 'Gouvernance documentée.',
           ),
           'RES-2.1': CriterionAnswer(
@@ -129,11 +129,11 @@ void main() {
       expect(projectDirector['email'], 'alice.martin@example.test');
 
       final scoring = payload['scoring'] as Map<String, dynamic>;
-      expect(scoring['methodStatus'], 'public_rnr_unweighted');
+      expect(scoring['methodStatus'], 'irn_scale_unweighted_v1');
       expect(scoring['weightedOfficialMethodImplemented'], isFalse);
       final global = scoring['global'] as Map<String, dynamic>;
-      expect(global['openIrnRnrScore'], 50.0);
-      expect(global['officialScore'], 50.0);
+      expect(global['openIrnRnrScore'], 52.5);
+      expect(global['officialScore'], 52.5);
       expect(global['completionRate'], 1.0);
 
       final activityLog = payload['activityLog'] as Map<String, dynamic>;
@@ -148,7 +148,7 @@ void main() {
       expect(answers, hasLength(2));
 
       final firstAnswer = answers.first as Map<String, dynamic>;
-      expect(firstAnswer['answer'], 'R');
+      expect(firstAnswer['answer'], 'RESULTAT');
       expect(firstAnswer['justification'], 'Gouvernance documentée.');
       expect(firstAnswer['hasJustification'], isTrue);
     },

@@ -495,7 +495,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
         content: const ResponsiveDialogContent(
           maxWidth: 620,
           child: Text(
-            'Cette action supprimera toutes les réponses R / NR et toutes les justifications de cette campagne. '
+            'Cette action supprimera toutes les notes IRN et toutes les justifications de cette campagne. '
             'Elle ne peut pas être annulée.',
           ),
         ),
@@ -1478,7 +1478,7 @@ class _ScoreCard extends StatelessWidget {
                       Text('Score IRN', style: theme.textTheme.titleLarge),
                       const SizedBox(height: 4),
                       const Text(
-                        'Calcul non pondéré : R / (R + NR). Les critères non cotés sont exclus du score.',
+                        'Grille IRN : NR=10, Intention=25, Moyen=50, Résultat=95. Les critères N.C. sont exclus du score.',
                       ),
                     ],
                   ),
@@ -1497,10 +1497,13 @@ class _ScoreCard extends StatelessWidget {
               runSpacing: 8,
               children: [
                 Chip(label: Text('Critères : ${summary.totalCriteria}')),
-                Chip(label: Text('Cotés : ${summary.answeredCriteria}')),
-                Chip(label: Text('R : ${summary.resilientCriteria}')),
+                Chip(label: Text('Renseignés : ${summary.answeredCriteria}')),
+                Chip(label: Text('N.C. : ${summary.notConcernedCriteria}')),
                 Chip(label: Text('NR : ${summary.nonResilientCriteria}')),
-                Chip(label: Text('N.C. : ${summary.notAnsweredCriteria}')),
+                Chip(label: Text('Intention : ${summary.intentionCriteria}')),
+                Chip(label: Text('Moyen : ${summary.mediumCriteria}')),
+                Chip(label: Text('Résultat : ${summary.resultCriteria}')),
+                Chip(label: Text('Non renseignés : ${summary.notAnsweredCriteria}')),
                 Chip(label: Text('Justifications : $justificationCount')),
                 Chip(
                   label: Text(
@@ -1652,8 +1655,7 @@ class _CriterionAnswerTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final hasJustification = justification.trim().isNotEmpty;
-    final canJustify =
-        answer == IrnAnswer.resilient || answer == IrnAnswer.nonResilient;
+    final canJustify = answer.isAnswered;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -1700,10 +1702,10 @@ class _CriterionAnswerTile extends StatelessWidget {
                       spacing: 6,
                       runSpacing: 6,
                       children: [
-                        for (final option in IrnAnswer.values)
+                        for (final option in IrnAnswer.ratingValues)
                           ChoiceChip(
                             label: Text(option.label),
-                            tooltip: option.longLabel,
+                            tooltip: option.scoringHelp,
                             selected: answer == option,
                             onSelected: canEdit
                                 ? (_) => onAnswerChanged(option)

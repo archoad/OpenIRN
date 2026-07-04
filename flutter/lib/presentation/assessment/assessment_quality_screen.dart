@@ -79,8 +79,8 @@ class _QualityHeaderCard extends StatelessWidget {
         ? 'Campagne prête pour revue'
         : 'Campagne à compléter';
     final message = report.isReadyForReview
-        ? 'Les informations de campagne sont complètes, tous les critères actifs sont cotés et chaque réponse R / NR dispose d’une justification.'
-        : 'Complèter les informations de campagne, les critères non cotés et les justifications avant revue ou export de référence.';
+        ? 'Les informations de campagne sont complètes, tous les critères actifs sont renseignés et chaque note IRN dispose d’une justification.'
+        : 'Compléter les informations de campagne, les critères non renseignés et les justifications avant revue ou export de référence.';
 
     return Card(
       child: Padding(
@@ -111,7 +111,7 @@ class _QualityHeaderCard extends StatelessWidget {
                         ),
                       ),
                       Chip(
-                        label: Text('Non cotés : ${report.missingAnswerCount}'),
+                        label: Text('Non renseignés : ${report.missingAnswerCount}'),
                       ),
                       Chip(
                         label: Text(
@@ -296,9 +296,9 @@ class _MissingAnswersCard extends StatelessWidget {
       child: ExpansionTile(
         initiallyExpanded: criteria.isNotEmpty,
         leading: const Icon(Icons.radio_button_unchecked),
-        title: Text('Critères non cotés (${criteria.length})'),
+        title: Text('Critères non renseignés (${criteria.length})'),
         subtitle: const Text(
-          'Ces critères sont encore en N.C. et ne contribuent pas au score.',
+          'Ces critères ne disposent pas encore d’une note IRN ou d’un statut N.C.',
         ),
         children: criteria.isEmpty
             ? const [
@@ -328,7 +328,7 @@ class _MissingJustificationsCard extends StatelessWidget {
         initiallyExpanded: issues.isNotEmpty,
         leading: const Icon(Icons.edit_note_outlined),
         title: Text('Justifications manquantes (${issues.length})'),
-        subtitle: const Text('Chaque réponse R / NR doit être documentée.'),
+        subtitle: const Text('Chaque note IRN doit être documentée.'),
         children: issues.isEmpty
             ? const [
                 ListTile(

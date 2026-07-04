@@ -62,9 +62,13 @@ class OfficialRnrScoringService {
     Map<String, IrnAnswer> answers,
   ) {
     var total = 0;
-    var resilient = 0;
+    var notConcerned = 0;
     var nonResilient = 0;
+    var intention = 0;
+    var medium = 0;
+    var result = 0;
     var notAnswered = 0;
+    var scorePointsTotal = 0;
 
     for (final criterion in criteria) {
       if (!criterion.active) {
@@ -74,22 +78,36 @@ class OfficialRnrScoringService {
       total += 1;
       final answer = answers[criterion.id] ?? IrnAnswer.notAnswered;
       switch (answer) {
-        case IrnAnswer.resilient:
-          resilient += 1;
+        case IrnAnswer.notConcerned:
+          notConcerned += 1;
         case IrnAnswer.nonResilient:
           nonResilient += 1;
+          scorePointsTotal += answer.scoreValue ?? 0;
+        case IrnAnswer.intention:
+          intention += 1;
+          scorePointsTotal += answer.scoreValue ?? 0;
+        case IrnAnswer.medium:
+          medium += 1;
+          scorePointsTotal += answer.scoreValue ?? 0;
+        case IrnAnswer.result:
+          result += 1;
+          scorePointsTotal += answer.scoreValue ?? 0;
         case IrnAnswer.notAnswered:
           notAnswered += 1;
       }
     }
 
-    final answered = resilient + nonResilient;
+    final answered = notConcerned + nonResilient + intention + medium + result;
     return IrnScoreSummary(
       totalCriteria: total,
       answeredCriteria: answered,
-      resilientCriteria: resilient,
+      notConcernedCriteria: notConcerned,
       nonResilientCriteria: nonResilient,
+      intentionCriteria: intention,
+      mediumCriteria: medium,
+      resultCriteria: result,
       notAnsweredCriteria: notAnswered,
+      scorePointsTotal: scorePointsTotal,
     );
   }
 }

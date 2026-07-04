@@ -268,7 +268,7 @@ class SyncPullImportService {
       var justification = _asString(answerPayload['justification']);
       if (answer == IrnAnswer.notAnswered && justification.isNotEmpty) {
         warnings.add(
-          'La justification distante du critère $criterionId a été ignorée car la réponse est N.C.',
+          'La justification distante du critère $criterionId a été ignorée car la réponse n’est pas renseignée',
         );
         justification = '';
       }
@@ -414,23 +414,39 @@ class SyncPullImportService {
   IrnAnswer _answerFromValue(Object? value) {
     final raw =
         value?.toString().trim().toLowerCase().replaceAll(
-          RegExp(r'[^a-z0-9]+'),
+          RegExp(r'[^a-z0-9àâçéèêëîïôùûüÿñæœ]+'),
           '_',
         ) ??
         '';
     switch (raw) {
-      case 'r':
-      case 'resilient':
-      case 'resilient_':
-      case 'résilient':
-        return IrnAnswer.resilient;
+      case 'nc':
+      case 'n_c':
+      case 'n_c_':
+      case 'notconcerned':
+      case 'not_concerned':
+      case 'non_concerné':
+      case 'non_concerne':
+        return IrnAnswer.notConcerned;
       case 'nr':
       case 'non_resilient':
       case 'non_resilient_':
       case 'non_résilient':
-        return IrnAnswer.nonResilient;
       case 'nonresilient':
+      case 'nonrésilient':
         return IrnAnswer.nonResilient;
+      case 'intention':
+        return IrnAnswer.intention;
+      case 'moyen':
+      case 'medium':
+        return IrnAnswer.medium;
+      case 'résultat':
+      case 'resultat':
+      case 'result':
+      case 'r':
+      case 'resilient':
+      case 'resilient_':
+      case 'résilient':
+        return IrnAnswer.result;
       default:
         return IrnAnswer.notAnswered;
     }

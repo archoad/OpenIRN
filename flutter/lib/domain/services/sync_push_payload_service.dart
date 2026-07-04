@@ -110,7 +110,8 @@ class SyncPushPayloadService {
     return <String, dynamic>{
       'criterionId': answer.criterionId,
       'answer': answer.answer.name,
-      'answerLabel': answer.answer.label,
+      'answerLabel': answer.answer.longLabel,
+      if (answer.answer.scoreValue != null) 'answerScore': answer.answer.scoreValue,
       'justification': answer.justification.trim(),
       'hasJustification': answer.hasJustification,
     };
