@@ -984,7 +984,6 @@ class OpenIrnApiClient {
     }
   }
 
-
   Future<OpenIrnApiTenantsResult> deleteTenant({
     String? baseUrl,
     required String tenantId,
@@ -1478,9 +1477,7 @@ class OpenIrnApiClient {
     final safeTenantId = tenantId.trim().isEmpty
         ? SyncConfiguration.defaultTenantId
         : tenantId.trim();
-    final usersUri = Uri.parse(
-      '$normalizedBaseUrl/users',
-    ).replace(
+    final usersUri = Uri.parse('$normalizedBaseUrl/users').replace(
       queryParameters: <String, String>{
         'tenantId': safeTenantId,
         if (allTenants) 'allTenants': 'true',
@@ -2553,9 +2550,7 @@ class OpenIrnApiClient {
     final safeTenantId = tenantId.trim().isEmpty
         ? SyncConfiguration.defaultTenantId
         : tenantId.trim();
-    final devicesUri = Uri.parse(
-      '$normalizedBaseUrl/devices',
-    ).replace(
+    final devicesUri = Uri.parse('$normalizedBaseUrl/devices').replace(
       queryParameters: <String, String>{
         'tenantId': safeTenantId,
         if (includeAllTenants) 'allTenants': 'true',
@@ -2828,6 +2823,7 @@ class OpenIrnApiClient {
     required String deviceName,
     required String platform,
     String note = '',
+    String deviceId = '',
   }) async {
     final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
       baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
@@ -2835,7 +2831,9 @@ class OpenIrnApiClient {
     final safeTenantId = tenantId.trim().isEmpty
         ? SyncConfiguration.defaultTenantId
         : tenantId.trim();
-    final requestUri = Uri.parse('$normalizedBaseUrl/devices/enrollment/request');
+    final requestUri = Uri.parse(
+      '$normalizedBaseUrl/devices/enrollment/request',
+    );
 
     try {
       final response = await _postJson(requestUri, <String, dynamic>{
@@ -2843,6 +2841,7 @@ class OpenIrnApiClient {
         'deviceName': deviceName.trim(),
         'platform': platform.trim(),
         'note': note.trim(),
+        if (deviceId.trim().isNotEmpty) 'deviceId': deviceId.trim(),
       });
       final decodedBody = _decodeJsonObject(response.body);
 
@@ -3023,15 +3022,40 @@ class OpenIrnApiClient {
         responseBody: decodedBody,
       );
     } on TimeoutException {
-      return _enrollmentNetworkError(approveUri, safeTenantId, 'Délai dépassé', 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.');
+      return _enrollmentNetworkError(
+        approveUri,
+        safeTenantId,
+        'Délai dépassé',
+        'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+      );
     } on SocketException catch (error) {
-      return _enrollmentNetworkError(approveUri, safeTenantId, 'Serveur injoignable', error.message);
+      return _enrollmentNetworkError(
+        approveUri,
+        safeTenantId,
+        'Serveur injoignable',
+        error.message,
+      );
     } on HandshakeException catch (error) {
-      return _enrollmentNetworkError(approveUri, safeTenantId, 'Erreur TLS', error.message);
+      return _enrollmentNetworkError(
+        approveUri,
+        safeTenantId,
+        'Erreur TLS',
+        error.message,
+      );
     } on FormatException catch (error) {
-      return _enrollmentNetworkError(approveUri, safeTenantId, 'Adresse serveur invalide', error.message);
+      return _enrollmentNetworkError(
+        approveUri,
+        safeTenantId,
+        'Adresse serveur invalide',
+        error.message,
+      );
     } on HttpException catch (error) {
-      return _enrollmentNetworkError(approveUri, safeTenantId, 'Erreur HTTP', error.message);
+      return _enrollmentNetworkError(
+        approveUri,
+        safeTenantId,
+        'Erreur HTTP',
+        error.message,
+      );
     }
   }
 
@@ -3062,15 +3086,40 @@ class OpenIrnApiClient {
         successMessage: 'La demande d’enrôlement a été refusée.',
       );
     } on TimeoutException {
-      return _devicesNetworkError(rejectUri, safeTenantId, 'Délai dépassé', 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.');
+      return _devicesNetworkError(
+        rejectUri,
+        safeTenantId,
+        'Délai dépassé',
+        'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+      );
     } on SocketException catch (error) {
-      return _devicesNetworkError(rejectUri, safeTenantId, 'Serveur injoignable', error.message);
+      return _devicesNetworkError(
+        rejectUri,
+        safeTenantId,
+        'Serveur injoignable',
+        error.message,
+      );
     } on HandshakeException catch (error) {
-      return _devicesNetworkError(rejectUri, safeTenantId, 'Erreur TLS', error.message);
+      return _devicesNetworkError(
+        rejectUri,
+        safeTenantId,
+        'Erreur TLS',
+        error.message,
+      );
     } on FormatException catch (error) {
-      return _devicesNetworkError(rejectUri, safeTenantId, 'Adresse serveur invalide', error.message);
+      return _devicesNetworkError(
+        rejectUri,
+        safeTenantId,
+        'Adresse serveur invalide',
+        error.message,
+      );
     } on HttpException catch (error) {
-      return _devicesNetworkError(rejectUri, safeTenantId, 'Erreur HTTP', error.message);
+      return _devicesNetworkError(
+        rejectUri,
+        safeTenantId,
+        'Erreur HTTP',
+        error.message,
+      );
     }
   }
 
@@ -3080,6 +3129,7 @@ class OpenIrnApiClient {
     required String code,
     required String deviceName,
     required String platform,
+    String deviceId = '',
   }) async {
     final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
       baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
@@ -3097,6 +3147,7 @@ class OpenIrnApiClient {
         'code': code.trim(),
         'deviceName': deviceName.trim(),
         'platform': platform.trim(),
+        if (deviceId.trim().isNotEmpty) 'deviceId': deviceId.trim(),
       });
       final decodedBody = _decodeJsonObject(response.body);
       final rawDevice = decodedBody?['device'];
@@ -3110,8 +3161,7 @@ class OpenIrnApiClient {
           url: consumeUri.toString(),
           statusCode: response.statusCode,
           title: 'Terminal autorisé',
-          message:
-              'Ce terminal est autorisé. Aucune clé sensible n’est stockée localement.',
+          message: 'Ce terminal est autorisé.',
           tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
           enrollmentId: device?.enrollmentId ?? '',
           code: '',

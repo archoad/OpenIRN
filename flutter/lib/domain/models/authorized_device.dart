@@ -1,3 +1,39 @@
+class AuthorizedDeviceWorkspace {
+  final String tenantId;
+  final String tenantDisplayName;
+  final String status;
+  final DateTime? createdAt;
+  final DateTime? lastSeenAt;
+  final DateTime? revokedAt;
+
+  const AuthorizedDeviceWorkspace({
+    required this.tenantId,
+    required this.tenantDisplayName,
+    required this.status,
+    required this.createdAt,
+    required this.lastSeenAt,
+    required this.revokedAt,
+  });
+
+  bool get isActive => status.toLowerCase() == 'active';
+
+  String get tenantLabel {
+    final label = tenantDisplayName.trim();
+    return label.isEmpty ? 'Espace de travail' : label;
+  }
+
+  factory AuthorizedDeviceWorkspace.fromJson(Map<String, dynamic> json) {
+    return AuthorizedDeviceWorkspace(
+      tenantId: json['tenantId']?.toString() ?? '',
+      tenantDisplayName: json['tenantDisplayName']?.toString().trim() ?? '',
+      status: json['status']?.toString() ?? '',
+      createdAt: AuthorizedDevice._parseDate(json['createdAt']),
+      lastSeenAt: AuthorizedDevice._parseDate(json['lastSeenAt']),
+      revokedAt: AuthorizedDevice._parseDate(json['revokedAt']),
+    );
+  }
+}
+
 class AuthorizedDevice {
   final String tenantId;
   final String deviceId;
@@ -11,6 +47,7 @@ class AuthorizedDevice {
   final String invitedByUserId;
   final String invitedByUserDisplayName;
   final String enrollmentId;
+  final List<AuthorizedDeviceWorkspace> workspaces;
 
   const AuthorizedDevice({
     required this.tenantId,
@@ -25,6 +62,7 @@ class AuthorizedDevice {
     required this.invitedByUserId,
     this.invitedByUserDisplayName = '',
     required this.enrollmentId,
+    this.workspaces = const <AuthorizedDeviceWorkspace>[],
   });
 
   bool get isActive => status.toLowerCase() == 'active';
@@ -37,6 +75,38 @@ class AuthorizedDevice {
   String get tenantLabel {
     final label = tenantDisplayName.trim();
     return label.isEmpty ? 'Espace de travail' : label;
+  }
+
+  List<AuthorizedDeviceWorkspace> get effectiveWorkspaces {
+    if (workspaces.isNotEmpty) {
+      return workspaces;
+    }
+    return <AuthorizedDeviceWorkspace>[
+      AuthorizedDeviceWorkspace(
+        tenantId: tenantId,
+        tenantDisplayName: tenantLabel,
+        status: status,
+        createdAt: createdAt,
+        lastSeenAt: lastSeenAt,
+        revokedAt: revokedAt,
+      ),
+    ];
+  }
+
+  int get workspaceCount => effectiveWorkspaces
+      .where((workspace) => workspace.tenantId.trim().isNotEmpty)
+      .length;
+
+  String get workspaceSummary {
+    final labels = effectiveWorkspaces
+        .map((workspace) => workspace.tenantLabel)
+        .where((label) => label.trim().isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+    if (labels.isEmpty) {
+      return tenantLabel;
+    }
+    return labels.join(', ');
   }
 
   String get invitedByLabel {
@@ -69,6 +139,18 @@ class AuthorizedDevice {
   String get statusLabel => isActive ? 'Actif' : 'Révoqué';
 
   factory AuthorizedDevice.fromJson(Map<String, dynamic> json) {
+    final rawWorkspaces = json['tenants'];
+    final workspaces = rawWorkspaces is List
+        ? rawWorkspaces
+              .whereType<Map>()
+              .map(
+                (item) => AuthorizedDeviceWorkspace.fromJson(
+                  Map<String, dynamic>.from(item),
+                ),
+              )
+              .where((workspace) => workspace.tenantId.trim().isNotEmpty)
+              .toList(growable: false)
+        : const <AuthorizedDeviceWorkspace>[];
     return AuthorizedDevice(
       tenantId: json['tenantId']?.toString() ?? '',
       deviceId: json['deviceId']?.toString() ?? '',
@@ -83,6 +165,7 @@ class AuthorizedDevice {
       invitedByUserDisplayName:
           json['invitedByUserDisplayName']?.toString().trim() ?? '',
       enrollmentId: json['enrollmentId']?.toString() ?? '',
+      workspaces: workspaces,
     );
   }
 

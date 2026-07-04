@@ -57,6 +57,49 @@ else
   ok "répertoire temporaire .tmp absent"
 fi
 
+if [[ -d "schemas" ]]; then
+  fail "répertoire historique schemas/ encore présent"
+else
+  ok "répertoire historique schemas/ absent"
+fi
+
+if [[ -f "tools/check_release_workflow.sh" ]]; then
+  fail "script historique de workflow release encore présent : tools/check_release_workflow.sh"
+else
+  ok "script historique de workflow release absent"
+fi
+
+if [[ -f "tools/enable_openirn_network_permissions.sh" || -f "tools/ensure_openirn_network_permissions.sh" ]]; then
+  fail "scripts historiques de permissions réseau encore présents"
+  [[ -f "tools/enable_openirn_network_permissions.sh" ]] && echo "  - tools/enable_openirn_network_permissions.sh"
+  [[ -f "tools/ensure_openirn_network_permissions.sh" ]] && echo "  - tools/ensure_openirn_network_permissions.sh"
+else
+  ok "scripts historiques de permissions réseau absents"
+fi
+
+if [[ -f "tools/generate_openirn_api_token.sh" ]]; then
+  fail "générateur historique du bearer global encore présent : tools/generate_openirn_api_token.sh"
+else
+  ok "générateur historique du bearer global absent"
+fi
+
+if grep -RIn --exclude-dir=.git --exclude='*.png' --exclude='*.jpg' --exclude='*.svg' \
+  -E 'bearer de transition|Bearer de transition' docs flutter/lib server/openirn-api/app/main.py >/tmp/openirn_legacy_bearer_labels.txt 2>/dev/null; then
+  fail "libellés bearer de transition encore présents"
+  sed 's/^/  - /' /tmp/openirn_legacy_bearer_labels.txt
+else
+  ok "libellés bearer de transition absents"
+fi
+
+legacy_db_term="sql""ite"
+if grep -RIn --exclude-dir=.git --exclude-dir=build --exclude='*.png' --exclude='*.jpg' --exclude='*.svg' \
+  -i "$legacy_db_term" README.md docs api flutter/lib server/openirn-api tools >/tmp/openirn_legacy_db_refs.txt 2>/dev/null; then
+  fail "références à l’ancien stockage serveur encore présentes"
+  sed 's/^/  - /' /tmp/openirn_legacy_db_refs.txt
+else
+  ok "références à l’ancien stockage serveur absentes"
+fi
+
 check_absent_find "fichier de travail référentiel" -type f \( \
   -name 'Questionnaire_IRN_*.xlsx' -o \
   -name 'Questionnaire_IRN_*.ods' -o \

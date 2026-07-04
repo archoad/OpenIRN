@@ -1,11 +1,10 @@
 [Unit]
-Description=Run OpenIRN secure SQLite backup daily
+Description=Run OpenIRN secure MariaDB backup daily
 
 [Timer]
-OnCalendar=*-*-* 03:15:00
+OnCalendar=*-*-* 03:10:00
 Persistent=true
-RandomizedDelaySec=10m
-AccuracySec=1m
+Unit=openirn-api-backup.service
 
 [Install]
 WantedBy=timers.target
