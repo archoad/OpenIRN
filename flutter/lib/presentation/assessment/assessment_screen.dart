@@ -59,8 +59,10 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   final Map<String, AppUser> _usersById = <String, AppUser>{};
   final Map<String, CriterionAssignment> _assignmentsByCriterionId =
       <String, CriterionAssignment>{};
+  final Set<String> _expandedPillarIds = <String>{};
 
   late LocalCampaign _campaign;
+  String? _selectedAssetId;
 
   bool _isLoadingAnswers = true;
   bool _isLoadingAssignments = true;
@@ -74,14 +76,95 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   bool _autoSyncRunning = false;
   int _lastAppliedSyncSerial = 0;
 
+  List<CampaignInformationAsset> get _scopedAssets =>
+      _campaign.information.assets;
+
+  bool get _isAssetScopedCampaign => _campaign.information.isAssetScoped;
+
+  bool get _shouldShowPersistenceCard {
+    final status = _localStatusMessage?.trim() ?? '';
+    if (_isSavingAnswers) {
+      return true;
+    }
+    if (status.isEmpty) {
+      return false;
+    }
+    return status.startsWith('Erreur') ||
+        status.startsWith('Impossible') ||
+        status.startsWith('Mode hors ligne') ||
+        status.startsWith('Synchronisation automatique publiée') ||
+        status.startsWith('La version serveur');
+  }
+
+  String? get _activeAssetId {
+    if (!_isAssetScopedCampaign) {
+      return null;
+    }
+    final selected = _selectedAssetId?.trim() ?? '';
+    if (selected.isNotEmpty &&
+        _scopedAssets.any((asset) => asset.id == selected)) {
+      return selected;
+    }
+    return _scopedAssets.isEmpty ? null : _scopedAssets.first.id;
+  }
+
+  CampaignInformationAsset? get _activeAsset =>
+      _campaign.information.assetById(_activeAssetId);
+
+  String _answerKeyForCriterion(String criterionId) {
+    final assetId = _activeAssetId;
+    if (!_isAssetScopedCampaign || assetId == null || assetId.isEmpty) {
+      return criterionId;
+    }
+    return 'asset:$assetId:criterion:$criterionId';
+  }
+
+  Map<String, CriterionAnswer> get _activeCriterionAnswers {
+    if (!_isAssetScopedCampaign) {
+      return Map<String, CriterionAnswer>.unmodifiable(_criterionAnswers);
+    }
+    final assetId = _activeAssetId;
+    if (assetId == null || assetId.isEmpty) {
+      return const <String, CriterionAnswer>{};
+    }
+    final prefix = 'asset:$assetId:criterion:';
+    final active = <String, CriterionAnswer>{};
+    for (final entry in _criterionAnswers.entries) {
+      if (!entry.key.startsWith(prefix)) {
+        continue;
+      }
+      final criterionId = entry.key.substring(prefix.length);
+      if (criterionId.isEmpty) {
+        continue;
+      }
+      final answer = entry.value;
+      active[criterionId] = CriterionAnswer(
+        criterionId: criterionId,
+        answer: answer.answer,
+        justification: answer.justification,
+      );
+    }
+    return active;
+  }
+
   Map<String, IrnAnswer> get _answers => <String, IrnAnswer>{
-    for (final entry in _criterionAnswers.entries)
+    for (final entry in _activeCriterionAnswers.entries)
       entry.key: entry.value.answer,
   };
 
   int get _justificationCount {
-    return _criterionAnswers.values
+    return _activeCriterionAnswers.values
         .where((answer) => answer.justification.trim().isNotEmpty)
+        .length;
+  }
+
+  int _answeredCountForAsset(String assetId) {
+    final prefix = 'asset:$assetId:criterion:';
+    return _criterionAnswers.entries
+        .where(
+          (entry) =>
+              entry.key.startsWith(prefix) && entry.value.answer.isAnswered,
+        )
         .length;
   }
 
@@ -89,11 +172,24 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   void initState() {
     super.initState();
     _campaign = widget.campaign;
+    _selectedAssetId = _campaign.information.assets.isEmpty
+        ? null
+        : _campaign.information.assets.first.id;
     _loadLocalAnswers();
     _loadAssignments();
     _lastAppliedSyncSerial = _appSyncCoordinator.changeSerial;
     _appSyncCoordinator.addListener(_handleBackgroundSyncUpdate);
     _startAutomaticSynchronization();
+  }
+
+  void _setPillarExpanded(String pillarId, bool isExpanded) {
+    setState(() {
+      if (isExpanded) {
+        _expandedPillarIds.add(pillarId);
+      } else {
+        _expandedPillarIds.remove(pillarId);
+      }
+    });
   }
 
   @override
@@ -369,12 +465,10 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       return;
     }
     final previousAnswers = Map<String, CriterionAnswer>.of(_criterionAnswers);
+    final storageKey = _answerKeyForCriterion(criterion.id);
     final current =
-        _criterionAnswers[criterion.id] ??
-        CriterionAnswer(
-          criterionId: criterion.id,
-          answer: IrnAnswer.notAnswered,
-        );
+        _criterionAnswers[storageKey] ??
+        CriterionAnswer(criterionId: storageKey, answer: IrnAnswer.notAnswered);
     final previousAnswer = current.answer;
     final updated = current.copyWith(
       answer: answer,
@@ -394,7 +488,9 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       await _recordActivity(
         type: LocalActivityType.answerChanged,
         title: 'Réponse modifiée',
-        description: '${criterion.code} — ${criterion.label}',
+        description: _activeAsset == null
+            ? '${criterion.code} — ${criterion.label}'
+            : '${_activeAsset!.displayLabel} · ${criterion.code} — ${criterion.label}',
         criterionId: criterion.id,
         fromValue: previousAnswer.label,
         toValue: answer.label,
@@ -411,12 +507,10 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       return;
     }
     final previousAnswers = Map<String, CriterionAnswer>.of(_criterionAnswers);
+    final storageKey = _answerKeyForCriterion(criterion.id);
     final current =
-        _criterionAnswers[criterion.id] ??
-        CriterionAnswer(
-          criterionId: criterion.id,
-          answer: IrnAnswer.notAnswered,
-        );
+        _criterionAnswers[storageKey] ??
+        CriterionAnswer(criterionId: storageKey, answer: IrnAnswer.notAnswered);
     final previousJustification = current.justification.trim();
     final updatedJustification = justification.trim();
     final updated = current.copyWith(justification: updatedJustification);
@@ -434,7 +528,9 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
         title: updatedJustification.isEmpty
             ? 'Justification supprimée'
             : 'Justification modifiée',
-        description: '${criterion.code} — ${criterion.label}',
+        description: _activeAsset == null
+            ? '${criterion.code} — ${criterion.label}'
+            : '${_activeAsset!.displayLabel} · ${criterion.code} — ${criterion.label}',
         criterionId: criterion.id,
         fromValue: previousJustification.isEmpty ? 'vide' : 'renseignée',
         toValue: updatedJustification.isEmpty ? 'vide' : 'renseignée',
@@ -467,8 +563,10 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       }
       setState(() {
         _isSavingAnswers = false;
-        _localStatusMessage =
-            'Évaluation sauvegardée localement ($_justificationCount justification(s)).';
+        final asset = _activeAsset;
+        _localStatusMessage = asset == null
+            ? 'Évaluation sauvegardée localement ($_justificationCount justification(s)).'
+            : 'Évaluation de l’actif « ${asset.displayLabel} » sauvegardée ($_justificationCount justification(s)).';
       });
       return true;
     } catch (error) {
@@ -709,7 +807,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
           referential: widget.referential,
           campaign: _campaign,
           criterionAnswers: Map<String, CriterionAnswer>.unmodifiable(
-            _criterionAnswers,
+            _activeCriterionAnswers,
           ),
         ),
       ),
@@ -727,7 +825,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
           referential: widget.referential,
           campaign: _campaign,
           criterionAnswers: Map<String, CriterionAnswer>.unmodifiable(
-            _criterionAnswers,
+            _activeCriterionAnswers,
           ),
         ),
       ),
@@ -741,7 +839,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
           referential: widget.referential,
           campaign: _campaign,
           criterionAnswers: Map<String, CriterionAnswer>.unmodifiable(
-            _criterionAnswers,
+            _activeCriterionAnswers,
           ),
         ),
       ),
@@ -767,6 +865,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final activeCriterionAnswers = _activeCriterionAnswers;
     final answers = _answers;
     final canEditCampaign = _accessPolicy.canEditCampaignInformation(
       widget.activeUser,
@@ -898,12 +997,30 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
                 justificationCount: _justificationCount,
               ),
               const SizedBox(height: 12),
-              _LocalPersistenceCard(
-                isLoading: _isLoadingAnswers,
-                isSaving: _isSavingAnswers,
-                message: _localStatusMessage,
-              ),
-              const SizedBox(height: 12),
+              if (_isAssetScopedCampaign) ...[
+                _AssetScopeCard(
+                  assets: _scopedAssets,
+                  selectedAssetId: _activeAssetId,
+                  answeredCountForAsset: _answeredCountForAsset,
+                  totalCriteria: widget.referential.criteria
+                      .where((criterion) => criterion.active)
+                      .length,
+                  onSelected: (assetId) {
+                    setState(() {
+                      _selectedAssetId = assetId;
+                    });
+                  },
+                ),
+                const SizedBox(height: 12),
+              ],
+              if (_shouldShowPersistenceCard) ...[
+                _LocalPersistenceCard(
+                  isLoading: _isLoadingAnswers,
+                  isSaving: _isSavingAnswers,
+                  message: _localStatusMessage,
+                ),
+                const SizedBox(height: 12),
+              ],
               if (_isLoadingAnswers || _isLoadingAssignments)
                 const Center(
                   child: Padding(
@@ -916,9 +1033,17 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
               else
                 for (final entry in visibleCriteriaByPillar.entries)
                   _PillarAssessmentCard(
+                    key: PageStorageKey<String>(
+                      'assessment-pillar-${entry.key.id}',
+                    ),
                     pillar: entry.key,
                     criteria: entry.value,
-                    criterionAnswers: _criterionAnswers,
+                    initiallyExpanded: _expandedPillarIds.contains(
+                      entry.key.id,
+                    ),
+                    onExpansionChanged: (isExpanded) =>
+                        _setPillarExpanded(entry.key.id, isExpanded),
+                    criterionAnswers: activeCriterionAnswers,
                     assignmentsByCriterionId: _assignmentsByCriterionId,
                     usersById: _usersById,
                     answers: answers,
@@ -1083,6 +1208,16 @@ class _CampaignInfoRows extends StatelessWidget {
                 : 'SI : ${info.systemName}',
           ),
         ),
+        if (info.criticalFunctionName.trim().isNotEmpty)
+          Chip(
+            avatar: const Icon(Icons.account_tree_outlined, size: 18),
+            label: Text('Fonction : ${info.criticalFunctionName}'),
+          ),
+        if (info.isAssetScoped)
+          Chip(
+            avatar: const Icon(Icons.inventory_2_outlined, size: 18),
+            label: Text('${info.assets.length} actif(s) à noter'),
+          ),
         Chip(
           avatar: const Icon(Icons.person_outline, size: 18),
           label: Text(_projectDirectorLabel(info)),
@@ -1182,7 +1317,7 @@ class _CampaignInformationDialogState
       _CampaignInformationFormResult(
         name: _nameController.text.trim(),
         description: _descriptionController.text.trim(),
-        information: CampaignInformation(
+        information: widget.campaign.information.copyWith(
           systemName: _systemNameController.text.trim(),
           systemDescription: _systemDescriptionController.text.trim(),
           projectDirectorFirstName: _projectDirectorFirstNameController.text
@@ -1561,6 +1696,134 @@ class _LocalPersistenceCard extends StatelessWidget {
   }
 }
 
+class _AssetScopeCard extends StatelessWidget {
+  final List<CampaignInformationAsset> assets;
+  final String? selectedAssetId;
+  final int Function(String assetId) answeredCountForAsset;
+  final int totalCriteria;
+  final ValueChanged<String> onSelected;
+
+  const _AssetScopeCard({
+    required this.assets,
+    required this.selectedAssetId,
+    required this.answeredCountForAsset,
+    required this.totalCriteria,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final selected = selectedAssetId?.trim().isNotEmpty == true
+        ? selectedAssetId
+        : (assets.isEmpty ? null : assets.first.id);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.inventory_2_outlined),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Notation par actif',
+                        style: theme.textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Sélectionnez un actif avec les boutons ci-dessous. Les réponses restent enregistrées séparément pour chaque actif.',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (assets.isEmpty)
+              const Text('Aucun actif n’est associé à cette campagne.')
+            else
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final asset in assets)
+                    _AssetProgressButton(
+                      asset: asset,
+                      isSelected: asset.id == selected,
+                      answeredCount: answeredCountForAsset(asset.id),
+                      totalCriteria: totalCriteria,
+                      onTap: () => onSelected(asset.id),
+                    ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AssetProgressButton extends StatelessWidget {
+  final CampaignInformationAsset asset;
+  final bool isSelected;
+  final int answeredCount;
+  final int totalCriteria;
+  final VoidCallback onTap;
+
+  const _AssetProgressButton({
+    required this.asset,
+    required this.isSelected,
+    required this.answeredCount,
+    required this.totalCriteria,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final progressLabel = totalCriteria <= 0
+        ? '$answeredCount'
+        : '$answeredCount/$totalCriteria';
+    final tooltip = asset.description.trim().isEmpty
+        ? '${asset.displayLabel} — $progressLabel critères renseignés'
+        : '${asset.displayLabel} — $progressLabel critères renseignés\n${asset.description.trim()}';
+
+    return Tooltip(
+      message: tooltip,
+      child: Semantics(
+        button: true,
+        selected: isSelected,
+        label: '${asset.displayLabel}, $progressLabel critères renseignés',
+        child: ChoiceChip(
+          selected: isSelected,
+          onSelected: (_) => onTap(),
+          visualDensity: VisualDensity.compact,
+          avatar: Icon(
+            isSelected ? Icons.check_circle : Icons.inventory_2_outlined,
+            size: 18,
+            color: isSelected ? colorScheme.onPrimaryContainer : null,
+          ),
+          label: Text(
+            '${asset.displayLabel} · $progressLabel',
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelLarge?.copyWith(
+              fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _PillarAssessmentCard extends StatelessWidget {
   final IrnPillar pillar;
   final List<IrnCriterion> criteria;
@@ -1569,6 +1832,8 @@ class _PillarAssessmentCard extends StatelessWidget {
   final Map<String, AppUser> usersById;
   final Map<String, IrnAnswer> answers;
   final IrnScoreSummary summary;
+  final bool initiallyExpanded;
+  final ValueChanged<bool> onExpansionChanged;
   final bool Function(IrnCriterion criterion) canEditCriterion;
   final String Function(IrnCriterion criterion) disabledReasonForCriterion;
   final void Function(IrnCriterion criterion, IrnAnswer answer) onAnswerChanged;
@@ -1576,8 +1841,11 @@ class _PillarAssessmentCard extends StatelessWidget {
   onJustificationChanged;
 
   const _PillarAssessmentCard({
+    super.key,
     required this.pillar,
     required this.criteria,
+    required this.initiallyExpanded,
+    required this.onExpansionChanged,
     required this.criterionAnswers,
     required this.assignmentsByCriterionId,
     required this.usersById,
@@ -1601,7 +1869,9 @@ class _PillarAssessmentCard extends StatelessWidget {
 
     return Card(
       child: ExpansionTile(
-        initiallyExpanded: false,
+        initiallyExpanded: initiallyExpanded,
+        maintainState: true,
+        onExpansionChanged: onExpansionChanged,
         title: Text('${pillar.code} — ${pillar.label}'),
         subtitle: Text(
           '${summary.answeredCriteria}/${summary.totalCriteria} coté(s) · '

@@ -76,10 +76,7 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
         for (final entry in criterionAnswers.entries)
           entry.key: entry.value.answer,
       };
-      final summary = _scoringService.computeSummary(
-        widget.referential,
-        answers,
-      );
+      final summary = _computeCampaignSummary(campaign, criterionAnswers);
       final qualityReport = _qualityService.buildReport(
         referential: widget.referential,
         criterionAnswers: criterionAnswers,
@@ -96,6 +93,70 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
       );
     }
     return _CampaignListState(campaigns: enriched);
+  }
+
+  IrnScoreSummary _computeCampaignSummary(
+    LocalCampaign campaign,
+    Map<String, CriterionAnswer> criterionAnswers,
+  ) {
+    if (!campaign.information.isAssetScoped) {
+      final answers = <String, IrnAnswer>{
+        for (final entry in criterionAnswers.entries)
+          entry.key: entry.value.answer,
+      };
+      return _scoringService.computeSummary(widget.referential, answers);
+    }
+
+    final criteria = widget.referential.criteria
+        .where((criterion) => criterion.active)
+        .toList(growable: false);
+    var total = 0;
+    var notConcerned = 0;
+    var nonResilient = 0;
+    var intention = 0;
+    var medium = 0;
+    var result = 0;
+    var notAnswered = 0;
+    var scorePointsTotal = 0;
+
+    for (final asset in campaign.information.assets) {
+      for (final criterion in criteria) {
+        total += 1;
+        final key = 'asset:${asset.id}:criterion:${criterion.id}';
+        final answer = criterionAnswers[key]?.answer ?? IrnAnswer.notAnswered;
+        switch (answer) {
+          case IrnAnswer.notConcerned:
+            notConcerned += 1;
+          case IrnAnswer.nonResilient:
+            nonResilient += 1;
+            scorePointsTotal += answer.scoreValue ?? 0;
+          case IrnAnswer.intention:
+            intention += 1;
+            scorePointsTotal += answer.scoreValue ?? 0;
+          case IrnAnswer.medium:
+            medium += 1;
+            scorePointsTotal += answer.scoreValue ?? 0;
+          case IrnAnswer.result:
+            result += 1;
+            scorePointsTotal += answer.scoreValue ?? 0;
+          case IrnAnswer.notAnswered:
+            notAnswered += 1;
+        }
+      }
+    }
+
+    return IrnScoreSummary(
+      totalCriteria: total,
+      answeredCriteria:
+          notConcerned + nonResilient + intention + medium + result,
+      notConcernedCriteria: notConcerned,
+      nonResilientCriteria: nonResilient,
+      intentionCriteria: intention,
+      mediumCriteria: medium,
+      resultCriteria: result,
+      notAnsweredCriteria: notAnswered,
+      scorePointsTotal: scorePointsTotal,
+    );
   }
 
   Future<void> _refresh() async {
@@ -280,6 +341,13 @@ class _CampaignCard extends StatelessWidget {
                         Text(
                           'SI : ${campaign.information.systemName}',
                           style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                      ],
+                      if (campaign.information.isAssetScoped) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          'Notation par actif : ${campaign.information.assets.length} actif(s)',
+                          style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
                       if (campaign
