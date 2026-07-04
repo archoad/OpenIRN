@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import '../../domain/models/api_session.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/authorized_device.dart';
 import '../../domain/models/device_enrollment_request.dart';
+import '../../domain/models/irn_asset_inventory.dart';
 import '../../domain/models/irn_referential.dart';
 import '../../domain/models/official_referential.dart';
 import '../../domain/models/security_audit_event.dart';
@@ -307,6 +309,57 @@ class OpenIrnApiSecurityAuditResult {
   });
 
   bool get isAvailable => status == OpenIrnApiDevicesStatus.available;
+}
+
+class OpenIrnApiInventoryResult {
+  final OpenIrnApiDevicesStatus status;
+  final String url;
+  final int? statusCode;
+  final String title;
+  final String message;
+  final String tenantId;
+  final IrnAssetInventory inventory;
+  final Map<String, dynamic>? responseBody;
+
+  const OpenIrnApiInventoryResult({
+    required this.status,
+    required this.url,
+    required this.statusCode,
+    required this.title,
+    required this.message,
+    required this.tenantId,
+    required this.inventory,
+    this.responseBody,
+  });
+
+  bool get isAvailable => status == OpenIrnApiDevicesStatus.available;
+}
+
+
+class OpenIrnApiInventoryExcelResult {
+  final OpenIrnApiDevicesStatus status;
+  final String url;
+  final int? statusCode;
+  final String title;
+  final String message;
+  final String tenantId;
+  final Uint8List? bytes;
+  final String suggestedFileName;
+  final Map<String, dynamic>? responseBody;
+
+  const OpenIrnApiInventoryExcelResult({
+    required this.status,
+    required this.url,
+    required this.statusCode,
+    required this.title,
+    required this.message,
+    required this.tenantId,
+    this.bytes,
+    this.suggestedFileName = 'openirn_inventaire_si.xlsx',
+    this.responseBody,
+  });
+
+  bool get isAvailable => status == OpenIrnApiDevicesStatus.available && bytes != null;
 }
 
 class OpenIrnApiDevicesResult {
@@ -2538,6 +2591,475 @@ class OpenIrnApiClient {
     }
   }
 
+  Future<OpenIrnApiInventoryResult> loadAssetInventory({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final uri = Uri.parse('$normalizedBaseUrl/inventory').replace(
+      queryParameters: <String, String>{'tenantId': safeTenantId},
+    );
+    try {
+      final response = await _get(uri, bearerToken: apiToken);
+      return _inventoryResultFromResponse(response, uri, safeTenantId);
+    } on TimeoutException {
+      return _inventoryNetworkError(uri, safeTenantId, 'Délai dépassé', 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.');
+    } on SocketException catch (error) {
+      return _inventoryNetworkError(uri, safeTenantId, 'Serveur injoignable', error.message);
+    } on HandshakeException catch (error) {
+      return _inventoryNetworkError(uri, safeTenantId, 'Erreur TLS', error.message);
+    } on FormatException catch (error) {
+      return _inventoryNetworkError(uri, safeTenantId, 'Adresse serveur invalide', error.message);
+    } on HttpException catch (error) {
+      return _inventoryNetworkError(uri, safeTenantId, 'Erreur HTTP', error.message);
+    }
+  }
+
+  Future<OpenIrnApiInventoryResult> createCriticalFunction({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    required String name,
+    String description = '',
+  }) {
+    return _postInventory(
+      baseUrl: baseUrl,
+      tenantId: tenantId,
+      apiToken: apiToken,
+      path: '/inventory/critical-functions',
+      payload: <String, dynamic>{'name': name.trim(), 'description': description.trim()},
+      successTitle: 'Fonction critique créée',
+    );
+  }
+
+  Future<OpenIrnApiInventoryResult> updateCriticalFunction({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    required String functionId,
+    required String name,
+    String description = '',
+  }) {
+    return _patchInventory(
+      baseUrl: baseUrl,
+      tenantId: tenantId,
+      apiToken: apiToken,
+      path: '/inventory/critical-functions/$functionId',
+      payload: <String, dynamic>{'name': name.trim(), 'description': description.trim()},
+      successTitle: 'Fonction critique mise à jour',
+    );
+  }
+
+  Future<OpenIrnApiInventoryResult> deleteCriticalFunction({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    required String functionId,
+  }) {
+    return _deleteInventory(
+      baseUrl: baseUrl,
+      tenantId: tenantId,
+      apiToken: apiToken,
+      path: '/inventory/critical-functions/$functionId',
+      successTitle: 'Fonction critique supprimée',
+    );
+  }
+
+  Future<OpenIrnApiInventoryResult> createInformationSystem({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    required String functionId,
+    required String name,
+    String description = '',
+    String owner = '',
+  }) {
+    return _postInventory(
+      baseUrl: baseUrl,
+      tenantId: tenantId,
+      apiToken: apiToken,
+      path: '/inventory/information-systems',
+      payload: <String, dynamic>{
+        'functionId': functionId,
+        'name': name.trim(),
+        'description': description.trim(),
+        'owner': owner.trim(),
+      },
+      successTitle: 'Système d’information créé',
+    );
+  }
+
+  Future<OpenIrnApiInventoryResult> updateInformationSystem({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    required String systemId,
+    required String functionId,
+    required String name,
+    String description = '',
+    String owner = '',
+  }) {
+    return _patchInventory(
+      baseUrl: baseUrl,
+      tenantId: tenantId,
+      apiToken: apiToken,
+      path: '/inventory/information-systems/$systemId',
+      payload: <String, dynamic>{
+        'functionId': functionId,
+        'name': name.trim(),
+        'description': description.trim(),
+        'owner': owner.trim(),
+      },
+      successTitle: 'Système d’information mis à jour',
+    );
+  }
+
+  Future<OpenIrnApiInventoryResult> deleteInformationSystem({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    required String systemId,
+  }) {
+    return _deleteInventory(
+      baseUrl: baseUrl,
+      tenantId: tenantId,
+      apiToken: apiToken,
+      path: '/inventory/information-systems/$systemId',
+      successTitle: 'Système d’information supprimé',
+    );
+  }
+
+  Future<OpenIrnApiInventoryResult> createInformationAsset({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    required String systemId,
+    required String name,
+    String assetType = '',
+    String description = '',
+    String criticality = '',
+  }) {
+    return _postInventory(
+      baseUrl: baseUrl,
+      tenantId: tenantId,
+      apiToken: apiToken,
+      path: '/inventory/assets',
+      payload: <String, dynamic>{
+        'systemId': systemId,
+        'name': name.trim(),
+        'assetType': assetType.trim(),
+        'description': description.trim(),
+        'criticality': criticality.trim(),
+      },
+      successTitle: 'Actif créé',
+    );
+  }
+
+  Future<OpenIrnApiInventoryResult> updateInformationAsset({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    required String assetId,
+    required String systemId,
+    required String name,
+    String assetType = '',
+    String description = '',
+    String criticality = '',
+  }) {
+    return _patchInventory(
+      baseUrl: baseUrl,
+      tenantId: tenantId,
+      apiToken: apiToken,
+      path: '/inventory/assets/$assetId',
+      payload: <String, dynamic>{
+        'systemId': systemId,
+        'name': name.trim(),
+        'assetType': assetType.trim(),
+        'description': description.trim(),
+        'criticality': criticality.trim(),
+      },
+      successTitle: 'Actif mis à jour',
+    );
+  }
+
+  Future<OpenIrnApiInventoryResult> deleteInformationAsset({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    required String assetId,
+  }) {
+    return _deleteInventory(
+      baseUrl: baseUrl,
+      tenantId: tenantId,
+      apiToken: apiToken,
+      path: '/inventory/assets/$assetId',
+      successTitle: 'Actif supprimé',
+    );
+  }
+
+  Future<OpenIrnApiInventoryExcelResult> exportAssetInventoryExcel({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    String systemId = '',
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(baseUrl ?? SyncConfiguration.fixedApiBaseUrl);
+    final safeTenantId = tenantId.trim().isEmpty ? SyncConfiguration.defaultTenantId : tenantId.trim();
+    final safeSystemId = systemId.trim();
+    final uri = Uri.parse('$normalizedBaseUrl/inventory/export.xlsx').replace(
+      queryParameters: <String, String>{
+        'tenantId': safeTenantId,
+        if (safeSystemId.isNotEmpty) 'systemId': safeSystemId,
+      },
+    );
+    try {
+      final response = await _getBytes(uri, bearerToken: apiToken);
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return OpenIrnApiInventoryExcelResult(
+          status: OpenIrnApiDevicesStatus.available,
+          url: uri.toString(),
+          statusCode: response.statusCode,
+          title: 'Export Excel prêt',
+          message: 'Actifs du SI exportés au format Excel.',
+          tenantId: safeTenantId,
+          bytes: response.bytes,
+          suggestedFileName: _contentDispositionFileName(response.headers) ?? _inventoryExcelFileName(safeTenantId),
+        );
+      }
+      final decodedBody = _decodeJsonObject(response.bodyText);
+      return OpenIrnApiInventoryExcelResult(
+        status: OpenIrnApiDevicesStatus.rejected,
+        url: uri.toString(),
+        statusCode: response.statusCode,
+        title: 'Export Excel refusé',
+        message: decodedBody?['detail']?.toString() ?? 'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        tenantId: safeTenantId,
+        responseBody: decodedBody,
+      );
+    } on TimeoutException {
+      return _inventoryExcelNetworkError(uri, safeTenantId, 'Délai dépassé', 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.');
+    } on SocketException catch (error) {
+      return _inventoryExcelNetworkError(uri, safeTenantId, 'Serveur injoignable', error.message);
+    } on HandshakeException catch (error) {
+      return _inventoryExcelNetworkError(uri, safeTenantId, 'Erreur TLS', error.message);
+    } on FormatException catch (error) {
+      return _inventoryExcelNetworkError(uri, safeTenantId, 'Adresse serveur invalide', error.message);
+    } on HttpException catch (error) {
+      return _inventoryExcelNetworkError(uri, safeTenantId, 'Erreur HTTP', error.message);
+    }
+  }
+
+  Future<OpenIrnApiInventoryResult> importAssetInventoryExcel({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    String systemId = '',
+    required Uint8List bytes,
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(baseUrl ?? SyncConfiguration.fixedApiBaseUrl);
+    final safeTenantId = tenantId.trim().isEmpty ? SyncConfiguration.defaultTenantId : tenantId.trim();
+    final safeSystemId = systemId.trim();
+    final uri = Uri.parse('$normalizedBaseUrl/inventory/import.xlsx').replace(
+      queryParameters: <String, String>{
+        'tenantId': safeTenantId,
+        if (safeSystemId.isNotEmpty) 'systemId': safeSystemId,
+        'mode': 'replace',
+      },
+    );
+    try {
+      final response = await _postBytes(
+        uri,
+        bytes,
+        bearerToken: apiToken,
+        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      );
+      return _inventoryResultFromResponse(response, uri, safeTenantId, successTitle: 'Actifs Excel importés');
+    } on TimeoutException {
+      return _inventoryNetworkError(uri, safeTenantId, 'Délai dépassé', 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.');
+    } on SocketException catch (error) {
+      return _inventoryNetworkError(uri, safeTenantId, 'Serveur injoignable', error.message);
+    } on HandshakeException catch (error) {
+      return _inventoryNetworkError(uri, safeTenantId, 'Erreur TLS', error.message);
+    } on FormatException catch (error) {
+      return _inventoryNetworkError(uri, safeTenantId, 'Adresse serveur invalide', error.message);
+    } on HttpException catch (error) {
+      return _inventoryNetworkError(uri, safeTenantId, 'Erreur HTTP', error.message);
+    }
+  }
+
+  Future<OpenIrnApiInventoryResult> _postInventory({
+    String? baseUrl,
+    required String tenantId,
+    required String apiToken,
+    required String path,
+    required Map<String, dynamic> payload,
+    required String successTitle,
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(baseUrl ?? SyncConfiguration.fixedApiBaseUrl);
+    final safeTenantId = tenantId.trim().isEmpty ? SyncConfiguration.defaultTenantId : tenantId.trim();
+    final uri = Uri.parse('$normalizedBaseUrl$path');
+    try {
+      final response = await _postJson(uri, <String, dynamic>{'tenantId': safeTenantId, ...payload}, bearerToken: apiToken);
+      return _inventoryResultFromResponse(response, uri, safeTenantId, successTitle: successTitle);
+    } on TimeoutException {
+      return _inventoryNetworkError(uri, safeTenantId, 'Délai dépassé', 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.');
+    } on SocketException catch (error) {
+      return _inventoryNetworkError(uri, safeTenantId, 'Serveur injoignable', error.message);
+    } on HandshakeException catch (error) {
+      return _inventoryNetworkError(uri, safeTenantId, 'Erreur TLS', error.message);
+    } on FormatException catch (error) {
+      return _inventoryNetworkError(uri, safeTenantId, 'Adresse serveur invalide', error.message);
+    } on HttpException catch (error) {
+      return _inventoryNetworkError(uri, safeTenantId, 'Erreur HTTP', error.message);
+    }
+  }
+
+  Future<OpenIrnApiInventoryResult> _patchInventory({
+    String? baseUrl,
+    required String tenantId,
+    required String apiToken,
+    required String path,
+    required Map<String, dynamic> payload,
+    required String successTitle,
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(baseUrl ?? SyncConfiguration.fixedApiBaseUrl);
+    final safeTenantId = tenantId.trim().isEmpty ? SyncConfiguration.defaultTenantId : tenantId.trim();
+    final uri = Uri.parse('$normalizedBaseUrl$path');
+    try {
+      final response = await _patchJson(uri, <String, dynamic>{'tenantId': safeTenantId, ...payload}, bearerToken: apiToken);
+      return _inventoryResultFromResponse(response, uri, safeTenantId, successTitle: successTitle);
+    } on TimeoutException {
+      return _inventoryNetworkError(uri, safeTenantId, 'Délai dépassé', 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.');
+    } on SocketException catch (error) {
+      return _inventoryNetworkError(uri, safeTenantId, 'Serveur injoignable', error.message);
+    } on HandshakeException catch (error) {
+      return _inventoryNetworkError(uri, safeTenantId, 'Erreur TLS', error.message);
+    } on FormatException catch (error) {
+      return _inventoryNetworkError(uri, safeTenantId, 'Adresse serveur invalide', error.message);
+    } on HttpException catch (error) {
+      return _inventoryNetworkError(uri, safeTenantId, 'Erreur HTTP', error.message);
+    }
+  }
+
+  Future<OpenIrnApiInventoryResult> _deleteInventory({
+    String? baseUrl,
+    required String tenantId,
+    required String apiToken,
+    required String path,
+    required String successTitle,
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(baseUrl ?? SyncConfiguration.fixedApiBaseUrl);
+    final safeTenantId = tenantId.trim().isEmpty ? SyncConfiguration.defaultTenantId : tenantId.trim();
+    final uri = Uri.parse('$normalizedBaseUrl$path').replace(queryParameters: <String, String>{'tenantId': safeTenantId});
+    try {
+      final response = await _delete(uri, bearerToken: apiToken);
+      return _inventoryResultFromResponse(response, uri, safeTenantId, successTitle: successTitle);
+    } on TimeoutException {
+      return _inventoryNetworkError(uri, safeTenantId, 'Délai dépassé', 'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.');
+    } on SocketException catch (error) {
+      return _inventoryNetworkError(uri, safeTenantId, 'Serveur injoignable', error.message);
+    } on HandshakeException catch (error) {
+      return _inventoryNetworkError(uri, safeTenantId, 'Erreur TLS', error.message);
+    } on FormatException catch (error) {
+      return _inventoryNetworkError(uri, safeTenantId, 'Adresse serveur invalide', error.message);
+    } on HttpException catch (error) {
+      return _inventoryNetworkError(uri, safeTenantId, 'Erreur HTTP', error.message);
+    }
+  }
+
+  OpenIrnApiInventoryResult _inventoryResultFromResponse(
+    _HttpResponse response,
+    Uri uri,
+    String safeTenantId, {
+    String successTitle = 'Inventaire SI récupéré',
+  }) {
+    final decodedBody = _decodeJsonObject(response.body);
+    final inventory = decodedBody == null
+        ? IrnAssetInventory.empty(tenantId: safeTenantId)
+        : IrnAssetInventory.fromJson(decodedBody);
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return OpenIrnApiInventoryResult(
+        status: OpenIrnApiDevicesStatus.available,
+        url: uri.toString(),
+        statusCode: response.statusCode,
+        title: successTitle,
+        message: decodedBody?['message']?.toString() ?? '${inventory.criticalFunctions.length} fonction(s), ${inventory.informationSystems.length} SI, ${inventory.assets.length} actif(s).',
+        tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
+        inventory: inventory,
+        responseBody: decodedBody,
+      );
+    }
+    return OpenIrnApiInventoryResult(
+      status: <int>{401, 403}.contains(response.statusCode)
+          ? OpenIrnApiDevicesStatus.rejected
+          : OpenIrnApiDevicesStatus.rejected,
+      url: uri.toString(),
+      statusCode: response.statusCode,
+      title: 'Inventaire SI refusé',
+      message: decodedBody?['detail']?.toString() ?? 'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+      tenantId: safeTenantId,
+      inventory: IrnAssetInventory.empty(tenantId: safeTenantId),
+      responseBody: decodedBody,
+    );
+  }
+
+  OpenIrnApiInventoryResult _inventoryNetworkError(
+    Uri uri,
+    String tenantId,
+    String title,
+    String message,
+  ) {
+    return OpenIrnApiInventoryResult(
+      status: OpenIrnApiDevicesStatus.unreachable,
+      url: uri.toString(),
+      statusCode: null,
+      title: title,
+      message: message,
+      tenantId: tenantId,
+      inventory: IrnAssetInventory.empty(tenantId: tenantId),
+    );
+  }
+
+
+  OpenIrnApiInventoryExcelResult _inventoryExcelNetworkError(
+    Uri uri,
+    String tenantId,
+    String title,
+    String message,
+  ) {
+    return OpenIrnApiInventoryExcelResult(
+      status: OpenIrnApiDevicesStatus.unreachable,
+      url: uri.toString(),
+      statusCode: null,
+      title: title,
+      message: message,
+      tenantId: tenantId,
+    );
+  }
+
+  String _inventoryExcelFileName(String tenantId) {
+    final timestamp = DateTime.now().toLocal();
+    String two(int value) => value.toString().padLeft(2, '0');
+    final safeTenant = tenantId.replaceAll(RegExp(r'[^a-zA-Z0-9_.-]+'), '_');
+    return 'openirn_inventaire_si_${safeTenant}_${timestamp.year}${two(timestamp.month)}${two(timestamp.day)}_${two(timestamp.hour)}${two(timestamp.minute)}.xlsx';
+  }
+
+  String? _contentDispositionFileName(Map<String, List<String>> headers) {
+    final values = headers['content-disposition'];
+    if (values == null || values.isEmpty) {
+      return null;
+    }
+    final value = values.join(';');
+    final match = RegExp(r'filename="?([^";]+)"?', caseSensitive: false).firstMatch(value);
+    return match?.group(1)?.trim();
+  }
+
   Future<OpenIrnApiDevicesResult> loadDevices({
     String? baseUrl,
     required String tenantId,
@@ -3887,6 +4409,59 @@ class OpenIrnApiClient {
     }
   }
 
+
+  Map<String, List<String>> _httpHeadersToMap(HttpHeaders headers) {
+    final result = <String, List<String>>{};
+    headers.forEach((name, values) {
+      result[name.toLowerCase()] = List<String>.unmodifiable(values);
+    });
+    return result;
+  }
+
+  Future<_BinaryHttpResponse> _getBytes(Uri uri, {String bearerToken = ''}) async {
+    final client = HttpClient();
+    try {
+      final request = await client.getUrl(uri).timeout(timeout);
+      request.headers.set(HttpHeaders.acceptHeader, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/json');
+      request.headers.set(HttpHeaders.userAgentHeader, 'OpenIRN');
+      _applyAuthorizationHeaders(request, bearerToken: bearerToken);
+      final response = await request.close().timeout(timeout);
+      final chunks = <int>[];
+      await for (final chunk in response.timeout(timeout)) {
+        chunks.addAll(chunk);
+      }
+      return _BinaryHttpResponse(
+        statusCode: response.statusCode,
+        bytes: Uint8List.fromList(chunks),
+        headers: _httpHeadersToMap(response.headers),
+      );
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<_HttpResponse> _postBytes(
+    Uri uri,
+    Uint8List bytes, {
+    String bearerToken = '',
+    String contentType = 'application/octet-stream',
+  }) async {
+    final client = HttpClient();
+    try {
+      final request = await client.postUrl(uri).timeout(timeout);
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      request.headers.set(HttpHeaders.contentTypeHeader, contentType);
+      request.headers.set(HttpHeaders.userAgentHeader, 'OpenIRN');
+      _applyAuthorizationHeaders(request, bearerToken: bearerToken);
+      request.add(bytes);
+      final response = await request.close().timeout(timeout);
+      final body = await response.transform(utf8.decoder).join().timeout(timeout);
+      return _HttpResponse(statusCode: response.statusCode, body: body);
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   Future<_HttpResponse> _postJson(
     Uri uri,
     Map<String, dynamic> payload, {
@@ -4285,4 +4860,24 @@ class _HttpResponse {
   final String body;
 
   const _HttpResponse({required this.statusCode, required this.body});
+}
+
+class _BinaryHttpResponse {
+  final int statusCode;
+  final Uint8List bytes;
+  final Map<String, List<String>> headers;
+
+  const _BinaryHttpResponse({
+    required this.statusCode,
+    required this.bytes,
+    required this.headers,
+  });
+
+  String get bodyText {
+    try {
+      return utf8.decode(bytes);
+    } catch (_) {
+      return '';
+    }
+  }
 }

@@ -7,6 +7,7 @@ import '../campaigns/campaign_management_screen.dart';
 import '../common/change_access_code_card.dart';
 import '../common/openirn_app_bar.dart';
 import '../users/user_list_screen.dart';
+import 'asset_inventory_management_screen.dart';
 import 'authorized_devices_screen.dart';
 import 'campaign_history_screen.dart';
 import 'official_referential_screen.dart';
@@ -166,6 +167,21 @@ class AdministrationScreen extends StatelessWidget {
     );
   }
 
+  Future<void> _openAssetInventory(BuildContext context) async {
+    if (!_accessPolicy.canManageInformationAssets(activeUser)) {
+      _showForbidden(
+        context,
+        'La gestion des fonctions critiques, systèmes d’information et actifs est réservée aux administrateurs et pilotes IRN.',
+      );
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => AssetInventoryManagementScreen(activeUser: activeUser),
+      ),
+    );
+  }
+
   Future<void> _openAuthorizedDevices(BuildContext context) async {
     if (!_accessPolicy.canManageTenantAuthorizedDevices(activeUser)) {
       _showForbidden(
@@ -204,6 +220,15 @@ class AdministrationScreen extends StatelessWidget {
               : 'Référentiel serveur absent : installe d’abord le référentiel officiel aDRI.',
           buttonLabel: 'Ouvrir',
           onPressed: () => _openCampaignManagement(context),
+        ),
+      if (_accessPolicy.canManageInformationAssets(activeUser))
+        _AdministrationActionCard(
+          icon: Icons.hub_outlined,
+          title: 'Fonctions critiques, SI & actifs',
+          subtitle:
+              'Déclarer les fonctions critiques de l’espace, les systèmes d’information qui les portent et les actifs associés.',
+          buttonLabel: 'Gérer',
+          onPressed: () => _openAssetInventory(context),
         ),
       if (_accessPolicy.canManageTenantUsers(activeUser))
         _AdministrationActionCard(
