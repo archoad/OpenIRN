@@ -1503,7 +1503,11 @@ class _ScoreCard extends StatelessWidget {
                 Chip(label: Text('Intention : ${summary.intentionCriteria}')),
                 Chip(label: Text('Moyen : ${summary.mediumCriteria}')),
                 Chip(label: Text('Résultat : ${summary.resultCriteria}')),
-                Chip(label: Text('Non renseignés : ${summary.notAnsweredCriteria}')),
+                Chip(
+                  label: Text(
+                    'Non renseignés : ${summary.notAnsweredCriteria}',
+                  ),
+                ),
                 Chip(label: Text('Justifications : $justificationCount')),
                 Chip(
                   label: Text(

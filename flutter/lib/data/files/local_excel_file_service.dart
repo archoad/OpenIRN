@@ -19,9 +19,7 @@ class LocalExcelFileService {
     mimeTypes: <String>[
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     ],
-    uniformTypeIdentifiers: <String>[
-      'org.openxmlformats.spreadsheetml.sheet',
-    ],
+    uniformTypeIdentifiers: <String>['org.openxmlformats.spreadsheetml.sheet'],
   );
 
   Future<String?> saveExcel({

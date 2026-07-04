@@ -4,40 +4,40 @@ import 'package:openirn/domain/models/irn_referential.dart';
 import 'package:openirn/domain/services/official_rnr_scoring_service.dart';
 
 void main() {
+  test('methodMetadata explicite que le score IRN n’est pas pondéré', () {
+    expect(
+      OfficialRnrScoringService.methodMetadata.methodStatus,
+      'irn_scale_unweighted_v1',
+    );
+    expect(
+      OfficialRnrScoringService
+          .methodMetadata
+          .weightedOfficialMethodImplemented,
+      isFalse,
+    );
+  });
+
   test(
-    'methodMetadata explicite que le score IRN n’est pas pondéré',
+    'computeSummary calcule la moyenne des niveaux notés et exclut les N.C.',
     () {
-      expect(
-        OfficialRnrScoringService.methodMetadata.methodStatus,
-        'irn_scale_unweighted_v1',
-      );
-      expect(
-        OfficialRnrScoringService
-            .methodMetadata
-            .weightedOfficialMethodImplemented,
-        isFalse,
-      );
+      final referential = _sampleReferential();
+      const service = OfficialRnrScoringService();
+
+      final summary = service.computeSummary(referential, {
+        'RES-1.1': IrnAnswer.result,
+        'RES-1.2': IrnAnswer.nonResilient,
+        'RES-2.1': IrnAnswer.notAnswered,
+      });
+
+      expect(summary.totalCriteria, 3);
+      expect(summary.answeredCriteria, 2);
+      expect(summary.resilientCriteria, 1);
+      expect(summary.nonResilientCriteria, 1);
+      expect(summary.notAnsweredCriteria, 1);
+      expect(summary.openIrnRnrScore, 52.5);
+      expect(summary.officialScore, 52.5);
     },
   );
-
-  test('computeSummary calcule la moyenne des niveaux notés et exclut les N.C.', () {
-    final referential = _sampleReferential();
-    const service = OfficialRnrScoringService();
-
-    final summary = service.computeSummary(referential, {
-      'RES-1.1': IrnAnswer.result,
-      'RES-1.2': IrnAnswer.nonResilient,
-      'RES-2.1': IrnAnswer.notAnswered,
-    });
-
-    expect(summary.totalCriteria, 3);
-    expect(summary.answeredCriteria, 2);
-    expect(summary.resilientCriteria, 1);
-    expect(summary.nonResilientCriteria, 1);
-    expect(summary.notAnsweredCriteria, 1);
-    expect(summary.openIrnRnrScore, 52.5);
-    expect(summary.officialScore, 52.5);
-  });
 
   test('computeSummary retourne N/A si rien nest coté', () {
     final referential = _sampleReferential();

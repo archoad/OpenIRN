@@ -283,7 +283,8 @@ class ServerCampaignStore {
       'criterionId': answer.criterionId,
       'answer': answer.answer.name,
       'answerLabel': answer.answer.longLabel,
-      if (answer.answer.scoreValue != null) 'answerScore': answer.answer.scoreValue,
+      if (answer.answer.scoreValue != null)
+        'answerScore': answer.answer.scoreValue,
       'justification': answer.justification.trim(),
       'hasJustification': answer.hasJustification,
     };

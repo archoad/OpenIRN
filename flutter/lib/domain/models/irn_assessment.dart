@@ -129,7 +129,10 @@ class IrnScoreSummary {
   });
 
   int get scoredCriteria =>
-      nonResilientCriteria + intentionCriteria + mediumCriteria + resultCriteria;
+      nonResilientCriteria +
+      intentionCriteria +
+      mediumCriteria +
+      resultCriteria;
 
   double? get openIrnScore {
     if (scoredCriteria == 0) {

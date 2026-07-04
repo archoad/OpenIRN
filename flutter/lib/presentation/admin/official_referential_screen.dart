@@ -613,7 +613,8 @@ class _InfoLine extends StatelessWidget {
 
 String _scoringMethodLabel(OfficialReferentialSummary summary) {
   final status = summary.scoringMethodStatus;
-  if (status == 'public_rnr_unweighted' || status == 'irn_scale_unweighted_v1') {
+  if (status == 'public_rnr_unweighted' ||
+      status == 'irn_scale_unweighted_v1') {
     return summary.weightedOfficialMethodImplemented
         ? 'IRN pondéré'
         : 'OpenIRN grille IRN non pondérée';
