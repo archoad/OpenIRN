@@ -136,7 +136,7 @@ class _AssessmentSummaryScreenState extends State<AssessmentSummaryScreen> {
               const SizedBox(height: 12),
               const _SectionTitle(
                 title: 'Score par pilier',
-                subtitle: 'Lecture simple : R / (R + NR), hors critères N.C.',
+                subtitle: 'Lecture selon la grille IRN, hors critères N.C.',
               ),
               const SizedBox(height: 8),
               for (final entry in pillarSummaries.entries)
@@ -448,7 +448,7 @@ class _GlobalSummaryCard extends StatelessWidget {
                       Text('Score IRN', style: theme.textTheme.headlineSmall),
                       const SizedBox(height: 4),
                       const Text(
-                        'Score non pondéré R / (R + NR), basé sur les critères cotés du référentiel.',
+                        'Score non pondéré selon la grille IRN : NR=10, Intention=25, Moyen=50, Résultat=95. Les N.C. sont exclus du score.',
                       ),
                     ],
                   ),
@@ -467,10 +467,13 @@ class _GlobalSummaryCard extends StatelessWidget {
               runSpacing: 8,
               children: [
                 Chip(label: Text('Critères : ${summary.totalCriteria}')),
-                Chip(label: Text('Cotés : ${summary.answeredCriteria}')),
-                Chip(label: Text('R : ${summary.resilientCriteria}')),
+                Chip(label: Text('Renseignés : ${summary.answeredCriteria}')),
+                Chip(label: Text('N.C. : ${summary.notConcernedCriteria}')),
                 Chip(label: Text('NR : ${summary.nonResilientCriteria}')),
-                Chip(label: Text('N.C. : ${summary.notAnsweredCriteria}')),
+                Chip(label: Text('Intention : ${summary.intentionCriteria}')),
+                Chip(label: Text('Moyen : ${summary.mediumCriteria}')),
+                Chip(label: Text('Résultat : ${summary.resultCriteria}')),
+                Chip(label: Text('Non renseignés : ${summary.notAnsweredCriteria}')),
                 Chip(
                   label: Text(
                     'Complétude : ${(summary.completionRate * 100).toStringAsFixed(0)} %',
@@ -527,7 +530,7 @@ class _InterpretationCard extends StatelessWidget {
 
   String _interpret({required double? score, required double completion}) {
     if (score == null) {
-      return 'Aucun critère n’est encore coté. Commence par renseigner quelques réponses R / NR.';
+      return 'Aucun critère n’est encore noté. Commence par renseigner la grille IRN.';
     }
     if (completion < 0.5) {
       return 'Le score est encore fragile : moins de la moitié du référentiel est coté.';
@@ -704,7 +707,7 @@ class _PillarIndicatorGrid extends StatelessWidget {
               compactTitle: true,
               icon: _pillarIcon(entry.key),
               subtitle:
-                  'R ${entry.value.resilientCriteria} · NR ${entry.value.nonResilientCriteria}',
+                  'NC ${entry.value.notConcernedCriteria} · NR ${entry.value.nonResilientCriteria} · Résultat ${entry.value.resultCriteria}',
             );
           },
         );
@@ -900,7 +903,7 @@ class _IndicatorLegend extends StatelessWidget {
             const _IndicatorLegendChip(
               entry: _IndicatorLegendEntry(
                 label: '—',
-                description: 'Non coté',
+                description: 'Non renseigné',
                 score: null,
               ),
             ),
@@ -1187,7 +1190,7 @@ class _PillarScoreCard extends StatelessWidget {
     return _ScoreLineCard(
       title: '${pillar.code} — ${pillar.label}',
       subtitle:
-          '${summary.answeredCriteria}/${summary.totalCriteria} coté(s) · R ${summary.resilientCriteria} · NR ${summary.nonResilientCriteria}',
+          '${summary.answeredCriteria}/${summary.totalCriteria} renseigné(s) · Score ${summary.formattedOpenIrnRnrScore}',
       summary: summary,
     );
   }
@@ -1204,7 +1207,7 @@ class _ScopeScoreCard extends StatelessWidget {
     return _ScoreLineCard(
       title: scope.label,
       subtitle:
-          '${summary.answeredCriteria}/${summary.totalCriteria} coté(s) · R ${summary.resilientCriteria} · NR ${summary.nonResilientCriteria}',
+          '${summary.answeredCriteria}/${summary.totalCriteria} renseigné(s) · Score ${summary.formattedOpenIrnRnrScore}',
       summary: summary,
     );
   }

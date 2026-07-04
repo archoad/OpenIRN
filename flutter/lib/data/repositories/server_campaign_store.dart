@@ -282,7 +282,8 @@ class ServerCampaignStore {
     return <String, dynamic>{
       'criterionId': answer.criterionId,
       'answer': answer.answer.name,
-      'answerLabel': answer.answer.label,
+      'answerLabel': answer.answer.longLabel,
+      if (answer.answer.scoreValue != null) 'answerScore': answer.answer.scoreValue,
       'justification': answer.justification.trim(),
       'hasJustification': answer.hasJustification,
     };
@@ -376,14 +377,35 @@ class ServerCampaignStore {
   }
 
   IrnAnswer? _answerFromStoredValue(String? value) {
-    switch (value?.trim()) {
-      case 'resilient':
-      case 'R':
-        return IrnAnswer.resilient;
-      case 'nonResilient':
-      case 'NR':
+    switch ((value ?? '').trim().toLowerCase()) {
+      case 'notconcerned':
+      case 'not_concerned':
+      case 'nonconcerné':
+      case 'non_concerne':
+      case 'non_concerné':
+      case 'nc':
+      case 'n.c.':
+        return IrnAnswer.notConcerned;
+      case 'nonresilient':
+      case 'non_resilient':
+      case 'nonrésilient':
+      case 'non_résilient':
+      case 'nr':
         return IrnAnswer.nonResilient;
-      case 'notAnswered':
+      case 'intention':
+        return IrnAnswer.intention;
+      case 'medium':
+      case 'moyen':
+        return IrnAnswer.medium;
+      case 'result':
+      case 'résultat':
+      case 'resultat':
+      case 'resilient':
+      case 'résilient':
+      case 'r':
+        return IrnAnswer.result;
+      case 'notanswered':
+      case 'not_answered':
       case '':
         return IrnAnswer.notAnswered;
       default:

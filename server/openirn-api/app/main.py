@@ -2378,18 +2378,18 @@ ADRI_EXPECTED_HEADERS = {
 }
 
 OPENIRN_RNR_SCORING_METADATA = {
-    "method": "R / (R + NR) * 100",
-    "methodLabel": "Score OpenIRN R/NR",
-    "methodStatus": "public_rnr_unweighted",
-    "notAnsweredPolicy": "excluded_from_score_included_in_completion",
-    "criteriaWeightPolicy": "uniform_per_answered_criterion",
-    "globalAggregationPolicy": "all_answered_criteria_same_weight",
+    "method": "Moyenne des niveaux IRN : NR=10, Intention=25, Moyen=50, Résultat=95",
+    "methodLabel": "Score OpenIRN",
+    "methodStatus": "irn_scale_unweighted_v1",
+    "notAnsweredPolicy": "not_answered_excluded_nc_excluded_from_score_included_in_completion",
+    "criteriaWeightPolicy": "uniform_per_scored_criterion",
+    "globalAggregationPolicy": "average_numeric_scored_criteria",
     "weightedOfficialMethodImplemented": False,
-    "officialWeightedMethodStatus": "not_implemented_no_public_formula_available",
+    "officialWeightedMethodStatus": "implemented_public_level_scale_without_additional_weighting",
     "disclaimer": (
-        "Les sources publiques IRN décrivent une cartographie pondérée et une évaluation "
-        "multicritères, mais ne publient pas de formule de pondération exploitable dans "
-        "OpenIRN. Le score affiché reste donc un score OpenIRN R/NR non pondéré."
+        "OpenIRN applique la grille de notation IRN : N.C. exclu du score, "
+        "Non résilient = 10/100, Intention = 25/100, Moyen = 50/100, "
+        "Résultat = 95/100. Aucune pondération additionnelle n’est appliquée."
     ),
 }
 

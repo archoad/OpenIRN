@@ -63,7 +63,7 @@ void main() {
             criterionAnswers: const <String, CriterionAnswer>{
               'RES-1.1': CriterionAnswer(
                 criterionId: 'RES-1.1',
-                answer: IrnAnswer.resilient,
+                answer: IrnAnswer.result,
                 justification: 'Justifié.',
               ),
             },

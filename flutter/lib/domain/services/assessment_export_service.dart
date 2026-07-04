@@ -161,10 +161,18 @@ class AssessmentExportService {
     return <String, dynamic>{
       'totalCriteria': summary.totalCriteria,
       'answeredCriteria': summary.answeredCriteria,
-      'resilientCriteria': summary.resilientCriteria,
+      'notConcernedCriteria': summary.notConcernedCriteria,
       'nonResilientCriteria': summary.nonResilientCriteria,
+      'intentionCriteria': summary.intentionCriteria,
+      'mediumCriteria': summary.mediumCriteria,
+      'resultCriteria': summary.resultCriteria,
       'notAnsweredCriteria': summary.notAnsweredCriteria,
+      'scoredCriteria': summary.scoredCriteria,
+      'scorePointsTotal': summary.scorePointsTotal,
       'completionRate': _round(summary.completionRate),
+      'openIrnScore': summary.openIrnScore == null
+          ? null
+          : _round(summary.openIrnScore!),
       'openIrnRnrScore': summary.openIrnRnrScore == null
           ? null
           : _round(summary.openIrnRnrScore!),
@@ -227,7 +235,10 @@ class AssessmentExportService {
       'scopeLabel': criterion.scope.label,
       'answer': _officialAnswerValue(criterionAnswer.answer),
       'answerLabel': criterionAnswer.answer.longLabel,
-      'isCountedInScore': criterionAnswer.answer.isCounted,
+      'isAnswered': criterionAnswer.answer.isAnswered,
+      'isScoredInScore': criterionAnswer.answer.isScored,
+      if (criterionAnswer.answer.scoreValue != null)
+        'answerScore': criterionAnswer.answer.scoreValue,
       'justification': justification,
       'hasJustification': justification.isNotEmpty,
     };
@@ -235,12 +246,18 @@ class AssessmentExportService {
 
   String _officialAnswerValue(IrnAnswer answer) {
     switch (answer) {
-      case IrnAnswer.resilient:
-        return 'R';
+      case IrnAnswer.notConcerned:
+        return 'NC';
       case IrnAnswer.nonResilient:
         return 'NR';
+      case IrnAnswer.intention:
+        return 'INTENTION';
+      case IrnAnswer.medium:
+        return 'MOYEN';
+      case IrnAnswer.result:
+        return 'RESULTAT';
       case IrnAnswer.notAnswered:
-        return 'NC';
+        return 'NON_RENSEIGNE';
     }
   }
 

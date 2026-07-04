@@ -14,7 +14,7 @@ void main() {
         criterionAnswers: const <String, CriterionAnswer>{
           'RES-1.1': CriterionAnswer(
             criterionId: 'RES-1.1',
-            answer: IrnAnswer.resilient,
+            answer: IrnAnswer.result,
             justification: 'Gouvernance documentée.',
           ),
           'RES-1.2': CriterionAnswer(
@@ -44,7 +44,7 @@ void main() {
         criterionAnswers: const <String, CriterionAnswer>{
           'RES-1.1': CriterionAnswer(
             criterionId: 'RES-1.1',
-            answer: IrnAnswer.resilient,
+            answer: IrnAnswer.result,
             justification: 'Documenté.',
           ),
           'RES-1.2': CriterionAnswer(
@@ -54,7 +54,7 @@ void main() {
           ),
           'RES-2.1': CriterionAnswer(
             criterionId: 'RES-2.1',
-            answer: IrnAnswer.resilient,
+            answer: IrnAnswer.result,
             justification: 'Preuve disponible.',
           ),
         },
@@ -75,7 +75,7 @@ void main() {
       criterionAnswers: const <String, CriterionAnswer>{
         'RES-1.1': CriterionAnswer(
           criterionId: 'RES-1.1',
-          answer: IrnAnswer.resilient,
+          answer: IrnAnswer.result,
           justification: 'Documenté.',
         ),
         'RES-1.2': CriterionAnswer(
@@ -85,7 +85,7 @@ void main() {
         ),
         'RES-2.1': CriterionAnswer(
           criterionId: 'RES-2.1',
-          answer: IrnAnswer.resilient,
+          answer: IrnAnswer.result,
           justification: 'Documenté.',
         ),
       },
@@ -108,7 +108,7 @@ void main() {
         criterionAnswers: const <String, CriterionAnswer>{
           'RES-1.1': CriterionAnswer(
             criterionId: 'RES-1.1',
-            answer: IrnAnswer.resilient,
+            answer: IrnAnswer.result,
             justification: 'Documenté.',
           ),
           'RES-1.2': CriterionAnswer(
@@ -118,7 +118,7 @@ void main() {
           ),
           'RES-2.1': CriterionAnswer(
             criterionId: 'RES-2.1',
-            answer: IrnAnswer.resilient,
+            answer: IrnAnswer.result,
             justification: 'Documenté.',
           ),
         },
@@ -151,7 +151,7 @@ void main() {
       criterionAnswers: const <String, CriterionAnswer>{
         'RES-1.1': CriterionAnswer(
           criterionId: 'RES-1.1',
-          answer: IrnAnswer.resilient,
+          answer: IrnAnswer.result,
           justification: 'Documenté.',
         ),
         'RES-1.2': CriterionAnswer(
@@ -161,7 +161,7 @@ void main() {
         ),
         'RES-2.1': CriterionAnswer(
           criterionId: 'RES-2.1',
-          answer: IrnAnswer.resilient,
+          answer: IrnAnswer.result,
           justification: 'Documenté.',
         ),
       },

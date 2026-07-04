@@ -77,7 +77,7 @@ void main() {
             'answers': <Map<String, dynamic>>[
               <String, dynamic>{
                 'criterionId': 'RES-1.1',
-                'answer': 'resilient',
+                'answer': 'result',
                 'justification': 'Justification distante',
               },
             ],
@@ -98,7 +98,7 @@ void main() {
     expect(result.campaigns.single.campaign.name, contains('Campagne source'));
     expect(
       result.campaigns.single.criterionAnswers['RES-1.1']?.answer,
-      IrnAnswer.resilient,
+      IrnAnswer.result,
     );
     expect(
       result.campaigns.single.criterionAnswers['RES-1.1']?.justification,

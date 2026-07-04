@@ -5,11 +5,11 @@ import 'package:openirn/domain/services/official_rnr_scoring_service.dart';
 
 void main() {
   test(
-    'methodMetadata explicite que le score OpenIRN R/NR nest pas pondéré',
+    'methodMetadata explicite que le score IRN n’est pas pondéré',
     () {
       expect(
         OfficialRnrScoringService.methodMetadata.methodStatus,
-        'public_rnr_unweighted',
+        'irn_scale_unweighted_v1',
       );
       expect(
         OfficialRnrScoringService
@@ -20,12 +20,12 @@ void main() {
     },
   );
 
-  test('computeSummary calcule R / (R + NR) et exclut les N.C.', () {
+  test('computeSummary calcule la moyenne des niveaux notés et exclut les N.C.', () {
     final referential = _sampleReferential();
     const service = OfficialRnrScoringService();
 
     final summary = service.computeSummary(referential, {
-      'RES-1.1': IrnAnswer.resilient,
+      'RES-1.1': IrnAnswer.result,
       'RES-1.2': IrnAnswer.nonResilient,
       'RES-2.1': IrnAnswer.notAnswered,
     });
@@ -35,8 +35,8 @@ void main() {
     expect(summary.resilientCriteria, 1);
     expect(summary.nonResilientCriteria, 1);
     expect(summary.notAnsweredCriteria, 1);
-    expect(summary.openIrnRnrScore, 50);
-    expect(summary.officialScore, 50);
+    expect(summary.openIrnRnrScore, 52.5);
+    expect(summary.officialScore, 52.5);
   });
 
   test('computeSummary retourne N/A si rien nest coté', () {
@@ -56,13 +56,13 @@ void main() {
     const service = OfficialRnrScoringService();
 
     final summaries = service.computeSummariesByPillar(referential, {
-      'RES-1.1': IrnAnswer.resilient,
+      'RES-1.1': IrnAnswer.result,
       'RES-1.2': IrnAnswer.nonResilient,
-      'RES-2.1': IrnAnswer.resilient,
+      'RES-2.1': IrnAnswer.result,
     });
 
-    expect(summaries[referential.pillars[0]]?.officialScore, 50);
-    expect(summaries[referential.pillars[1]]?.officialScore, 100);
+    expect(summaries[referential.pillars[0]]?.officialScore, 52.5);
+    expect(summaries[referential.pillars[1]]?.officialScore, 95);
   });
 
   test('computeSummariesByScope regroupe organisation et actif numérique', () {
@@ -70,15 +70,15 @@ void main() {
     const service = OfficialRnrScoringService();
 
     final summaries = service.computeSummariesByScope(referential, {
-      'RES-1.1': IrnAnswer.resilient,
+      'RES-1.1': IrnAnswer.result,
       'RES-1.2': IrnAnswer.nonResilient,
-      'RES-2.1': IrnAnswer.resilient,
+      'RES-2.1': IrnAnswer.result,
     });
 
     expect(summaries[CriterionScope.organization]?.totalCriteria, 2);
     expect(summaries[CriterionScope.asset]?.totalCriteria, 1);
-    expect(summaries[CriterionScope.organization]?.officialScore, 50);
-    expect(summaries[CriterionScope.asset]?.officialScore, 100);
+    expect(summaries[CriterionScope.organization]?.officialScore, 52.5);
+    expect(summaries[CriterionScope.asset]?.officialScore, 95);
   });
 }
 

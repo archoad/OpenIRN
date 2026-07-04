@@ -321,11 +321,14 @@ class _CampaignCard extends StatelessWidget {
                 ),
                 Chip(
                   label: Text(
-                    'Cotés : ${summary.answeredCriteria}/${summary.totalCriteria}',
+                    'Renseignés : ${summary.answeredCriteria}/${summary.totalCriteria}',
                   ),
                 ),
-                Chip(label: Text('R : ${summary.resilientCriteria}')),
+                Chip(label: Text('N.C. : ${summary.notConcernedCriteria}')),
                 Chip(label: Text('NR : ${summary.nonResilientCriteria}')),
+                Chip(label: Text('Intention : ${summary.intentionCriteria}')),
+                Chip(label: Text('Moyen : ${summary.mediumCriteria}')),
+                Chip(label: Text('Résultat : ${summary.resultCriteria}')),
                 Chip(
                   label: Text(
                     'Complétude : ${(summary.completionRate * 100).toStringAsFixed(0)} %',
