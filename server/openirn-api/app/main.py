@@ -1271,6 +1271,9 @@ def _migrate_existing_entity_ids_to_uuid(con: Any) -> None:
         "sync_snapshots",
         "campaign_states",
         "campaign_revisions",
+        "critical_functions",
+        "information_systems",
+        "information_assets",
         "authorized_devices",
         "device_enrollment_requests",
         "device_enrollment_codes",
@@ -3893,6 +3896,9 @@ def _table_counts(con: Any) -> dict[str, int | None]:
         "sync_snapshots",
         "campaign_states",
         "campaign_revisions",
+        "critical_functions",
+        "information_systems",
+        "information_assets",
         "authorized_devices",
         "device_enrollment_requests",
         "device_enrollment_codes",
@@ -6158,6 +6164,701 @@ def revoke_auth_session(
         "sessionId": safe_session_id,
         "message": "Session révoquée.",
     }
+
+
+def _inventory_text(value: Any, limit: int = 255) -> str:
+    return str(value or "").strip()[: max(1, limit)]
+
+
+def _inventory_row_public(row: Any, *, kind: str) -> dict[str, Any]:
+    if kind == "function":
+        return {
+            "id": row["function_id"],
+            "functionId": row["function_id"],
+            "tenantId": row["tenant_id"],
+            "name": row["name"],
+            "description": row["description"],
+            "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
+        }
+    if kind == "system":
+        return {
+            "id": row["system_id"],
+            "systemId": row["system_id"],
+            "functionId": row["function_id"],
+            "tenantId": row["tenant_id"],
+            "name": row["name"],
+            "description": row["description"],
+            "owner": row["owner"],
+            "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
+        }
+    return {
+        "id": row["asset_id"],
+        "assetId": row["asset_id"],
+        "systemId": row["system_id"],
+        "tenantId": row["tenant_id"],
+        "name": row["name"],
+        "assetType": row["asset_type"],
+        "description": row["description"],
+        "criticality": row["criticality"],
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+    }
+
+
+def _inventory_payload(con: Any, tenant_id: str) -> dict[str, Any]:
+    function_rows = con.execute(
+        """
+        SELECT tenant_id, function_id, name, description, created_at, updated_at
+        FROM critical_functions
+        WHERE tenant_id = ?
+        ORDER BY name ASC, created_at ASC
+        """,
+        (tenant_id,),
+    ).fetchall()
+    system_rows = con.execute(
+        """
+        SELECT tenant_id, system_id, function_id, name, description, owner, created_at, updated_at
+        FROM information_systems
+        WHERE tenant_id = ?
+        ORDER BY name ASC, created_at ASC
+        """,
+        (tenant_id,),
+    ).fetchall()
+    asset_rows = con.execute(
+        """
+        SELECT tenant_id, asset_id, system_id, name, asset_type, description, criticality, created_at, updated_at
+        FROM information_assets
+        WHERE tenant_id = ?
+        ORDER BY name ASC, created_at ASC
+        """,
+        (tenant_id,),
+    ).fetchall()
+    functions = [_inventory_row_public(row, kind="function") for row in function_rows]
+    systems = [_inventory_row_public(row, kind="system") for row in system_rows]
+    assets = [_inventory_row_public(row, kind="asset") for row in asset_rows]
+    return {
+        "status": "ok",
+        "type": "openirn.assetInventory",
+        "application": "OpenIRN API",
+        "version": APP_VERSION,
+        "tenantId": tenant_id,
+        "tenantDisplayName": _tenant_display_name(con, tenant_id),
+        "serverTime": _utc_now().isoformat(),
+        "criticalFunctionCount": len(functions),
+        "informationSystemCount": len(systems),
+        "assetCount": len(assets),
+        "criticalFunctions": functions,
+        "informationSystems": systems,
+        "assets": assets,
+    }
+
+
+INVENTORY_EXCEL_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+INVENTORY_EXCEL_MAX_BYTES = 5 * 1024 * 1024
+
+
+def _load_openpyxl() -> Any:
+    try:
+        import openpyxl  # type: ignore
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="La dépendance openpyxl est requise pour l'import/export Excel de l'inventaire SI",
+        ) from exc
+    return openpyxl
+
+
+def _inventory_excel_safe_name(value: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9_.-]+", "_", value.strip()).strip("_")
+    return cleaned[:80] or "inventaire"
+
+
+def _inventory_excel_write_header(sheet: Any, headers: list[str]) -> None:
+    sheet.append(headers)
+
+
+def _inventory_excel_autowidth(sheet: Any) -> None:
+    for column_cells in sheet.columns:
+        max_length = 0
+        column_letter = column_cells[0].column_letter
+        for cell in column_cells:
+            value = "" if cell.value is None else str(cell.value)
+            max_length = max(max_length, min(len(value), 80))
+        sheet.column_dimensions[column_letter].width = max(12, min(max_length + 2, 60))
+
+
+def _inventory_system_export_context(con: Any, tenant_id: str, system_id: str) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    inventory = _inventory_payload(con, tenant_id)
+    system = next((item for item in inventory["informationSystems"] if item["systemId"] == system_id), None)
+    if system is None:
+        raise HTTPException(status_code=404, detail="Système d'information introuvable")
+    function = next((item for item in inventory["criticalFunctions"] if item["functionId"] == system["functionId"]), {})
+    assets = [item for item in inventory["assets"] if item["systemId"] == system_id]
+    return function, system, assets
+
+
+def _inventory_to_excel_bytes(con: Any, tenant_id: str, system_id: str) -> bytes:
+    openpyxl = _load_openpyxl()
+    from openpyxl.styles import Font, PatternFill, Protection
+    from openpyxl.utils import get_column_letter
+
+    function, system, assets = _inventory_system_export_context(con, tenant_id, system_id)
+
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "Actifs SI"
+
+    password = secrets.token_urlsafe(12)
+    locked = Protection(locked=True)
+    unlocked = Protection(locked=False)
+    header_fill = PatternFill(fill_type="solid", fgColor="E9EEF6")
+    id_fill = PatternFill(fill_type="solid", fgColor="F3F4F6")
+
+    # Une seule feuille métier, une ligne par actif. La ligne 1 contient les colonnes attendues à l'import.
+    header_row = 1
+    headers = ["ID actif", "Nom actif", "Type actif", "Description actif"]
+    sheet.append(headers)
+    for cell in sheet[header_row]:
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+        cell.protection = locked
+
+    def append_asset_row(asset_id: str = "", name: str = "", asset_type: str = "", description: str = "") -> None:
+        sheet.append([asset_id, name, asset_type, description])
+        row_index = sheet.max_row
+        for col_index in range(1, len(headers) + 1):
+            cell = sheet.cell(row=row_index, column=col_index)
+            if col_index == 1:
+                cell.protection = locked
+                cell.fill = id_fill
+            else:
+                cell.protection = unlocked
+
+    for asset in assets:
+        append_asset_row(
+            str(asset.get("assetId") or ""),
+            str(asset.get("name") or ""),
+            str(asset.get("assetType") or ""),
+            str(asset.get("description") or ""),
+        )
+
+    # Pré-formate des lignes vides pour l'ajout d'actifs sans modifier la protection.
+    min_template_rows = max(sheet.max_row + 100, header_row + 200)
+    for _ in range(sheet.max_row + 1, min_template_rows + 1):
+        append_asset_row()
+
+    # Déverrouille les métadonnées éditables B:D, mais garde la colonne A verrouillée partout.
+    for row in range(1, min_template_rows + 1):
+        sheet.cell(row=row, column=1).protection = locked
+        for col in range(2, 5):
+            sheet.cell(row=row, column=col).protection = unlocked
+
+    sheet.freeze_panes = f"A{header_row + 1}"
+    sheet.auto_filter.ref = f"A{header_row}:{get_column_letter(len(headers))}{max(sheet.max_row, header_row)}"
+    sheet.column_dimensions["A"].width = 38
+    sheet.column_dimensions["B"].width = 36
+    sheet.column_dimensions["C"].width = 24
+    sheet.column_dimensions["D"].width = 56
+
+    sheet.protection.sheet = True
+    sheet.protection.password = password
+    # En OOXML/openpyxl, selectUnlockedCells=True protège aussi la sélection
+    # des cellules déverrouillées. On laisse donc cette option à False afin que
+    # les colonnes B:D restent réellement modifiables dans Excel/LibreOffice.
+    sheet.protection.selectLockedCells = False
+    sheet.protection.selectUnlockedCells = False
+    sheet.protection.formatCells = False
+    sheet.protection.formatColumns = False
+    sheet.protection.formatRows = False
+    sheet.protection.insertRows = False
+    sheet.protection.deleteRows = False
+
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
+def _excel_norm(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _excel_header_key(value: Any) -> str:
+    text = _excel_norm(value).lower()
+    replacements = {
+        "é": "e", "è": "e", "ê": "e", "ë": "e",
+        "à": "a", "â": "a", "ä": "a",
+        "î": "i", "ï": "i",
+        "ô": "o", "ö": "o",
+        "ù": "u", "û": "u", "ü": "u",
+        "ç": "c",
+        "’": "'",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return re.sub(r"[^a-z0-9]+", "_", text).strip("_")
+
+
+def _excel_sheet(workbook: Any, names: list[str]) -> Any:
+    wanted = {_excel_header_key(name) for name in names}
+    for sheet_name in workbook.sheetnames:
+        if _excel_header_key(sheet_name) in wanted:
+            return workbook[sheet_name]
+    raise HTTPException(status_code=400, detail=f"Feuille Excel manquante: {names[0]}")
+
+
+def _excel_rows(sheet: Any) -> list[dict[str, str]]:
+    rows = list(sheet.iter_rows(values_only=True))
+    if not rows:
+        return []
+    headers = [_excel_header_key(cell) for cell in rows[0]]
+    result: list[dict[str, str]] = []
+    for raw_row in rows[1:]:
+        values = [_excel_norm(cell) for cell in raw_row]
+        if not any(values):
+            continue
+        item: dict[str, str] = {}
+        for index, header in enumerate(headers):
+            if not header:
+                continue
+            item[header] = values[index] if index < len(values) else ""
+        result.append(item)
+    return result
+
+
+def _excel_get(row: dict[str, str], *keys: str) -> str:
+    for key in keys:
+        value = row.get(_excel_header_key(key), "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _inventory_import_from_excel_bytes(con: Any, tenant_id: str, system_id: str, raw: bytes) -> dict[str, int]:
+    if not raw:
+        raise HTTPException(status_code=400, detail="Fichier Excel vide")
+    if len(raw) > INVENTORY_EXCEL_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Fichier Excel trop volumineux pour l'import des actifs")
+    openpyxl = _load_openpyxl()
+    try:
+        workbook = openpyxl.load_workbook(BytesIO(raw), data_only=True)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Fichier Excel illisible: {exc}") from exc
+
+    _require_information_system(con, tenant_id, system_id)
+    rows = _excel_rows(_excel_sheet(workbook, ["Actifs SI", "Actifs", "Assets"]))
+    if not rows:
+        raise HTTPException(status_code=400, detail="La feuille Actifs SI ne contient aucune ligne importable")
+
+    existing_asset_rows = con.execute(
+        "SELECT asset_id FROM information_assets WHERE tenant_id = ? AND system_id = ?",
+        (tenant_id, system_id),
+    ).fetchall()
+    existing_asset_ids = {str(row["asset_id"]) for row in existing_asset_rows}
+
+    now = _utc_now().isoformat()
+    assets: list[tuple[str, str, str, str]] = []
+    used_asset_ids: set[str] = set()
+
+    for index, row in enumerate(rows, start=2):
+        asset_name = _inventory_text(_excel_get(row, "Nom actif", "Actif", "name"), 255)
+        asset_type = _inventory_text(_excel_get(row, "Type actif", "Type d'actif", "asset type"), 120)
+        asset_description = _inventory_text(_excel_get(row, "Description actif", "description actif"), 4000)
+        raw_asset_id = _normalize_uuid(_excel_get(row, "ID actif", "asset id", "assetId"))
+
+        if not asset_name and not asset_type and not asset_description and not raw_asset_id:
+            continue
+        if not asset_name:
+            raise HTTPException(status_code=400, detail=f"Ligne {index}: le nom de l'actif est obligatoire")
+
+        if raw_asset_id:
+            if raw_asset_id not in existing_asset_ids:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Ligne {index}: ID actif inconnu pour ce SI. Pour créer un nouvel actif, laissez la colonne ID actif vide.",
+                )
+            asset_id = raw_asset_id
+        else:
+            asset_id = _new_uuid()
+
+        if asset_id in used_asset_ids:
+            raise HTTPException(status_code=400, detail=f"Ligne {index}: ID actif dupliqué dans le fichier Excel: {asset_id}")
+        used_asset_ids.add(asset_id)
+        assets.append((asset_id, asset_name, asset_type, asset_description))
+
+    con.execute("DELETE FROM information_assets WHERE tenant_id = ? AND system_id = ?", (tenant_id, system_id))
+    for asset_id, name, asset_type, description in assets:
+        con.execute(
+            """
+            INSERT INTO information_assets(tenant_id, asset_id, system_id, name, asset_type, description, criticality, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (tenant_id, asset_id, system_id, name, asset_type, description, "", now, now),
+        )
+    return {"assets": len(assets)}
+
+
+def _require_function(con: Any, tenant_id: str, function_id: str) -> None:
+    row = con.execute(
+        "SELECT 1 FROM critical_functions WHERE tenant_id = ? AND function_id = ?",
+        (tenant_id, function_id),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Fonction critique introuvable")
+
+
+def _require_information_system(con: Any, tenant_id: str, system_id: str) -> None:
+    row = con.execute(
+        "SELECT 1 FROM information_systems WHERE tenant_id = ? AND system_id = ?",
+        (tenant_id, system_id),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Système d'information introuvable")
+
+
+
+@app.get("/inventory/export.xlsx")
+def asset_inventory_export_excel(
+    request: Request,
+    tenantId: str = Query(default=DEFAULT_TENANT_ID, min_length=1, max_length=80),
+    systemId: str = Query(default="", min_length=0, max_length=80),
+) -> StreamingResponse:
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
+    system_id = _normalize_uuid(systemId)
+    if not system_id:
+        raise HTTPException(status_code=400, detail="Le paramètre systemId est obligatoire pour l'export Excel des actifs")
+    _require_campaign_manager_authorization(request, tenant_id)
+    with _db() as con:
+        _ensure_tenant(con, tenant_id)
+        _require_information_system(con, tenant_id, system_id)
+        system_row = con.execute(
+            "SELECT name FROM information_systems WHERE tenant_id = ? AND system_id = ?",
+            (tenant_id, system_id),
+        ).fetchone()
+        system_name = str(system_row["name"] if system_row else system_id)
+        raw = _inventory_to_excel_bytes(con, tenant_id, system_id)
+        con.commit()
+    timestamp = _utc_now().strftime("%Y%m%dT%H%M%SZ")
+    filename = f"openirn_actifs_si_{_inventory_excel_safe_name(system_name)}_{timestamp}.xlsx"
+    return StreamingResponse(
+        BytesIO(raw),
+        media_type=INVENTORY_EXCEL_MIME,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/inventory/import.xlsx")
+async def asset_inventory_import_excel(
+    request: Request,
+    tenantId: str = Query(default=DEFAULT_TENANT_ID, min_length=1, max_length=80),
+    systemId: str = Query(default="", min_length=0, max_length=80),
+    mode: str = Query(default="replace"),
+) -> dict[str, Any]:
+    if mode.strip().lower() != "replace":
+        raise HTTPException(status_code=400, detail="Seul le mode replace est supporté pour l'import Excel des actifs")
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
+    system_id = _normalize_uuid(systemId)
+    if not system_id:
+        raise HTTPException(status_code=400, detail="Le paramètre systemId est obligatoire pour l'import Excel des actifs")
+    auth_context = _require_campaign_manager_authorization(request, tenant_id)
+    raw = await request.body()
+    with _db() as con:
+        with con:
+            _ensure_tenant(con, tenant_id)
+            counts = _inventory_import_from_excel_bytes(con, tenant_id, system_id, raw)
+            _record_device_audit(
+                con,
+                tenant_id,
+                "inventory.system.excel.imported",
+                device_id=str(auth_context.get("deviceId") or ""),
+                payload={"mode": mode, "systemId": system_id, "counts": counts, "actorUserId": auth_context.get("userId") or ""},
+            )
+            result = _inventory_payload(con, tenant_id)
+            result["message"] = f"Actifs importés pour le SI: {counts['assets']} actif(s)."
+            result["importCounts"] = counts
+    return result
+
+
+@app.get("/inventory")
+def asset_inventory(
+    request: Request,
+    tenantId: str = Query(default=DEFAULT_TENANT_ID, min_length=1, max_length=80),
+) -> dict[str, Any]:
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
+    _require_campaign_manager_authorization(request, tenant_id)
+    with _db() as con:
+        _ensure_tenant(con, tenant_id)
+        payload = _inventory_payload(con, tenant_id)
+        con.commit()
+    return payload
+
+
+@app.post("/inventory/critical-functions")
+async def critical_function_create(request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Payload must be a JSON object")
+    tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
+    auth_context = _require_campaign_manager_authorization(request, tenant_id)
+    name = _inventory_text(payload.get("name"), 255)
+    description = _inventory_text(payload.get("description"), 4000)
+    if not name:
+        raise HTTPException(status_code=400, detail="Le nom de la fonction critique est obligatoire")
+    now = _utc_now().isoformat()
+    function_id = _normalize_uuid(payload.get("functionId") or payload.get("id")) or _new_uuid()
+    with _db() as con:
+        with con:
+            _ensure_tenant(con, tenant_id)
+            con.execute(
+                """
+                INSERT INTO critical_functions(tenant_id, function_id, name, description, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (tenant_id, function_id, name, description, now, now),
+            )
+            _record_device_audit(
+                con,
+                tenant_id,
+                "inventory.critical_function.created",
+                device_id=str(auth_context.get("deviceId") or ""),
+                payload={"functionId": function_id, "name": name, "actorUserId": auth_context.get("userId") or ""},
+            )
+            result = _inventory_payload(con, tenant_id)
+    return result
+
+
+@app.patch("/inventory/critical-functions/{function_id}")
+async def critical_function_update(function_id: str, request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Payload must be a JSON object")
+    tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
+    auth_context = _require_campaign_manager_authorization(request, tenant_id)
+    name = _inventory_text(payload.get("name"), 255)
+    description = _inventory_text(payload.get("description"), 4000)
+    if not name:
+        raise HTTPException(status_code=400, detail="Le nom de la fonction critique est obligatoire")
+    now = _utc_now().isoformat()
+    with _db() as con:
+        with con:
+            _require_function(con, tenant_id, function_id)
+            con.execute(
+                """
+                UPDATE critical_functions
+                SET name = ?, description = ?, updated_at = ?
+                WHERE tenant_id = ? AND function_id = ?
+                """,
+                (name, description, now, tenant_id, function_id),
+            )
+            _record_device_audit(con, tenant_id, "inventory.critical_function.updated", device_id=str(auth_context.get("deviceId") or ""), payload={"functionId": function_id, "name": name, "actorUserId": auth_context.get("userId") or ""})
+            result = _inventory_payload(con, tenant_id)
+    return result
+
+
+@app.delete("/inventory/critical-functions/{function_id}")
+def critical_function_delete(
+    function_id: str,
+    request: Request,
+    tenantId: str = Query(default=DEFAULT_TENANT_ID, min_length=1, max_length=80),
+) -> dict[str, Any]:
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
+    auth_context = _require_campaign_manager_authorization(request, tenant_id)
+    with _db() as con:
+        with con:
+            _require_function(con, tenant_id, function_id)
+            con.execute("DELETE FROM critical_functions WHERE tenant_id = ? AND function_id = ?", (tenant_id, function_id))
+            _record_device_audit(con, tenant_id, "inventory.critical_function.deleted", device_id=str(auth_context.get("deviceId") or ""), payload={"functionId": function_id, "actorUserId": auth_context.get("userId") or ""})
+            result = _inventory_payload(con, tenant_id)
+    return result
+
+
+@app.post("/inventory/information-systems")
+async def information_system_create(request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Payload must be a JSON object")
+    tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
+    auth_context = _require_campaign_manager_authorization(request, tenant_id)
+    function_id = str(payload.get("functionId") or "").strip()
+    name = _inventory_text(payload.get("name"), 255)
+    description = _inventory_text(payload.get("description"), 4000)
+    owner = _inventory_text(payload.get("owner"), 255)
+    if not function_id:
+        raise HTTPException(status_code=400, detail="La fonction critique est obligatoire")
+    if not name:
+        raise HTTPException(status_code=400, detail="Le nom du système d'information est obligatoire")
+    now = _utc_now().isoformat()
+    system_id = _normalize_uuid(payload.get("systemId") or payload.get("id")) or _new_uuid()
+    with _db() as con:
+        with con:
+            _require_function(con, tenant_id, function_id)
+            con.execute(
+                """
+                INSERT INTO information_systems(tenant_id, system_id, function_id, name, description, owner, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (tenant_id, system_id, function_id, name, description, owner, now, now),
+            )
+            _record_device_audit(con, tenant_id, "inventory.information_system.created", device_id=str(auth_context.get("deviceId") or ""), payload={"systemId": system_id, "functionId": function_id, "name": name, "actorUserId": auth_context.get("userId") or ""})
+            result = _inventory_payload(con, tenant_id)
+    return result
+
+
+@app.patch("/inventory/information-systems/{system_id}")
+async def information_system_update(system_id: str, request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Payload must be a JSON object")
+    tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
+    auth_context = _require_campaign_manager_authorization(request, tenant_id)
+    function_id = str(payload.get("functionId") or "").strip()
+    name = _inventory_text(payload.get("name"), 255)
+    description = _inventory_text(payload.get("description"), 4000)
+    owner = _inventory_text(payload.get("owner"), 255)
+    if not function_id:
+        raise HTTPException(status_code=400, detail="La fonction critique est obligatoire")
+    if not name:
+        raise HTTPException(status_code=400, detail="Le nom du système d'information est obligatoire")
+    now = _utc_now().isoformat()
+    with _db() as con:
+        with con:
+            _require_information_system(con, tenant_id, system_id)
+            _require_function(con, tenant_id, function_id)
+            con.execute(
+                """
+                UPDATE information_systems
+                SET function_id = ?, name = ?, description = ?, owner = ?, updated_at = ?
+                WHERE tenant_id = ? AND system_id = ?
+                """,
+                (function_id, name, description, owner, now, tenant_id, system_id),
+            )
+            _record_device_audit(con, tenant_id, "inventory.information_system.updated", device_id=str(auth_context.get("deviceId") or ""), payload={"systemId": system_id, "functionId": function_id, "name": name, "actorUserId": auth_context.get("userId") or ""})
+            result = _inventory_payload(con, tenant_id)
+    return result
+
+
+@app.delete("/inventory/information-systems/{system_id}")
+def information_system_delete(
+    system_id: str,
+    request: Request,
+    tenantId: str = Query(default=DEFAULT_TENANT_ID, min_length=1, max_length=80),
+) -> dict[str, Any]:
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
+    auth_context = _require_campaign_manager_authorization(request, tenant_id)
+    with _db() as con:
+        with con:
+            _require_information_system(con, tenant_id, system_id)
+            con.execute("DELETE FROM information_systems WHERE tenant_id = ? AND system_id = ?", (tenant_id, system_id))
+            _record_device_audit(con, tenant_id, "inventory.information_system.deleted", device_id=str(auth_context.get("deviceId") or ""), payload={"systemId": system_id, "actorUserId": auth_context.get("userId") or ""})
+            result = _inventory_payload(con, tenant_id)
+    return result
+
+
+@app.post("/inventory/assets")
+async def information_asset_create(request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Payload must be a JSON object")
+    tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
+    auth_context = _require_campaign_manager_authorization(request, tenant_id)
+    system_id = str(payload.get("systemId") or "").strip()
+    name = _inventory_text(payload.get("name"), 255)
+    asset_type = _inventory_text(payload.get("assetType") or payload.get("type"), 120)
+    description = _inventory_text(payload.get("description"), 4000)
+    criticality = _inventory_text(payload.get("criticality"), 80)
+    if not system_id:
+        raise HTTPException(status_code=400, detail="Le système d'information est obligatoire")
+    if not name:
+        raise HTTPException(status_code=400, detail="Le nom de l'actif est obligatoire")
+    now = _utc_now().isoformat()
+    asset_id = _normalize_uuid(payload.get("assetId") or payload.get("id")) or _new_uuid()
+    with _db() as con:
+        with con:
+            _require_information_system(con, tenant_id, system_id)
+            con.execute(
+                """
+                INSERT INTO information_assets(tenant_id, asset_id, system_id, name, asset_type, description, criticality, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (tenant_id, asset_id, system_id, name, asset_type, description, criticality, now, now),
+            )
+            _record_device_audit(con, tenant_id, "inventory.asset.created", device_id=str(auth_context.get("deviceId") or ""), payload={"assetId": asset_id, "systemId": system_id, "name": name, "actorUserId": auth_context.get("userId") or ""})
+            result = _inventory_payload(con, tenant_id)
+    return result
+
+
+@app.patch("/inventory/assets/{asset_id}")
+async def information_asset_update(asset_id: str, request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Payload must be a JSON object")
+    tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
+    auth_context = _require_campaign_manager_authorization(request, tenant_id)
+    system_id = str(payload.get("systemId") or "").strip()
+    name = _inventory_text(payload.get("name"), 255)
+    asset_type = _inventory_text(payload.get("assetType") or payload.get("type"), 120)
+    description = _inventory_text(payload.get("description"), 4000)
+    criticality = _inventory_text(payload.get("criticality"), 80)
+    if not system_id:
+        raise HTTPException(status_code=400, detail="Le système d'information est obligatoire")
+    if not name:
+        raise HTTPException(status_code=400, detail="Le nom de l'actif est obligatoire")
+    now = _utc_now().isoformat()
+    with _db() as con:
+        with con:
+            row = con.execute("SELECT 1 FROM information_assets WHERE tenant_id = ? AND asset_id = ?", (tenant_id, asset_id)).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Actif introuvable")
+            _require_information_system(con, tenant_id, system_id)
+            con.execute(
+                """
+                UPDATE information_assets
+                SET system_id = ?, name = ?, asset_type = ?, description = ?, criticality = ?, updated_at = ?
+                WHERE tenant_id = ? AND asset_id = ?
+                """,
+                (system_id, name, asset_type, description, criticality, now, tenant_id, asset_id),
+            )
+            _record_device_audit(con, tenant_id, "inventory.asset.updated", device_id=str(auth_context.get("deviceId") or ""), payload={"assetId": asset_id, "systemId": system_id, "name": name, "actorUserId": auth_context.get("userId") or ""})
+            result = _inventory_payload(con, tenant_id)
+    return result
+
+
+@app.delete("/inventory/assets/{asset_id}")
+def information_asset_delete(
+    asset_id: str,
+    request: Request,
+    tenantId: str = Query(default=DEFAULT_TENANT_ID, min_length=1, max_length=80),
+) -> dict[str, Any]:
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
+    auth_context = _require_campaign_manager_authorization(request, tenant_id)
+    with _db() as con:
+        with con:
+            row = con.execute("SELECT 1 FROM information_assets WHERE tenant_id = ? AND asset_id = ?", (tenant_id, asset_id)).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Actif introuvable")
+            con.execute("DELETE FROM information_assets WHERE tenant_id = ? AND asset_id = ?", (tenant_id, asset_id))
+            _record_device_audit(con, tenant_id, "inventory.asset.deleted", device_id=str(auth_context.get("deviceId") or ""), payload={"assetId": asset_id, "actorUserId": auth_context.get("userId") or ""})
+            result = _inventory_payload(con, tenant_id)
+    return result
 
 
 @app.get("/users")
