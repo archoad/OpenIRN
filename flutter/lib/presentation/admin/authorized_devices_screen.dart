@@ -9,6 +9,7 @@ import '../../domain/models/device_enrollment_request.dart';
 import '../../domain/models/sync_configuration.dart';
 import '../../domain/services/access_policy_service.dart';
 import '../../domain/services/app_sync_coordinator.dart';
+import '../../l10n/openirn_localizations.dart';
 import '../common/openirn_app_bar.dart';
 import '../common/responsive_autofocus.dart';
 import '../common/responsive_dialog.dart';
@@ -43,9 +44,15 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
         configuration: SyncConfiguration.empty(),
         devices: const <AuthorizedDevice>[],
         serverAvailable: false,
-        title: 'Accès refusé',
-        message:
-            'La gestion des terminaux autorisés est réservée aux administrateurs et pilotes IRN.',
+        title: OpenIrnLocalizations.instance.tr(
+          'authorized_devices.error.access_denied.title',
+          fallback: 'Accès refusé',
+        ),
+        message: OpenIrnLocalizations.instance.tr(
+          'authorized_devices.error.access_denied.message',
+          fallback:
+              'La gestion des terminaux autorisés est réservée aux administrateurs et pilotes IRN.',
+        ),
         includeAllTenants: false,
       );
     }
@@ -55,9 +62,15 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
         configuration: configuration,
         devices: const <AuthorizedDevice>[],
         serverAvailable: false,
-        title: 'Serveur non configuré',
-        message:
-            'La synchronisation serveur n’est pas configurée sur ce terminal. Impossible de gérer les terminaux autorisés.',
+        title: OpenIrnLocalizations.instance.tr(
+          'authorized_devices.error.server_not_configured.title',
+          fallback: 'Serveur non configuré',
+        ),
+        message: OpenIrnLocalizations.instance.tr(
+          'authorized_devices.error.server_not_configured.message',
+          fallback:
+              'La synchronisation serveur n’est pas configurée sur ce terminal. Impossible de gérer les terminaux autorisés.',
+        ),
         includeAllTenants: false,
       );
     }
@@ -203,22 +216,32 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
       context: context,
       builder: (context) => AlertDialog(
         insetPadding: responsiveDialogInsetPadding(context),
-        title: const Text('Refuser la demande ?'),
+        title: Text(
+          context.tr(
+            'authorized_devices.reject_request.title',
+            fallback: 'Refuser la demande ?',
+          ),
+        ),
         content: ResponsiveDialogContent(
           maxWidth: 620,
           child: Text(
-            'La demande d’autorisation du terminal « ${request.displayName} » sera marquée comme refusée.',
+            context.tr(
+              'authorized_devices.reject_request.message',
+              fallback:
+                  'La demande d’autorisation du terminal « {device} » sera marquée comme refusée.',
+              values: {'device': request.displayName},
+            ),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Annuler'),
+            child: Text(context.tr('common.cancel', fallback: 'Annuler')),
           ),
           FilledButton.tonalIcon(
             onPressed: () => Navigator.of(context).pop(true),
             icon: const Icon(Icons.block_outlined),
-            label: const Text('Refuser'),
+            label: Text(context.tr('common.reject', fallback: 'Refuser')),
           ),
         ],
       ),
@@ -279,24 +302,46 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
       context: context,
       builder: (context) => AlertDialog(
         insetPadding: responsiveDialogInsetPadding(context),
-        title: const Text('Révoquer ce terminal ?'),
+        title: Text(
+          context.tr(
+            'authorized_devices.revoke.title',
+            fallback: 'Révoquer ce terminal ?',
+          ),
+        ),
         content: ResponsiveDialogContent(
           maxWidth: 620,
           child: Text(
-            'Le terminal « ${device.displayName} » ne pourra plus utiliser son jeton OpenIRN. '
-            'Cette opération est recommandée si le terminal est perdu, remplacé ou compromis.'
-            '${isCurrentDevice ? '\n\nAttention : il s’agit du terminal courant. Son autorisation locale sera aussi supprimée après révocation.' : ''}',
+            context.tr(
+              'authorized_devices.revoke.message',
+              fallback:
+                  'Le terminal « {device} » ne pourra plus utiliser son jeton OpenIRN. Cette opération est recommandée si le terminal est perdu, remplacé ou compromis.{currentWarning}',
+              values: {
+                'device': device.displayName,
+                'currentWarning': isCurrentDevice
+                    ? context.tr(
+                        'authorized_devices.revoke.current_warning',
+                        fallback:
+                            '\n\nAttention : il s’agit du terminal courant. Son autorisation locale sera aussi supprimée après révocation.',
+                      )
+                    : '',
+              },
+            ),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Annuler'),
+            child: Text(context.tr('common.cancel', fallback: 'Annuler')),
           ),
           FilledButton.icon(
             onPressed: () => Navigator.of(context).pop(true),
             icon: const Icon(Icons.block_outlined),
-            label: const Text('Révoquer'),
+            label: Text(
+              context.tr(
+                'authorized_devices.action.revoke',
+                fallback: 'Révoquer',
+              ),
+            ),
           ),
         ],
       ),
@@ -331,9 +376,13 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Terminal courant révoqué. Veuillez autoriser de nouveau ce terminal pour resynchroniser.',
+            context.tr(
+              'authorized_devices.revoke.current_success',
+              fallback:
+                  'Terminal courant révoqué. Veuillez autoriser de nouveau ce terminal pour resynchroniser.',
+            ),
           ),
         ),
       );
@@ -396,8 +445,13 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
 
           final state = snapshot.data;
           if (state == null) {
-            return const Center(
-              child: Text('Impossible de charger les terminaux autorisés.'),
+            return Center(
+              child: Text(
+                context.tr(
+                  'authorized_devices.error.load_failed',
+                  fallback: 'Impossible de charger les terminaux autorisés.',
+                ),
+              ),
             );
           }
 
@@ -436,11 +490,17 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
                         message: state.message,
                       )
                     else if (state.devices.isEmpty)
-                      const _MessageCard(
+                      _MessageCard(
                         icon: Icons.devices_other_outlined,
-                        title: 'Aucun terminal enregistré',
-                        message:
-                            'Créez une invitation pour autoriser le premier terminal avec un code individuel.',
+                        title: context.tr(
+                          'authorized_devices.empty.title',
+                          fallback: 'Aucun terminal enregistré',
+                        ),
+                        message: context.tr(
+                          'authorized_devices.empty.message',
+                          fallback:
+                              'Créez une invitation pour autoriser le premier terminal avec un code individuel.',
+                        ),
                       )
                     else
                       for (final device in state.devices) ...[
@@ -495,13 +555,31 @@ class _HeaderCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Terminaux autorisés',
+                context.tr(
+                  'authorized_devices.title',
+                  fallback: 'Terminaux autorisés',
+                ),
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: 6),
               Text(
                 state.serverAvailable
-                    ? '$activeCount actif(s), $revokedCount révoqué(s), $pendingRequestCount demande(s) en attente — ${state.includeAllTenants ? 'tous les espaces' : state.configuration.tenantLabel}'
+                    ? context.tr(
+                        'authorized_devices.summary',
+                        fallback:
+                            '{active} actif(s), {revoked} révoqué(s), {pending} demande(s) en attente — {scope}',
+                        values: {
+                          'active': activeCount,
+                          'revoked': revokedCount,
+                          'pending': pendingRequestCount,
+                          'scope': state.includeAllTenants
+                              ? context.tr(
+                                  'common.all_workspaces',
+                                  fallback: 'tous les espaces',
+                                )
+                              : state.configuration.tenantLabel,
+                        },
+                      )
                     : state.message,
               ),
             ],
@@ -522,7 +600,12 @@ class _HeaderCard extends StatelessWidget {
                   FilledButton.icon(
                     onPressed: working ? null : onCreateEnrollment,
                     icon: const Icon(Icons.add_link_outlined),
-                    label: const Text('Autoriser un nouveau terminal'),
+                    label: Text(
+                      context.tr(
+                        'authorized_devices.action.authorize_new',
+                        fallback: 'Autoriser un nouveau terminal',
+                      ),
+                    ),
                   ),
                 ],
               )
@@ -533,7 +616,12 @@ class _HeaderCard extends StatelessWidget {
                   FilledButton.icon(
                     onPressed: working ? null : onCreateEnrollment,
                     icon: const Icon(Icons.add_link_outlined),
-                    label: const Text('Autoriser un nouveau terminal'),
+                    label: Text(
+                      context.tr(
+                        'authorized_devices.action.authorize_new',
+                        fallback: 'Autoriser un nouveau terminal',
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -560,8 +648,15 @@ class _DeviceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final lastSeen = device.lastSeenAt == null
-        ? 'Jamais vu'
-        : 'Dernière activité : ${_formatDateTime(device.lastSeenAt!)}';
+        ? context.tr(
+            'authorized_devices.last_seen.never',
+            fallback: 'Jamais vu',
+          )
+        : context.tr(
+            'authorized_devices.last_seen.at',
+            fallback: 'Dernière activité : {date}',
+            values: {'date': _formatDateTime(device.lastSeenAt!)},
+          );
     final statusColor = device.isActive
         ? Theme.of(context).colorScheme.primaryContainer
         : Theme.of(context).colorScheme.errorContainer;
@@ -604,7 +699,7 @@ class _DeviceCard extends StatelessWidget {
                             vertical: 4,
                           ),
                           child: Text(
-                            device.statusLabel,
+                            context.trText(device.statusLabel),
                             style: TextStyle(color: statusTextColor),
                           ),
                         ),
@@ -633,7 +728,10 @@ class _DeviceCard extends StatelessWidget {
                               vertical: 4,
                             ),
                             child: Text(
-                              'Ce terminal',
+                              context.tr(
+                                'authorized_devices.current_device',
+                                fallback: 'Ce terminal',
+                              ),
                               style: TextStyle(
                                 color: Theme.of(
                                   context,
@@ -649,24 +747,48 @@ class _DeviceCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     device.workspaceCount > 1
-                        ? 'Enrollé dans ${device.workspaceCount} espaces : ${device.workspaceSummary}'
-                        : 'Enrollé dans ${device.workspaceSummary}',
+                        ? context.tr(
+                            'authorized_devices.enrolled.multiple',
+                            fallback:
+                                'Enrollé dans {count} espaces : {summary}',
+                            values: {
+                              'count': device.workspaceCount,
+                              'summary': device.workspaceSummary,
+                            },
+                          )
+                        : context.tr(
+                            'authorized_devices.enrolled.single',
+                            fallback: 'Enrollé dans {summary}',
+                            values: {'summary': device.workspaceSummary},
+                          ),
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Identifiant terminal : ${device.deviceId}',
+                    context.tr(
+                      'authorized_devices.device_id',
+                      fallback: 'Identifiant terminal : {deviceId}',
+                      values: {'deviceId': device.deviceId},
+                    ),
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Créé le ${_formatDateTime(device.createdAt)}',
+                    context.tr(
+                      'authorized_devices.created_at',
+                      fallback: 'Créé le {date}',
+                      values: {'date': _formatDateTime(device.createdAt)},
+                    ),
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   if (device.revokedAt != null) ...[
                     const SizedBox(height: 4),
                     Text(
-                      'Révoqué le ${_formatDateTime(device.revokedAt)}',
+                      context.tr(
+                        'authorized_devices.revoked_at',
+                        fallback: 'Révoqué le {date}',
+                        values: {'date': _formatDateTime(device.revokedAt)},
+                      ),
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
@@ -686,15 +808,26 @@ class _DeviceCard extends StatelessWidget {
                 PopupMenuItem<String>(
                   value: 'rename',
                   enabled: device.isActive,
-                  child: const Text('Renommer'),
+                  child: Text(
+                    context.tr(
+                      'authorized_devices.action.rename',
+                      fallback: 'Renommer',
+                    ),
+                  ),
                 ),
                 PopupMenuItem<String>(
                   value: 'revoke',
                   enabled: device.isActive,
                   child: Text(
                     device.workspaceCount > 1
-                        ? 'Révoquer dans cet espace'
-                        : 'Révoquer',
+                        ? context.tr(
+                            'authorized_devices.action.revoke_workspace',
+                            fallback: 'Révoquer dans cet espace',
+                          )
+                        : context.tr(
+                            'authorized_devices.action.revoke',
+                            fallback: 'Révoquer',
+                          ),
                   ),
                 ),
               ],
@@ -740,14 +873,25 @@ class _EnrollmentRequestsSection extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Demandes d’enrôlement',
+                        context.tr(
+                          'authorized_devices.requests.title',
+                          fallback: 'Demandes d’enrôlement',
+                        ),
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                       const SizedBox(height: 6),
                       Text(
                         pending.isEmpty
-                            ? 'Aucune demande en attente.'
-                            : '${pending.length} demande(s) en attente de validation.',
+                            ? context.tr(
+                                'authorized_devices.requests.none_pending',
+                                fallback: 'Aucune demande en attente.',
+                              )
+                            : context.tr(
+                                'authorized_devices.requests.pending_count',
+                                fallback:
+                                    '{count} demande(s) en attente de validation.',
+                                values: {'count': pending.length},
+                              ),
                       ),
                     ],
                   ),
@@ -841,7 +985,7 @@ class _EnrollmentRequestCard extends StatelessWidget {
                             vertical: 4,
                           ),
                           child: Text(
-                            request.statusLabel,
+                            context.trText(request.statusLabel),
                             style: TextStyle(color: statusTextColor),
                           ),
                         ),
@@ -858,7 +1002,14 @@ class _EnrollmentRequestCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '${request.platformLabel} — demandée le ${_formatDateTime(request.requestedAt)}',
+                    context.tr(
+                      'authorized_devices.requests.requested_at',
+                      fallback: '{platform} — demandée le {date}',
+                      values: {
+                        'platform': request.platformLabel,
+                        'date': _formatDateTime(request.requestedAt),
+                      },
+                    ),
                   ),
                   if (request.requesterNote.trim().isNotEmpty) ...[
                     const SizedBox(height: 6),
@@ -870,7 +1021,11 @@ class _EnrollmentRequestCard extends StatelessWidget {
                   if (request.decidedAt != null) ...[
                     const SizedBox(height: 6),
                     Text(
-                      'Traitée le ${_formatDateTime(request.decidedAt)}',
+                      context.tr(
+                        'authorized_devices.requests.decided_at',
+                        fallback: 'Traitée le {date}',
+                        values: {'date': _formatDateTime(request.decidedAt)},
+                      ),
                       style: theme.textTheme.bodySmall,
                     ),
                   ],
@@ -885,12 +1040,16 @@ class _EnrollmentRequestCard extends StatelessWidget {
                   TextButton.icon(
                     onPressed: working ? null : onReject,
                     icon: const Icon(Icons.block_outlined),
-                    label: const Text('Refuser'),
+                    label: Text(
+                      context.tr('common.reject', fallback: 'Refuser'),
+                    ),
                   ),
                   FilledButton.icon(
                     onPressed: working ? null : onApprove,
                     icon: const Icon(Icons.check_circle_outline),
-                    label: const Text('Approuver'),
+                    label: Text(
+                      context.tr('common.approve', fallback: 'Approuver'),
+                    ),
                   ),
                 ],
               ),
@@ -959,7 +1118,11 @@ class _EnrollmentDialogState extends State<_EnrollmentDialog> {
         ? widget.activeUser.fullName
         : widget.activeUser.id;
     _labelController = TextEditingController(
-      text: 'Invitation créée par $userName',
+      text: OpenIrnLocalizations.instance.tr(
+        'authorized_devices.enrollment.default_label',
+        fallback: 'Invitation créée par {user}',
+        values: {'user': userName},
+      ),
     );
   }
 
@@ -973,7 +1136,12 @@ class _EnrollmentDialogState extends State<_EnrollmentDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
-      title: const Text('Autoriser un nouveau terminal'),
+      title: Text(
+        context.tr(
+          'authorized_devices.enrollment.title',
+          fallback: 'Autoriser un nouveau terminal',
+        ),
+      ),
       content: ResponsiveDialogContent(
         maxWidth: 680,
         child: SingleChildScrollView(
@@ -981,29 +1149,66 @@ class _EnrollmentDialogState extends State<_EnrollmentDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'OpenIRN va générer un code court à usage unique. Le nouveau terminal devra saisir ce code avant expiration.',
+              Text(
+                context.tr(
+                  'authorized_devices.enrollment.help',
+                  fallback:
+                      'OpenIRN va générer un code court à usage unique. Le nouveau terminal devra saisir ce code avant expiration.',
+                ),
               ),
               const SizedBox(height: 16),
               TextField(
                 controller: _labelController,
                 autofocus: shouldAutofocusTextField(context),
-                decoration: const InputDecoration(
-                  labelText: 'Libellé interne',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: context.tr(
+                    'authorized_devices.enrollment.label',
+                    fallback: 'Libellé interne',
+                  ),
+                  border: const OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<int>(
                 initialValue: _expiresInMinutes,
-                decoration: const InputDecoration(
-                  labelText: 'Durée de validité',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: context.tr(
+                    'authorized_devices.enrollment.validity',
+                    fallback: 'Durée de validité',
+                  ),
+                  border: const OutlineInputBorder(),
                 ),
-                items: const [
-                  DropdownMenuItem(value: 5, child: Text('5 minutes')),
-                  DropdownMenuItem(value: 10, child: Text('10 minutes')),
-                  DropdownMenuItem(value: 15, child: Text('15 minutes')),
+                items: [
+                  DropdownMenuItem(
+                    value: 5,
+                    child: Text(
+                      context.tr(
+                        'common.minutes',
+                        fallback: '{count} minutes',
+                        values: {'count': 5},
+                      ),
+                    ),
+                  ),
+                  DropdownMenuItem(
+                    value: 10,
+                    child: Text(
+                      context.tr(
+                        'common.minutes',
+                        fallback: '{count} minutes',
+                        values: {'count': 10},
+                      ),
+                    ),
+                  ),
+                  DropdownMenuItem(
+                    value: 15,
+                    child: Text(
+                      context.tr(
+                        'common.minutes',
+                        fallback: '{count} minutes',
+                        values: {'count': 15},
+                      ),
+                    ),
+                  ),
                 ],
                 onChanged: (value) {
                   if (value == null) {
@@ -1021,7 +1226,7 @@ class _EnrollmentDialogState extends State<_EnrollmentDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Annuler'),
+          child: Text(context.tr('common.cancel', fallback: 'Annuler')),
         ),
         FilledButton.icon(
           onPressed: () => Navigator.of(context).pop(
@@ -1031,7 +1236,12 @@ class _EnrollmentDialogState extends State<_EnrollmentDialog> {
             ),
           ),
           icon: const Icon(Icons.add_link_outlined),
-          label: const Text('Créer le code'),
+          label: Text(
+            context.tr(
+              'authorized_devices.enrollment.create_code',
+              fallback: 'Créer le code',
+            ),
+          ),
         ),
       ],
     );
@@ -1046,20 +1256,36 @@ class _EnrollmentCodeDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final expiresAt = enrollment.expiresAt == null
-        ? 'Expiration non précisée'
-        : 'Expire le ${_formatDateTime(enrollment.expiresAt)}';
+        ? context.tr(
+            'authorized_devices.enrollment.no_expiration',
+            fallback: 'Expiration non précisée',
+          )
+        : context.tr(
+            'authorized_devices.enrollment.expires_at',
+            fallback: 'Expire le {date}',
+            values: {'date': _formatDateTime(enrollment.expiresAt)},
+          );
 
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
-      title: const Text('Code d’appairage'),
+      title: Text(
+        context.tr(
+          'authorized_devices.enrollment.code_title',
+          fallback: 'Code d’appairage',
+        ),
+      ),
       content: ResponsiveDialogContent(
         maxWidth: 700,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Sur le nouveau terminal, ouvrez OpenIRN puis choisissez « Autoriser ce terminal ». Saisissez ensuite le code ci-dessous.',
+            Text(
+              context.tr(
+                'authorized_devices.enrollment.code_help',
+                fallback:
+                    'Sur le nouveau terminal, ouvrez OpenIRN puis choisissez « Autoriser ce terminal ». Saisissez ensuite le code ci-dessous.',
+              ),
             ),
             const SizedBox(height: 16),
             Center(
@@ -1076,7 +1302,11 @@ class _EnrollmentCodeDialog extends StatelessWidget {
             Text(expiresAt),
             const SizedBox(height: 12),
             Text(
-              'Ce code est à usage unique. Il ne sera plus affiché après fermeture de cette fenêtre.',
+              context.tr(
+                'authorized_devices.enrollment.one_time_code',
+                fallback:
+                    'Ce code est à usage unique. Il ne sera plus affiché après fermeture de cette fenêtre.',
+              ),
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
@@ -1087,17 +1317,24 @@ class _EnrollmentCodeDialog extends StatelessWidget {
           onPressed: () async {
             await Clipboard.setData(ClipboardData(text: enrollment.code));
             if (context.mounted) {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(const SnackBar(content: Text('Code copié.')));
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    context.tr(
+                      'authorized_devices.enrollment.code_copied',
+                      fallback: 'Code copié.',
+                    ),
+                  ),
+                ),
+              );
             }
           },
           icon: const Icon(Icons.copy_outlined),
-          label: const Text('Copier'),
+          label: Text(context.tr('common.copy', fallback: 'Copier')),
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Fermer'),
+          child: Text(context.tr('common.close', fallback: 'Fermer')),
         ),
       ],
     );
@@ -1132,15 +1369,23 @@ class _RenameDeviceDialogState extends State<_RenameDeviceDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
-      title: const Text('Renommer le terminal'),
+      title: Text(
+        context.tr(
+          'authorized_devices.rename.title',
+          fallback: 'Renommer le terminal',
+        ),
+      ),
       content: ResponsiveDialogContent(
         maxWidth: 620,
         child: TextField(
           controller: _controller,
           autofocus: shouldAutofocusTextField(context),
-          decoration: const InputDecoration(
-            labelText: 'Nom du terminal',
-            border: OutlineInputBorder(),
+          decoration: InputDecoration(
+            labelText: context.tr(
+              'authorized_devices.rename.label',
+              fallback: 'Nom du terminal',
+            ),
+            border: const OutlineInputBorder(),
           ),
           onSubmitted: (_) => _submit(context),
         ),
@@ -1148,11 +1393,16 @@ class _RenameDeviceDialogState extends State<_RenameDeviceDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Annuler'),
+          child: Text(context.tr('common.cancel', fallback: 'Annuler')),
         ),
         FilledButton(
           onPressed: () => _submit(context),
-          child: const Text('Renommer'),
+          child: Text(
+            context.tr(
+              'authorized_devices.action.rename',
+              fallback: 'Renommer',
+            ),
+          ),
         ),
       ],
     );

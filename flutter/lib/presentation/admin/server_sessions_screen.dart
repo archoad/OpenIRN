@@ -6,6 +6,7 @@ import '../../domain/models/api_session.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/sync_configuration.dart';
 import '../../domain/services/access_policy_service.dart';
+import '../../l10n/openirn_localizations.dart';
 import '../common/openirn_app_bar.dart';
 import '../common/responsive_dialog.dart';
 
@@ -39,9 +40,12 @@ class _ServerSessionsScreenState extends State<ServerSessionsScreen> {
         configuration: SyncConfiguration.empty(),
         sessions: const <ApiSessionInfo>[],
         serverAvailable: false,
-        title: 'Accès refusé',
-        message:
-            'La gestion des sessions serveur est réservée aux administrateurs.',
+        title: OpenIrnLocalizations.instance.tr(
+          'screen.security.access_denied',
+        ),
+        message: OpenIrnLocalizations.instance.tr(
+          'sessions.error.access_denied.message',
+        ),
       );
     }
     final configuration = await _configurationRepository.loadConfiguration();
@@ -50,9 +54,12 @@ class _ServerSessionsScreenState extends State<ServerSessionsScreen> {
         configuration: configuration,
         sessions: const <ApiSessionInfo>[],
         serverAvailable: false,
-        title: 'Serveur non configuré',
-        message:
-            'La synchronisation serveur n’est pas configurée sur ce terminal.',
+        title: OpenIrnLocalizations.instance.tr(
+          'screen.security.server_not_configured',
+        ),
+        message: OpenIrnLocalizations.instance.tr(
+          'security.error.server_not_configured.message',
+        ),
       );
     }
 
@@ -88,11 +95,7 @@ class _ServerSessionsScreenState extends State<ServerSessionsScreen> {
     }
     if (session.isCurrentSession) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'La session courante ne peut pas être révoquée depuis cette page. Ferme l’application pour la terminer.',
-          ),
-        ),
+        SnackBar(content: Text(context.tr('sessions.current.cannot_revoke'))),
       );
       return;
     }
@@ -101,23 +104,28 @@ class _ServerSessionsScreenState extends State<ServerSessionsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         insetPadding: responsiveDialogInsetPadding(context),
-        title: const Text('Révoquer cette session ?'),
+        title: Text(context.tr('sessions.revoke_dialog.title')),
         content: ResponsiveDialogContent(
           maxWidth: 640,
           child: Text(
-            'La session de ${session.displayUser} sur « ${session.displayDevice} » sera invalidée immédiatement. '
-            'Le terminal devra redemander un code personnel pour ouvrir une nouvelle session.',
+            context.tr(
+              'sessions.revoke_dialog.message',
+              values: {
+                'user': session.displayUser,
+                'device': session.displayDevice,
+              },
+            ),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Annuler'),
+            child: Text(context.tr('common.cancel')),
           ),
           FilledButton.icon(
             onPressed: () => Navigator.of(context).pop(true),
             icon: const Icon(Icons.logout_outlined),
-            label: const Text('Révoquer'),
+            label: Text(context.tr('sessions.action.revoke')),
           ),
         ],
       ),
@@ -141,7 +149,11 @@ class _ServerSessionsScreenState extends State<ServerSessionsScreen> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${result.title} — ${result.message}')),
+        SnackBar(
+          content: Text(
+            '${context.trText(result.title)} — ${context.trText(result.message)}',
+          ),
+        ),
       );
       if (result.isAvailable) {
         await _refresh();
@@ -179,8 +191,8 @@ class _ServerSessionsScreenState extends State<ServerSessionsScreen> {
 
           final state = snapshot.data;
           if (state == null) {
-            return const Center(
-              child: Text('Impossible de charger les sessions serveur.'),
+            return Center(
+              child: Text(context.tr('sessions.error.load_failed')),
             );
           }
 
@@ -212,11 +224,10 @@ class _ServerSessionsScreenState extends State<ServerSessionsScreen> {
                         message: state.message,
                       )
                     else if (state.sessions.isEmpty)
-                      const _MessageCard(
+                      _MessageCard(
                         icon: Icons.lock_clock_outlined,
-                        title: 'Aucune session serveur',
-                        message:
-                            'Aucune session courte n’est actuellement connue côté serveur.',
+                        title: context.tr('screen.sessions.empty'),
+                        message: context.tr('sessions.empty.message'),
                       )
                     else
                       for (final session in state.sessions) ...[
@@ -272,14 +283,22 @@ class _HeaderCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Sessions serveur',
+                context.tr('screen.sessions.title'),
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: 6),
               Text(
                 state.serverAvailable
-                    ? '$activeCount active(s), $expiredCount expirée(s), $revokedCount révoquée(s) — ${state.configuration.tenantLabel}'
-                    : state.message,
+                    ? context.tr(
+                        'sessions.header.summary',
+                        values: {
+                          'active': activeCount,
+                          'expired': expiredCount,
+                          'revoked': revokedCount,
+                          'workspace': state.configuration.tenantLabel,
+                        },
+                      )
+                    : context.trText(state.message),
               ),
             ],
           ),
@@ -289,8 +308,8 @@ class _HeaderCard extends StatelessWidget {
 
     final toggle = SwitchListTile(
       contentPadding: EdgeInsets.zero,
-      title: const Text('Afficher les sessions inactives'),
-      subtitle: const Text('Inclut les sessions expirées ou révoquées.'),
+      title: Text(context.tr('sessions.filter.show_inactive')),
+      subtitle: Text(context.tr('sessions.filter.show_inactive_help')),
       value: includeInactive,
       onChanged: onIncludeInactiveChanged,
     );
@@ -355,10 +374,13 @@ class _SessionCard extends StatelessWidget {
                         session.displayUser,
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
-                      _Badge(label: session.statusLabel, colors: statusColors),
+                      _Badge(
+                        label: context.trText(session.statusLabel),
+                        colors: statusColors,
+                      ),
                       if (session.isCurrentSession)
                         _Badge(
-                          label: 'Session courante',
+                          label: context.tr('screen.sessions.current'),
                           colors: _BadgeColors(
                             background: Theme.of(
                               context,
@@ -376,18 +398,30 @@ class _SessionCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Créée le ${_formatDateTime(session.createdAt)} — expire le ${_formatDateTime(session.expiresAt)}',
+                    context.tr(
+                      'sessions.card.created_expires',
+                      values: {
+                        'created': _formatDateTime(session.createdAt),
+                        'expires': _formatDateTime(session.expiresAt),
+                      },
+                    ),
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Dernière activité : ${_formatDateTime(session.lastSeenAt)}',
+                    context.tr(
+                      'sessions.card.last_activity',
+                      values: {'time': _formatDateTime(session.lastSeenAt)},
+                    ),
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   if (session.revokedAt != null) ...[
                     const SizedBox(height: 4),
                     Text(
-                      'Révoquée le ${_formatDateTime(session.revokedAt)}',
+                      context.tr(
+                        'sessions.card.revoked_at',
+                        values: {'time': _formatDateTime(session.revokedAt)},
+                      ),
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
@@ -405,7 +439,7 @@ class _SessionCard extends StatelessWidget {
                 PopupMenuItem<String>(
                   value: 'revoke',
                   enabled: session.isActive && !session.isCurrentSession,
-                  child: const Text('Révoquer'),
+                  child: Text(context.tr('sessions.action.revoke')),
                 ),
               ],
             ),
@@ -488,9 +522,12 @@ class _MessageCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: Theme.of(context).textTheme.titleMedium),
+                  Text(
+                    context.trText(title),
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                   const SizedBox(height: 6),
-                  Text(message),
+                  Text(context.trText(message)),
                 ],
               ),
             ),

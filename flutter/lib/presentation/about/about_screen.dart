@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../domain/models/irn_referential.dart';
+import '../../l10n/openirn_localizations.dart';
 import '../common/openirn_app_bar.dart';
 
 class AboutScreen extends StatefulWidget {
@@ -71,9 +72,7 @@ class _ApplicationCard extends StatelessWidget {
                     children: [
                       Text('OpenIRN', style: textTheme.headlineSmall),
                       const SizedBox(height: 4),
-                      const Text(
-                        'Application open source d’exploration et d’évaluation de l’Indice de Résilience Numérique.',
-                      ),
+                      Text(context.tr('about.description')),
                     ],
                   ),
                 ),
@@ -85,15 +84,22 @@ class _ApplicationCard extends StatelessWidget {
               builder: (context, snapshot) {
                 final info = snapshot.data;
                 final versionLabel = info == null
-                    ? 'Version en cours de chargement'
-                    : _formatPackageVersion(info);
+                    ? context.tr('about.version.loading')
+                    : _formatPackageVersion(context, info);
 
                 return Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   children: [
                     Chip(label: Text('OpenIRN $versionLabel')),
-                    Chip(label: Text('Référentiel ${referential.version}')),
+                    Chip(
+                      label: Text(
+                        context.tr(
+                          'about.referential_version',
+                          values: {'version': referential.version},
+                        ),
+                      ),
+                    ),
                   ],
                 );
               },
@@ -121,7 +127,7 @@ class _ReferentialCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Référentiel utilisé',
+              context.tr('about.referential_used'),
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 12),
@@ -173,7 +179,7 @@ class _InfoRow extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: labelStyle),
+          Text(context.trText(label), style: labelStyle),
           const SizedBox(height: 2),
           if (selectable) SelectableText(value) else Text(value),
         ],
@@ -182,7 +188,7 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
-String _formatPackageVersion(PackageInfo info) {
+String _formatPackageVersion(BuildContext context, PackageInfo info) {
   final version = info.version.trim();
-  return version.isEmpty ? 'Version inconnue' : version;
+  return version.isEmpty ? context.tr('about.version.unknown') : version;
 }

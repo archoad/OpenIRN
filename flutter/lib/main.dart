@@ -4,6 +4,7 @@ import 'data/repositories/api_irn_referential_repository.dart';
 import 'data/repositories/legacy_local_storage_purge_service.dart';
 import 'domain/services/app_session_manager.dart';
 import 'domain/services/app_sync_coordinator.dart';
+import 'l10n/openirn_localizations.dart';
 import 'presentation/referential/referential_overview_screen.dart';
 
 final GlobalKey<NavigatorState> openIrnNavigatorKey =
@@ -12,6 +13,7 @@ final GlobalKey<NavigatorState> openIrnNavigatorKey =
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await const LegacyLocalStoragePurgeService().purge();
+  await OpenIrnLocalizations.instance.initialize();
   runApp(const OpenIrnApp());
 }
 
@@ -44,7 +46,10 @@ class OpenIrnApp extends StatelessWidget {
         ),
       ),
       builder: (context, child) {
-        return _SessionActivityScope(child: child ?? const SizedBox.shrink());
+        return OpenIrnLocalizationScope(
+          controller: OpenIrnLocalizations.instance,
+          child: _SessionActivityScope(child: child ?? const SizedBox.shrink()),
+        );
       },
       home: const ReferentialOverviewScreen(
         repository: ApiIrnReferentialRepository(),

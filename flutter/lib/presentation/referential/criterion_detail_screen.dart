@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../domain/models/irn_referential.dart';
+import '../../l10n/openirn_localizations.dart';
 import '../common/openirn_app_bar.dart';
 
 class CriterionDetailScreen extends StatelessWidget {
@@ -40,13 +41,27 @@ class CriterionDetailScreen extends StatelessWidget {
                         children: [
                           Chip(label: Text(pillar.label)),
                           Chip(
-                            label: Text('Portée : ${criterion.scope.label}'),
+                            label: Text(
+                              context.tr(
+                                'criterion.scope.value',
+                                values: {
+                                  'scope': context.trText(
+                                    criterion.scope.label,
+                                  ),
+                                },
+                              ),
+                            ),
                           ),
                           Chip(
-                            label: Text('Réponse : ${criterion.answerMode}'),
+                            label: Text(
+                              context.tr(
+                                'criterion.answer.value',
+                                values: {'answer': criterion.answerMode},
+                              ),
+                            ),
                           ),
                           if (!criterion.active)
-                            const Chip(label: Text('Inactif')),
+                            Chip(label: Text(context.tr('common.inactive'))),
                         ],
                       ),
                     ],
@@ -54,19 +69,23 @@ class CriterionDetailScreen extends StatelessWidget {
                 ),
               ),
               _SectionCard(
-                title: 'Objectif / description',
+                title: context.tr('referential.detail.objective_title'),
                 content: criterion.description,
-                emptyMessage: 'Aucune description renseignée.',
+                emptyMessage: context.tr(
+                  'referential.detail.empty_description',
+                ),
               ),
               _SectionCard(
-                title: 'Recommandations',
+                title: context.tr('referential.detail.recommendations_title'),
                 content: criterion.recommendations,
-                emptyMessage: 'Aucune recommandation renseignée.',
+                emptyMessage: context.tr(
+                  'referential.detail.empty_recommendations',
+                ),
               ),
               _SectionCard(
-                title: 'Références réglementaires',
+                title: context.tr('referential.detail.regulatory_title'),
                 content: criterion.regulatoryReferences,
-                emptyMessage: 'Aucune référence réglementaire renseignée.',
+                emptyMessage: context.tr('referential.detail.empty_regulatory'),
               ),
               Card(
                 child: Padding(
@@ -75,19 +94,37 @@ class CriterionDetailScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Traçabilité',
+                        context.tr('referential.detail.traceability'),
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 8),
-                      SelectableText('Code source : ${criterion.sourceCode}'),
+                      SelectableText(
+                        context.tr(
+                          'referential.detail.source_code',
+                          values: {'code': criterion.sourceCode},
+                        ),
+                      ),
                       if (criterion.sourceScope.isNotEmpty)
                         SelectableText(
-                          'Portée source : ${criterion.sourceScope}',
+                          context.tr(
+                            'referential.detail.source_scope',
+                            values: {'scope': criterion.sourceScope},
+                          ),
                         ),
                       if (criterion.source.sheet.isNotEmpty)
-                        SelectableText('Onglet : ${criterion.source.sheet}'),
+                        SelectableText(
+                          context.tr(
+                            'referential.detail.sheet',
+                            values: {'sheet': criterion.source.sheet},
+                          ),
+                        ),
                       if (criterion.source.row != null)
-                        SelectableText('Ligne : ${criterion.source.row}'),
+                        SelectableText(
+                          context.tr(
+                            'referential.detail.row',
+                            values: {'row': criterion.source.row},
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -121,9 +158,14 @@ class _SectionCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              context.trText(title),
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 8),
-            SelectableText(normalized.isEmpty ? emptyMessage : normalized),
+            SelectableText(
+              normalized.isEmpty ? context.trText(emptyMessage) : normalized,
+            ),
           ],
         ),
       ),

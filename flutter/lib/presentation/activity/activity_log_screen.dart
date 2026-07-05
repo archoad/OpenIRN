@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../data/repositories/local_activity_repository.dart';
+import '../../l10n/openirn_localizations.dart';
 import '../../domain/models/irn_referential.dart';
 import '../../domain/models/local_activity_event.dart';
 import '../common/openirn_app_bar.dart';
@@ -50,22 +51,32 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
       context: context,
       builder: (_) => AlertDialog(
         insetPadding: responsiveDialogInsetPadding(context),
-        title: const Text('Effacer le journal ?'),
+        title: Text(
+          context.tr(
+            'activity.clear_dialog.title',
+            fallback: 'Effacer le journal ?',
+          ),
+        ),
         content: ResponsiveDialogContent(
           maxWidth: 560,
           child: Text(
-            'Le journal de la campagne “${widget.campaign.name}” sera supprimé de ce terminal.',
+            context.tr(
+              'activity.clear_dialog.message',
+              fallback:
+                  'Le journal de la campagne “{campaign}” sera supprimé de ce terminal.',
+              values: {'campaign': widget.campaign.name},
+            ),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Annuler'),
+            child: Text(context.tr('action.cancel', fallback: 'Annuler')),
           ),
           FilledButton.icon(
             onPressed: () => Navigator.of(context).pop(true),
             icon: const Icon(Icons.delete_outline),
-            label: const Text('Effacer'),
+            label: Text(context.tr('action.clear', fallback: 'Effacer')),
             style: FilledButton.styleFrom(
               backgroundColor: Theme.of(context).colorScheme.error,
               foregroundColor: Theme.of(context).colorScheme.onError,
@@ -86,9 +97,13 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Journal effacé.')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          context.tr('activity.clear_success', fallback: 'Journal effacé.'),
+        ),
+      ),
+    );
     await _refresh();
   }
 
@@ -100,14 +115,17 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
         actions: [
           OpenIrnAppBarAction(
             id: 'refresh',
-            label: 'Actualiser',
+            label: context.tr('action.refresh', fallback: 'Actualiser'),
             icon: Icons.refresh,
             onSelected: _refresh,
           ),
           const OpenIrnAppBarAction.divider(),
           OpenIrnAppBarAction(
             id: 'clear',
-            label: 'Effacer le journal',
+            label: context.tr(
+              'activity.action.clear_log',
+              fallback: 'Effacer le journal',
+            ),
             icon: Icons.delete_outline,
             destructive: true,
             onSelected: _clearJournal,
@@ -185,11 +203,23 @@ class _HeaderCard extends StatelessWidget {
                   Text(campaign.name, style: theme.textTheme.titleLarge),
                   const SizedBox(height: 4),
                   Text(
-                    'Référentiel ${referential.version} · ${campaign.status.label}',
+                    context.tr(
+                      'activity.header.referential_status',
+                      fallback: 'Référentiel {version} · {status}',
+                      values: {
+                        'version': referential.version,
+                        'status': context.trText(campaign.status.label),
+                      },
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '$eventCount évènement(s) enregistré(s) localement pour cette campagne.',
+                    context.tr(
+                      'activity.header.event_count',
+                      fallback:
+                          '{count} évènement(s) enregistré(s) localement pour cette campagne.',
+                      values: {'count': eventCount},
+                    ),
                   ),
                 ],
               ),
@@ -228,7 +258,7 @@ class _ActivityEventCard extends StatelessWidget {
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       Text(event.title, style: theme.textTheme.titleMedium),
-                      Chip(label: Text(event.type.label)),
+                      Chip(label: Text(context.trText(event.type.label))),
                     ],
                   ),
                   if (event.description.isNotEmpty) ...[
@@ -297,14 +327,19 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Card(
+    return Card(
       child: Padding(
-        padding: EdgeInsets.all(24),
+        padding: const EdgeInsets.all(24),
         child: Column(
           children: [
-            Icon(Icons.history_toggle_off_outlined, size: 44),
-            SizedBox(height: 12),
-            Text('Aucun évènement enregistré pour cette campagne.'),
+            const Icon(Icons.history_toggle_off_outlined, size: 44),
+            const SizedBox(height: 12),
+            Text(
+              context.tr(
+                'activity.empty',
+                fallback: 'Aucun évènement enregistré pour cette campagne.',
+              ),
+            ),
           ],
         ),
       ),
@@ -328,12 +363,19 @@ class _ErrorState extends StatelessWidget {
           children: [
             const Icon(Icons.error_outline, size: 42),
             const SizedBox(height: 12),
-            Text('Impossible de charger le journal d’activité : $error'),
+            Text(
+              context.tr(
+                'activity.error.load',
+                fallback:
+                    'Impossible de charger le journal d’activité : {error}',
+                values: {'error': error},
+              ),
+            ),
             const SizedBox(height: 12),
             FilledButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh),
-              label: const Text('Réessayer'),
+              label: Text(context.tr('action.retry', fallback: 'Réessayer')),
             ),
           ],
         ),

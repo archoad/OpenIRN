@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../data/api/openirn_api_client.dart';
+import '../../l10n/openirn_localizations.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/services/app_session_manager.dart';
 
@@ -27,7 +28,10 @@ class _SyncConnectivityIndicatorState extends State<SyncConnectivityIndicator> {
 
   Timer? _timer;
   _ConnectivityState _state = _ConnectivityState.checking;
-  String _tooltip = 'Contrôle de la connexion OpenIRN…';
+  String _tooltipKey = 'sync.tooltip.checking';
+  String? _tooltipFallback;
+  int? _snapshotCount;
+  String? _offlineTitle;
 
   @override
   void initState() {
@@ -50,8 +54,11 @@ class _SyncConnectivityIndicatorState extends State<SyncConnectivityIndicator> {
       }
       setState(() {
         _state = _ConnectivityState.tenantNotSelected;
-        _tooltip =
+        _tooltipKey = 'sync.tooltip.no_tenant';
+        _tooltipFallback =
             'Aucun espace de travail sélectionné : aucune connexion au serveur n’est ouverte.';
+        _snapshotCount = null;
+        _offlineTitle = null;
       });
       return;
     }
@@ -66,15 +73,21 @@ class _SyncConnectivityIndicatorState extends State<SyncConnectivityIndicator> {
         configuration.tenantId != activeTenantId) {
       setState(() {
         _state = _ConnectivityState.localOnly;
-        _tooltip =
+        _tooltipKey = 'sync.tooltip.local_only';
+        _tooltipFallback =
             'Mode hors ligne uniquement : synchronisation non configurée pour l’espace courant.';
+        _snapshotCount = null;
+        _offlineTitle = null;
       });
       return;
     }
 
     setState(() {
       _state = _ConnectivityState.checking;
-      _tooltip = 'Contrôle de la connexion OpenIRN…';
+      _tooltipKey = 'sync.tooltip.checking';
+      _tooltipFallback = 'Contrôle de la connexion OpenIRN…';
+      _snapshotCount = null;
+      _offlineTitle = null;
     });
 
     final result = await _apiClient.loadSyncStatus(
@@ -90,15 +103,29 @@ class _SyncConnectivityIndicatorState extends State<SyncConnectivityIndicator> {
       _state = result.isAvailable
           ? _ConnectivityState.online
           : _ConnectivityState.localOnly;
-      _tooltip = result.isAvailable
-          ? 'Synchronisation OpenIRN active : ${result.snapshotCount} snapshot(s) serveur.'
-          : 'Mode hors ligne uniquement : ${result.title}';
+      if (result.isAvailable) {
+        _tooltipKey = 'sync.tooltip.online';
+        _tooltipFallback =
+            'Synchronisation OpenIRN active : ${result.snapshotCount} snapshot(s) serveur.';
+        _snapshotCount = result.snapshotCount;
+        _offlineTitle = null;
+      } else {
+        _tooltipKey = 'sync.tooltip.offline_title';
+        _tooltipFallback = 'Mode hors ligne uniquement : ${result.title}';
+        _snapshotCount = null;
+        _offlineTitle = result.title;
+      }
     });
   }
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final tooltip = context.tr(
+      _tooltipKey,
+      fallback: _tooltipFallback ?? 'Contrôle de la connexion OpenIRN…',
+      values: {'count': _snapshotCount ?? '', 'title': _offlineTitle ?? ''},
+    );
     final color = switch (_state) {
       _ConnectivityState.tenantNotSelected => colorScheme.outline,
       _ConnectivityState.checking => colorScheme.tertiary,
@@ -106,16 +133,32 @@ class _SyncConnectivityIndicatorState extends State<SyncConnectivityIndicator> {
       _ConnectivityState.localOnly => colorScheme.error,
     };
     final label = switch (_state) {
-      _ConnectivityState.tenantNotSelected => 'Aucun espace sélectionné',
-      _ConnectivityState.checking => 'Contrôle en cours',
-      _ConnectivityState.online => 'Serveur accessible',
-      _ConnectivityState.localOnly => 'Mode hors ligne',
+      _ConnectivityState.tenantNotSelected => context.tr(
+        'sync.status.no_tenant',
+        fallback: 'Aucun espace sélectionné',
+      ),
+      _ConnectivityState.checking => context.tr(
+        'sync.status.checking',
+        fallback: 'Contrôle en cours',
+      ),
+      _ConnectivityState.online => context.tr(
+        'sync.status.online',
+        fallback: 'Serveur accessible',
+      ),
+      _ConnectivityState.localOnly => context.tr(
+        'sync.status.local_only',
+        fallback: 'Mode hors ligne',
+      ),
     };
 
     return Tooltip(
-      message: _tooltip,
+      message: tooltip,
       child: Semantics(
-        label: 'Statut de synchronisation : $label',
+        label: context.tr(
+          'sync.semantics.status',
+          fallback: 'Statut de synchronisation : {label}',
+          values: {'label': label},
+        ),
         button: true,
         child: InkWell(
           borderRadius: BorderRadius.circular(16),

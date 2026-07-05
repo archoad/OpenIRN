@@ -5,9 +5,30 @@ import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/sync_configuration.dart';
 import '../../domain/services/app_sync_coordinator.dart';
+import '../../l10n/openirn_localizations.dart';
 import '../common/openirn_app_bar.dart';
 import '../common/responsive_autofocus.dart';
 import '../common/responsive_dialog.dart';
+
+String _roleLabel(BuildContext context, AppUserRole role) {
+  return context.tr('role.${role.jsonValue}', fallback: role.label);
+}
+
+String _roleDescription(BuildContext context, AppUserRole role) {
+  return context.tr(
+    'role_description.${role.jsonValue}',
+    fallback: role.description,
+  );
+}
+
+String _localizedText(BuildContext context, String text) {
+  return context.tr(text, fallback: context.trText(text));
+}
+
+String _tenantLabel(BuildContext context, AppUser user) {
+  final label = user.tenantDisplayName.trim();
+  return label.isEmpty ? context.tr('common.workspace') : label;
+}
 
 class UserListScreen extends StatefulWidget {
   final AppUser activeUser;
@@ -60,9 +81,8 @@ class _UserListScreenState extends State<UserListScreen> {
       return const _UserListStateData(
         users: <AppUser>[],
         serverAvailable: false,
-        sourceLabel: 'Terminal non autorisé',
-        sourceMessage:
-            'Veuillez autoriser ce terminal avant d’accéder à la liste des utilisateurs.',
+        sourceLabel: 'users.source.terminal_not_authorized',
+        sourceMessage: 'users.source.authorize_terminal_first',
       );
     }
 
@@ -79,8 +99,8 @@ class _UserListScreenState extends State<UserListScreen> {
         users: centralUsers.users,
         serverAvailable: true,
         sourceLabel: _isSolutionAdministrator
-            ? 'Base centrale serveur · tous les espaces'
-            : 'Base centrale serveur',
+            ? 'users.source.central_all_workspaces'
+            : 'users.source.central',
         sourceMessage: centralUsers.message,
         apiBaseUrl: configuration.apiBaseUrl,
         tenantId: configuration.tenantId,
@@ -91,9 +111,8 @@ class _UserListScreenState extends State<UserListScreen> {
     return _UserListStateData(
       users: const <AppUser>[],
       serverAvailable: false,
-      sourceLabel: 'Serveur indisponible',
-      sourceMessage:
-          '${centralUsers.title} — ${centralUsers.message}. Les utilisateurs ne sont plus mis en cache localement.',
+      sourceLabel: 'users.source.server_unavailable',
+      sourceMessage: 'users.source.server_unavailable_no_cache',
       apiBaseUrl: configuration.apiBaseUrl,
       tenantId: configuration.tenantId,
       apiToken: configuration.apiToken,
@@ -244,9 +263,13 @@ class _UserListScreenState extends State<UserListScreen> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Création impossible : $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.tr('users.error.create_failed', values: {'error': error}),
+          ),
+        ),
+      );
     }
   }
 
@@ -311,7 +334,11 @@ class _UserListScreenState extends State<UserListScreen> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Modification impossible : $error')),
+        SnackBar(
+          content: Text(
+            context.tr('users.error.update_failed', values: {'error': error}),
+          ),
+        ),
       );
     }
   }
@@ -361,22 +388,22 @@ class _UserListScreenState extends State<UserListScreen> {
       context: context,
       builder: (_) => AlertDialog(
         insetPadding: responsiveDialogInsetPadding(context),
-        title: const Text('Supprimer l’utilisateur ?'),
+        title: Text(context.tr('users.delete.title')),
         content: ResponsiveDialogContent(
           maxWidth: 560,
           child: Text(
-            'L’utilisateur « ${user.displayName} » sera supprimé de la base centrale serveur.',
+            context.tr('users.delete.body', values: {'user': user.displayName}),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Annuler'),
+            child: Text(context.tr('common.action.cancel')),
           ),
           FilledButton.tonalIcon(
             onPressed: () => Navigator.of(context).pop(true),
             icon: const Icon(Icons.delete_outline),
-            label: const Text('Supprimer'),
+            label: Text(context.tr('common.action.delete')),
           ),
         ],
       ),
@@ -408,7 +435,11 @@ class _UserListScreenState extends State<UserListScreen> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Suppression impossible : $error')),
+        SnackBar(
+          content: Text(
+            context.tr('users.error.delete_failed', values: {'error': error}),
+          ),
+        ),
       );
     }
   }
@@ -430,19 +461,19 @@ class _UserListScreenState extends State<UserListScreen> {
     return Scaffold(
       appBar: OpenIrnAppBar(
         title: _isSolutionAdministrator
-            ? 'Utilisateurs — tous les espaces'
-            : 'Utilisateurs',
+            ? context.tr('users.title_all_workspaces')
+            : context.tr('users.title'),
         actions: [
           OpenIrnAppBarAction(
             id: 'refresh_users',
-            label: 'Actualiser',
+            label: context.tr('common.action.refresh'),
             icon: Icons.refresh_outlined,
             enabled: !_working,
             onSelected: _refresh,
           ),
           OpenIrnAppBarAction(
             id: 'new_user',
-            label: 'Nouvel utilisateur',
+            label: context.tr('users.action.new'),
             icon: Icons.person_add_alt_1_outlined,
             enabled: !_working,
             onSelected: _createUser,
@@ -457,7 +488,12 @@ class _UserListScreenState extends State<UserListScreen> {
           }
           if (snapshot.hasError) {
             return Center(
-              child: Text('Chargement impossible : ${snapshot.error}'),
+              child: Text(
+                context.tr(
+                  'common.loading_failed',
+                  values: {'error': snapshot.error},
+                ),
+              ),
             );
           }
           final state = snapshot.data;
@@ -544,13 +580,11 @@ class _IntroCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Annuaire et codes utilisateurs',
+              context.tr('users.intro.title'),
               style: theme.textTheme.titleLarge,
             ),
             const SizedBox(height: 6),
-            const Text(
-              'Les administrateurs consultent tous les espaces. Les Pilotes IRN gèrent les utilisateurs de leur propre espace.',
-            ),
+            Text(context.tr('users.intro.body')),
             const SizedBox(height: 10),
             Wrap(
               spacing: 8,
@@ -563,13 +597,18 @@ class _IntroCard extends StatelessWidget {
                         : Icons.cloud_off_outlined,
                     size: 18,
                   ),
-                  label: Text(state?.sourceLabel ?? 'Chargement'),
+                  label: Text(
+                    _localizedText(
+                      context,
+                      state?.sourceLabel ?? 'common.loading',
+                    ),
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             Text(
-              state?.sourceMessage ?? 'Chargement de la base utilisateurs.',
+              _localizedText(context, state?.sourceMessage ?? 'users.loading'),
               style: theme.textTheme.bodySmall,
             ),
           ],
@@ -630,7 +669,7 @@ class _UserCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        user.role.description,
+                        _roleDescription(context, user.role),
                         style: theme.textTheme.bodySmall,
                         maxLines: compact ? 4 : 2,
                         overflow: TextOverflow.ellipsis,
@@ -645,16 +684,16 @@ class _UserCard extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                Chip(label: Text(user.role.label)),
+                Chip(label: Text(_roleLabel(context, user.role))),
                 if (showTenant && user.tenantId.trim().isNotEmpty)
                   Chip(
                     avatar: const Icon(Icons.account_tree_outlined, size: 18),
-                    label: Text(user.tenantLabel),
+                    label: Text(_tenantLabel(context, user)),
                   ),
                 if (centralPinsAvailable)
-                  const Chip(
-                    avatar: Icon(Icons.key_outlined, size: 18),
-                    label: Text('Code serveur'),
+                  Chip(
+                    avatar: const Icon(Icons.key_outlined, size: 18),
+                    label: Text(context.tr('users.chip.server_code')),
                   ),
               ],
             );
@@ -667,15 +706,15 @@ class _UserCard extends StatelessWidget {
                 TextButton.icon(
                   onPressed: centralPinsAvailable ? onChangePin : null,
                   icon: const Icon(Icons.key_outlined),
-                  label: const Text('Code'),
+                  label: Text(context.tr('users.action.code')),
                 ),
                 IconButton(
-                  tooltip: 'Modifier',
+                  tooltip: context.tr('common.action.edit'),
                   onPressed: onEdit,
                   icon: const Icon(Icons.edit_outlined),
                 ),
                 IconButton(
-                  tooltip: 'Supprimer',
+                  tooltip: context.tr('common.action.delete'),
                   onPressed: onDelete,
                   icon: const Icon(Icons.delete_outline),
                 ),
@@ -791,12 +830,12 @@ class _UserDialogState extends State<_UserDialog> {
       return TextFormField(
         controller: _firstNameController,
         autofocus: shouldAutofocusTextField(context),
-        decoration: const InputDecoration(
-          labelText: 'Prénom',
-          border: OutlineInputBorder(),
+        decoration: InputDecoration(
+          labelText: context.tr('users.field.first_name'),
+          border: const OutlineInputBorder(),
         ),
         validator: (value) => value == null || value.trim().isEmpty
-            ? 'Prénom obligatoire.'
+            ? context.tr('users.validation.first_name_required')
             : null,
       );
     }
@@ -804,19 +843,22 @@ class _UserDialogState extends State<_UserDialog> {
     Widget buildLastNameField() {
       return TextFormField(
         controller: _lastNameController,
-        decoration: const InputDecoration(
-          labelText: 'Nom',
-          border: OutlineInputBorder(),
+        decoration: InputDecoration(
+          labelText: context.tr('users.field.last_name'),
+          border: const OutlineInputBorder(),
         ),
-        validator: (value) =>
-            value == null || value.trim().isEmpty ? 'Nom obligatoire.' : null,
+        validator: (value) => value == null || value.trim().isEmpty
+            ? context.tr('users.validation.last_name_required')
+            : null,
       );
     }
 
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
       title: Text(
-        widget.user == null ? 'Nouvel utilisateur' : 'Modifier l’utilisateur',
+        widget.user == null
+            ? context.tr('users.dialog.create_title')
+            : context.tr('users.dialog.edit_title'),
       ),
       content: ResponsiveDialogContent(
         maxWidth: 820,
@@ -851,17 +893,17 @@ class _UserDialogState extends State<_UserDialog> {
                   enableSuggestions: false,
                   smartDashesType: SmartDashesType.disabled,
                   smartQuotesType: SmartQuotesType.disabled,
-                  decoration: const InputDecoration(
-                    labelText: 'Email',
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: context.tr('users.field.email'),
+                    border: const OutlineInputBorder(),
                   ),
                   validator: (value) {
                     final email = value?.trim() ?? '';
                     if (email.isEmpty) {
-                      return 'Email obligatoire.';
+                      return context.tr('users.validation.email_required');
                     }
                     if (!email.contains('@') || !email.contains('.')) {
-                      return 'Email invalide.';
+                      return context.tr('users.validation.email_invalid');
                     }
                     return null;
                   },
@@ -870,9 +912,9 @@ class _UserDialogState extends State<_UserDialog> {
                 DropdownButtonFormField<AppUserRole>(
                   initialValue: _role,
                   isExpanded: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Rôle',
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: context.tr('users.field.role'),
+                    border: const OutlineInputBorder(),
                   ),
                   items: [
                     for (final role in AppUserRole.values.where(
@@ -883,7 +925,7 @@ class _UserDialogState extends State<_UserDialog> {
                       DropdownMenuItem<AppUserRole>(
                         value: role,
                         child: Text(
-                          role.label,
+                          _roleLabel(context, role),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -898,9 +940,12 @@ class _UserDialogState extends State<_UserDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Annuler'),
+          child: Text(context.tr('common.action.cancel')),
         ),
-        FilledButton(onPressed: _submit, child: const Text('Enregistrer')),
+        FilledButton(
+          onPressed: _submit,
+          child: Text(context.tr('common.action.save')),
+        ),
       ],
     );
   }
@@ -942,7 +987,7 @@ class _UserPinDialogState extends State<_UserPinDialog> {
         : widget.user.email;
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
-      title: const Text('Modifier le code utilisateur'),
+      title: Text(context.tr('users.pin.title')),
       content: ResponsiveDialogContent(
         maxWidth: 560,
         child: Form(
@@ -953,13 +998,15 @@ class _UserPinDialogState extends State<_UserPinDialog> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  displayName.isEmpty ? 'Utilisateur sans nom' : displayName,
+                  displayName.isEmpty
+                      ? context.tr('users.empty_name')
+                      : displayName,
                   style: Theme.of(context).textTheme.titleMedium,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 4),
-                Text(widget.user.role.label),
+                Text(_roleLabel(context, widget.user.role)),
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _pinController,
@@ -974,11 +1021,13 @@ class _UserPinDialogState extends State<_UserPinDialog> {
                   smartDashesType: SmartDashesType.disabled,
                   smartQuotesType: SmartQuotesType.disabled,
                   decoration: InputDecoration(
-                    labelText: 'Nouveau code',
+                    labelText: context.tr('users.pin.new_code'),
                     border: const OutlineInputBorder(),
-                    helperText: 'Entre 4 et 32 caractères.',
+                    helperText: context.tr('users.pin.helper'),
                     suffixIcon: IconButton(
-                      tooltip: _obscurePin ? 'Afficher' : 'Masquer',
+                      tooltip: _obscurePin
+                          ? context.tr('common.action.show')
+                          : context.tr('common.action.hide'),
                       onPressed: () =>
                           setState(() => _obscurePin = !_obscurePin),
                       icon: Icon(
@@ -991,10 +1040,10 @@ class _UserPinDialogState extends State<_UserPinDialog> {
                   validator: (value) {
                     final pin = value?.trim() ?? '';
                     if (pin.length < 4) {
-                      return 'Code trop court.';
+                      return context.tr('users.pin.too_short');
                     }
                     if (pin.length > 32) {
-                      return 'Code trop long.';
+                      return context.tr('users.pin.too_long');
                     }
                     return null;
                   },
@@ -1012,13 +1061,13 @@ class _UserPinDialogState extends State<_UserPinDialog> {
                   enableSuggestions: false,
                   smartDashesType: SmartDashesType.disabled,
                   smartQuotesType: SmartQuotesType.disabled,
-                  decoration: const InputDecoration(
-                    labelText: 'Confirmer le code',
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: context.tr('users.pin.confirm'),
+                    border: const OutlineInputBorder(),
                   ),
                   validator: (value) {
                     if ((value?.trim() ?? '') != _pinController.text.trim()) {
-                      return 'Les codes ne correspondent pas.';
+                      return context.tr('users.pin.mismatch');
                     }
                     return null;
                   },
@@ -1032,12 +1081,12 @@ class _UserPinDialogState extends State<_UserPinDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Annuler'),
+          child: Text(context.tr('common.action.cancel')),
         ),
         FilledButton.icon(
           onPressed: _submit,
           icon: const Icon(Icons.key_outlined),
-          label: const Text('Mettre à jour'),
+          label: Text(context.tr('common.action.update')),
         ),
       ],
     );

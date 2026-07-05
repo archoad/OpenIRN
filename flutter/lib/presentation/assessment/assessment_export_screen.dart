@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../data/files/local_json_file_service.dart';
+import '../../l10n/openirn_localizations.dart';
 import '../../data/repositories/local_activity_repository.dart';
 import '../../data/repositories/local_criterion_assignment_repository.dart';
 import '../../data/repositories/local_user_repository.dart';
@@ -113,13 +114,18 @@ class _AssessmentExportScreenState extends State<AssessmentExportScreen> {
             actions: [
               OpenIrnAppBarAction(
                 id: 'copy',
-                label: 'Copier',
+                label: context.tr('action.copy', fallback: 'Copier'),
                 icon: Icons.copy_all_outlined,
                 onSelected: () => _copyToClipboard(context, jsonPayload),
               ),
               OpenIrnAppBarAction(
                 id: 'save',
-                label: _isSaving ? 'Enregistrement…' : 'Enregistrer',
+                label: _isSaving
+                    ? context.tr(
+                        'export.action.saving',
+                        fallback: 'Enregistrement…',
+                      )
+                    : context.tr('action.save', fallback: 'Enregistrer'),
                 icon: Icons.save_alt_outlined,
                 enabled: !_isSaving,
                 onSelected: () => _saveToFile(context, jsonPayload),
@@ -147,9 +153,12 @@ class _AssessmentExportScreenState extends State<AssessmentExportScreen> {
                   ),
                   if (snapshot.hasError) ...[
                     const SizedBox(height: 12),
-                    const _ExportWarningCard(
-                      message:
-                          'Le journal d’activité n’a pas pu être chargé. L’export reste utilisable, mais il ne contient pas la trace locale.',
+                    _ExportWarningCard(
+                      message: context.tr(
+                        'export.warning.activity_unavailable',
+                        fallback:
+                            'Le journal d’activité n’a pas pu être chargé. L’export reste utilisable, mais il ne contient pas la trace locale.',
+                      ),
                     ),
                   ],
                   if (_fileErrorMessage != null) ...[
@@ -177,7 +186,14 @@ class _AssessmentExportScreenState extends State<AssessmentExportScreen> {
       _fileErrorMessage = null;
     });
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Ouverture du dialogue d’enregistrement…')),
+      SnackBar(
+        content: Text(
+          context.tr(
+            'export.snackbar.open_save_dialog',
+            fallback: 'Ouverture du dialogue d’enregistrement…',
+          ),
+        ),
+      ),
     );
 
     try {
@@ -192,24 +208,43 @@ class _AssessmentExportScreenState extends State<AssessmentExportScreen> {
         return;
       }
       if (path == null) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Export fichier annulé.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              context.tr(
+                'export.snackbar.cancelled',
+                fallback: 'Export fichier annulé.',
+              ),
+            ),
+          ),
+        );
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Export JSON enregistré : $path')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.tr(
+              'export.snackbar.saved',
+              fallback: 'Export JSON enregistré : {path}',
+              values: {'path': path},
+            ),
+          ),
+        ),
+      );
     } catch (error) {
       if (!context.mounted) {
         return;
       }
       setState(() {
-        _fileErrorMessage = 'Enregistrement impossible : $error';
+        _fileErrorMessage = context.tr(
+          'export.error.save_failed',
+          fallback: 'Enregistrement impossible : {error}',
+          values: {'error': error},
+        );
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Enregistrement impossible : $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_fileErrorMessage!)));
     } finally {
       if (mounted) {
         setState(() {
@@ -228,8 +263,13 @@ class _AssessmentExportScreenState extends State<AssessmentExportScreen> {
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Export JSON copié dans le presse-papiers.'),
+      SnackBar(
+        content: Text(
+          context.tr(
+            'export.snackbar.copied',
+            fallback: 'Export JSON copié dans le presse-papiers.',
+          ),
+        ),
       ),
     );
   }
@@ -258,14 +298,14 @@ class _ExportIntroCard extends StatelessWidget {
     required this.isSaving,
   });
 
-  String _projectDirectorLabel(CampaignInformation info) {
+  String _projectDirectorLabel(BuildContext context, CampaignInformation info) {
     if (info.projectDirectorFullName.isNotEmpty) {
       return info.projectDirectorFullName;
     }
     if (info.projectDirectorEmail.trim().isNotEmpty) {
       return info.projectDirectorEmail.trim();
     }
-    return 'non renseigné';
+    return context.tr('common.not_provided', fallback: 'non renseigné');
   }
 
   @override
@@ -284,7 +324,10 @@ class _ExportIntroCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Export local de l’évaluation',
+                    context.tr(
+                      'export.intro.title',
+                      fallback: 'Export local de l’évaluation',
+                    ),
                     style: theme.textTheme.titleLarge,
                   ),
                 ),
@@ -302,50 +345,150 @@ class _ExportIntroCard extends StatelessWidget {
                             )
                           : const Icon(Icons.save_alt_outlined),
                       label: Text(
-                        isSaving ? 'Enregistrement…' : 'Enregistrer .json',
+                        isSaving
+                            ? context.tr(
+                                'export.action.saving',
+                                fallback: 'Enregistrement…',
+                              )
+                            : context.tr(
+                                'export.action.save_json',
+                                fallback: 'Enregistrer .json',
+                              ),
                       ),
                     ),
                     OutlinedButton.icon(
                       onPressed: onCopy,
                       icon: const Icon(Icons.copy_all_outlined),
-                      label: const Text('Copier'),
+                      label: Text(
+                        context.tr('action.copy', fallback: 'Copier'),
+                      ),
                     ),
                   ],
                 ),
               ],
             ),
             const SizedBox(height: 12),
-            const Text(
-              'Cet export sert de format d’échange avant la future synchronisation serveur. '
-              'Il contient la traçabilité du référentiel officiel, la campagne, les notes IRN, les justifications, les scores calculés et le journal d’activité local. '
-              'Vous pouvez l’enregistrer au format JSON ou le copier dans le presse-papiers.',
+            Text(
+              context.tr(
+                'export.intro.description',
+                fallback:
+                    'Cet export sert de format d’échange avant la future synchronisation serveur. Il contient la traçabilité du référentiel officiel, la campagne, les notes IRN, les justifications, les scores calculés et le journal d’activité local. Vous pouvez l’enregistrer au format JSON ou le copier dans le presse-papiers.',
+              ),
             ),
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                Chip(label: Text('Campagne : ${campaign.name}')),
-                Chip(label: Text('Statut : ${campaign.status.label}')),
                 Chip(
                   label: Text(
-                    'SI : ${campaign.information.systemName.trim().isEmpty ? 'non renseigné' : campaign.information.systemName}',
+                    context.tr(
+                      'export.chip.campaign',
+                      fallback: 'Campagne : {name}',
+                      values: {'name': campaign.name},
+                    ),
                   ),
                 ),
                 Chip(
                   label: Text(
-                    'Directeur : ${_projectDirectorLabel(campaign.information)}',
+                    context.tr(
+                      'export.chip.status',
+                      fallback: 'Statut : {status}',
+                      values: {'status': context.trText(campaign.status.label)},
+                    ),
                   ),
                 ),
-                Chip(label: Text('Référentiel : ${referential.id}')),
-                Chip(label: Text('Version : ${referential.version}')),
-                Chip(label: Text('Réponses cotées : $answeredCount')),
-                Chip(label: Text('Justifications : $justificationCount')),
-                Chip(label: Text('Évènements journal : $activityEventCount')),
-                Chip(label: Text('Affectations : $assignmentCount')),
                 Chip(
                   label: Text(
-                    'Critères exportés : ${referential.criteria.length}',
+                    context.tr(
+                      'export.chip.system',
+                      fallback: 'SI : {system}',
+                      values: {
+                        'system': campaign.information.systemName.trim().isEmpty
+                            ? context.tr(
+                                'common.not_provided',
+                                fallback: 'non renseigné',
+                              )
+                            : campaign.information.systemName,
+                      },
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'export.chip.director',
+                      fallback: 'Directeur : {director}',
+                      values: {
+                        'director': _projectDirectorLabel(
+                          context,
+                          campaign.information,
+                        ),
+                      },
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'export.chip.referential',
+                      fallback: 'Référentiel : {id}',
+                      values: {'id': referential.id},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'export.chip.version',
+                      fallback: 'Version : {version}',
+                      values: {'version': referential.version},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'export.chip.rated_answers',
+                      fallback: 'Réponses cotées : {count}',
+                      values: {'count': answeredCount},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'export.chip.justifications',
+                      fallback: 'Justifications : {count}',
+                      values: {'count': justificationCount},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'export.chip.activity_events',
+                      fallback: 'Évènements journal : {count}',
+                      values: {'count': activityEventCount},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'export.chip.assignments',
+                      fallback: 'Affectations : {count}',
+                      values: {'count': assignmentCount},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'export.chip.criteria',
+                      fallback: 'Critères exportés : {count}',
+                      values: {'count': referential.criteria.length},
+                    ),
                   ),
                 ),
               ],
@@ -400,7 +543,7 @@ class _JsonPreviewCard extends StatelessWidget {
                 const Icon(Icons.preview_outlined),
                 const SizedBox(width: 8),
                 Text(
-                  'Aperçu JSON',
+                  context.tr('export.preview.title', fallback: 'Aperçu JSON'),
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
               ],

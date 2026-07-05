@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../l10n/openirn_localizations.dart';
 import '../../data/api/openirn_api_client.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/app_user.dart';
@@ -109,9 +110,13 @@ class _ReferentialOverviewScreenState extends State<ReferentialOverviewScreen> {
     }
     if (!bootstrap.hasReferential) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Le référentiel serveur doit être chargé avant d’ouvrir À propos.',
+            context.tr(
+              'home.about.referential_required',
+              fallback:
+                  'Le référentiel serveur doit être chargé avant d’ouvrir À propos.',
+            ),
           ),
         ),
       );
@@ -149,7 +154,12 @@ class _ReferentialOverviewScreenState extends State<ReferentialOverviewScreen> {
           }
           final bootstrap = snapshot.data;
           if (bootstrap == null) {
-            return const _ErrorState(error: 'État d’accueil absent.');
+            return _ErrorState(
+              error: context.tr(
+                'home.error.missing_state',
+                fallback: 'État d’accueil absent.',
+              ),
+            );
           }
 
           return _HomeContent(
@@ -367,6 +377,12 @@ class _HomeContentState extends State<_HomeContent> {
       return;
     }
 
+    final workspaceSelectedReason = context.tr(
+      'home.session.workspace_selected',
+      fallback: 'Espace de travail {workspace} sélectionné.',
+      values: {'workspace': selected.displayName},
+    );
+
     final updated = await _syncConfigurationRepository.saveConfiguration(
       configuration.copyWith(
         tenantId: selected.id,
@@ -376,9 +392,7 @@ class _HomeContentState extends State<_HomeContent> {
       ),
     );
 
-    AppSessionManager.instance.clearSession(
-      reason: 'Espace de travail ${selected.displayName} sélectionné.',
-    );
+    AppSessionManager.instance.clearSession(reason: workspaceSelectedReason);
     AppSyncCoordinator.instance.stop();
 
     if (!mounted) {
@@ -392,9 +406,14 @@ class _HomeContentState extends State<_HomeContent> {
   }
 
   Future<void> _returnToTenantSelection() async {
+    final returnWorkspaceSelectionReason = context.tr(
+      'home.session.return_workspace_selection',
+      fallback: 'Retour au choix de l’espace de travail.',
+    );
+
     final updated = await _syncConfigurationRepository.clearTenantSelection();
     AppSessionManager.instance.clearSession(
-      reason: 'Retour au choix de l’espace de travail.',
+      reason: returnWorkspaceSelectionReason,
     );
     AppSyncCoordinator.instance.stop();
 
@@ -496,24 +515,41 @@ class _HomeContentState extends State<_HomeContent> {
     }
     if (widget.requiresDeviceEnrollment || !configuration.isConfigured) {
       _showForbidden(
-        'Veuillez autoriser ce terminal avant d’ouvrir une campagne d’évaluation.',
+        context.tr(
+          'home.forbidden.enroll_before_campaigns',
+          fallback:
+              'Veuillez autoriser ce terminal avant d’ouvrir une campagne d’évaluation.',
+        ),
       );
       return;
     }
     final activeUser = AppSessionManager.instance.activeUser;
     if (!AppSessionManager.instance.hasActiveSession || activeUser == null) {
       _showForbidden(
-        'Veuillez déverrouiller OpenIRN avec votre profil et votre code personnel avant d’ouvrir une campagne.',
+        context.tr(
+          'home.forbidden.unlock_before_campaigns',
+          fallback:
+              'Veuillez déverrouiller OpenIRN avec votre profil et votre code personnel avant d’ouvrir une campagne.',
+        ),
       );
       return;
     }
     if (!_accessPolicy.can(activeUser, OpenIrnPermission.viewCampaignList)) {
-      _showForbidden('Votre profil ne permet pas d’ouvrir les campagnes.');
+      _showForbidden(
+        context.tr(
+          'home.forbidden.campaigns_role',
+          fallback: 'Votre profil ne permet pas d’ouvrir les campagnes.',
+        ),
+      );
       return;
     }
     if (!_hasServerReferential) {
       _showForbidden(
-        'Veuillez installer ou recharger le référentiel officiel aDRI depuis l’administration avant d’ouvrir une campagne.',
+        context.tr(
+          'home.forbidden.install_referential_before_campaigns',
+          fallback:
+              'Veuillez installer ou recharger le référentiel officiel aDRI depuis l’administration avant d’ouvrir une campagne.',
+        ),
       );
       return;
     }
@@ -532,7 +568,11 @@ class _HomeContentState extends State<_HomeContent> {
     final activeUser = AppSessionManager.instance.activeUser;
     if (!AppSessionManager.instance.hasActiveSession || activeUser == null) {
       _showForbidden(
-        'Veuillez déverrouiller OpenIRN avec votre profil et votre code personnel avant d’ouvrir le référentiel.',
+        context.tr(
+          'home.forbidden.unlock_before_referential',
+          fallback:
+              'Veuillez déverrouiller OpenIRN avec votre profil et votre code personnel avant d’ouvrir le référentiel.',
+        ),
       );
       return;
     }
@@ -540,12 +580,21 @@ class _HomeContentState extends State<_HomeContent> {
       activeUser,
       OpenIrnPermission.viewReferentialCatalog,
     )) {
-      _showForbidden('Votre profil ne permet pas de consulter le référentiel.');
+      _showForbidden(
+        context.tr(
+          'home.forbidden.referential_role',
+          fallback: 'Votre profil ne permet pas de consulter le référentiel.',
+        ),
+      );
       return;
     }
     if (!_hasServerReferential) {
       _showForbidden(
-        'Le référentiel officiel n’est pas encore chargé depuis le serveur.',
+        context.tr(
+          'home.forbidden.referential_not_loaded',
+          fallback:
+              'Le référentiel officiel n’est pas encore chargé depuis le serveur.',
+        ),
       );
       return;
     }
@@ -569,7 +618,11 @@ class _HomeContentState extends State<_HomeContent> {
     }
     if (widget.requiresDeviceEnrollment || !configuration.isConfigured) {
       _showForbidden(
-        'Veuillez autoriser ce terminal avant d’ouvrir l’administration.',
+        context.tr(
+          'home.forbidden.enroll_before_admin',
+          fallback:
+              'Veuillez autoriser ce terminal avant d’ouvrir l’administration.',
+        ),
       );
       return;
     }
@@ -577,7 +630,11 @@ class _HomeContentState extends State<_HomeContent> {
     final activeUser = AppSessionManager.instance.activeUser;
     if (!AppSessionManager.instance.hasActiveSession || activeUser == null) {
       _showForbidden(
-        'Veuillez déverrouiller OpenIRN avec votre profil et votre code personnel avant d’ouvrir l’administration.',
+        context.tr(
+          'home.forbidden.unlock_before_admin',
+          fallback:
+              'Veuillez déverrouiller OpenIRN avec votre profil et votre code personnel avant d’ouvrir l’administration.',
+        ),
       );
       return;
     }
@@ -613,13 +670,21 @@ class _HomeContentState extends State<_HomeContent> {
     }
     if (!selectedConfiguration.hasSelectedTenant) {
       _showForbidden(
-        'Veuillez d’abord choisir un espace de travail avant d’ouvrir une session.',
+        context.tr(
+          'home.forbidden.choose_workspace_before_unlock',
+          fallback:
+              'Veuillez d’abord choisir un espace de travail avant d’ouvrir une session.',
+        ),
       );
       return;
     }
     if (!selectedConfiguration.isConfigured) {
       _showForbidden(
-        'Veuillez autoriser ce terminal dans cet espace de travail avant d’ouvrir une session.',
+        context.tr(
+          'home.forbidden.enroll_workspace_before_unlock',
+          fallback:
+              'Veuillez autoriser ce terminal dans cet espace de travail avant d’ouvrir une session.',
+        ),
       );
       return;
     }
@@ -643,7 +708,11 @@ class _HomeContentState extends State<_HomeContent> {
 
     if (activeUsers.isEmpty) {
       _showForbidden(
-        'Aucun profil utilisateur actif n’est disponible pour cet espace de travail.',
+        context.tr(
+          'home.forbidden.no_active_user',
+          fallback:
+              'Aucun profil utilisateur actif n’est disponible pour cet espace de travail.',
+        ),
       );
       return;
     }
@@ -652,9 +721,16 @@ class _HomeContentState extends State<_HomeContent> {
       context: context,
       barrierDismissible: false,
       builder: (_) => _AdministrationAuthenticationDialog(
-        title: 'Déverrouiller OpenIRN',
-        intro:
-            'Veuillez choisir votre profil dans l’espace de travail ${authenticationData.tenantLabel}, puis saisir votre code personnel.',
+        title: context.tr(
+          'home.unlock.dialog.title',
+          fallback: 'Déverrouiller OpenIRN',
+        ),
+        intro: context.tr(
+          'home.unlock.dialog.intro',
+          fallback:
+              'Veuillez choisir votre profil dans l’espace de travail {workspace}, puis saisir votre code personnel.',
+          values: {'workspace': authenticationData.tenantLabel},
+        ),
         users: activeUsers,
         source: authenticationData.source,
         message: authenticationData.message,
@@ -691,7 +767,15 @@ class _HomeContentState extends State<_HomeContent> {
     }
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Session ouverte : ${selectedUser.displayName}')),
+      SnackBar(
+        content: Text(
+          context.tr(
+            'home.session.opened_user',
+            fallback: 'Session ouverte : {user}',
+            values: {'user': selectedUser.displayName},
+          ),
+        ),
+      ),
     );
     widget.onConfigurationChanged();
     setState(() {
@@ -701,6 +785,10 @@ class _HomeContentState extends State<_HomeContent> {
   }
 
   Future<void> _lockSession() async {
+    final lockedManuallyReason = context.tr(
+      'home.session.locked_manually',
+      fallback: 'Session verrouillée manuellement.',
+    );
     final sessionToken = AppSessionManager.instance.apiToken;
     final configuration = await _syncConfigurationRepository
         .loadConfiguration();
@@ -713,9 +801,7 @@ class _HomeContentState extends State<_HomeContent> {
       );
     }
 
-    AppSessionManager.instance.clearSession(
-      reason: 'Session verrouillée manuellement.',
-    );
+    AppSessionManager.instance.clearSession(reason: lockedManuallyReason);
     AppSyncCoordinator.instance.stop();
     if (!mounted) {
       return;
@@ -734,7 +820,11 @@ class _HomeContentState extends State<_HomeContent> {
     if (authenticationData.source !=
         _AdministrationAuthenticationSource.server) {
       _showForbidden(
-        'Authentification serveur obligatoire pour accéder à l’administration.',
+        context.tr(
+          'home.forbidden.server_auth_required',
+          fallback:
+              'Authentification serveur obligatoire pour accéder à l’administration.',
+        ),
       );
       return false;
     }
@@ -769,9 +859,13 @@ class _HomeContentState extends State<_HomeContent> {
 
     if (result.mustChangePin) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Code initial accepté. Pensez à définir un code personnel dans l’administration.',
+            context.tr(
+              'home.pin.initial_accepted',
+              fallback:
+                  'Code initial accepté. Pensez à définir un code personnel dans l’administration.',
+            ),
           ),
         ),
       );
@@ -786,20 +880,26 @@ class _HomeContentState extends State<_HomeContent> {
     configuration ??= await _syncConfigurationRepository.loadConfiguration();
 
     if (widget.requiresTenantSelection) {
-      return const _AdministrationAuthenticationData(
+      return _AdministrationAuthenticationData(
         source: _AdministrationAuthenticationSource.localOnly,
-        message:
-            'Veuillez d’abord choisir un espace de travail avant d’ouvrir une session OpenIRN.',
-        users: <AppUser>[],
+        message: OpenIrnLocalizations.instance.tr(
+          'home.auth.choose_workspace_first',
+          fallback:
+              'Veuillez d’abord choisir un espace de travail avant d’ouvrir une session OpenIRN.',
+        ),
+        users: const <AppUser>[],
       );
     }
 
     if (widget.requiresDeviceEnrollment || !configuration.isConfigured) {
-      return const _AdministrationAuthenticationData(
+      return _AdministrationAuthenticationData(
         source: _AdministrationAuthenticationSource.localOnly,
-        message:
-            'Terminal non autorisé : veuillez autoriser ce terminal avant d’accéder aux fonctions protégées.',
-        users: <AppUser>[],
+        message: OpenIrnLocalizations.instance.tr(
+          'home.auth.device_not_authorized',
+          fallback:
+              'Terminal non autorisé : veuillez autoriser ce terminal avant d’accéder aux fonctions protégées.',
+        ),
+        users: const <AppUser>[],
       );
     }
 
@@ -813,8 +913,12 @@ class _HomeContentState extends State<_HomeContent> {
       if (centralUsers.hasUsers) {
         return _AdministrationAuthenticationData(
           source: _AdministrationAuthenticationSource.server,
-          message:
-              '${centralUsers.message} Veuillez sélectionner votre identité puis saisir votre code personnel.',
+          message: OpenIrnLocalizations.instance.tr(
+            'home.auth.server_users_message',
+            fallback:
+                '{message} Veuillez sélectionner votre identité puis saisir votre code personnel.',
+            values: {'message': centralUsers.message},
+          ),
           users: centralUsers.users,
           apiBaseUrl: configuration.apiBaseUrl,
           tenantId: centralUsers.tenantId.trim().isNotEmpty
@@ -830,17 +934,24 @@ class _HomeContentState extends State<_HomeContent> {
 
       return _AdministrationAuthenticationData(
         source: _AdministrationAuthenticationSource.localFallback,
-        message:
-            '${centralUsers.title} — authentification indisponible. Veuillez réessayer lorsque le serveur OpenIRN répond.',
+        message: OpenIrnLocalizations.instance.tr(
+          'home.auth.unavailable',
+          fallback:
+              '{title} — authentification indisponible. Veuillez réessayer lorsque le serveur OpenIRN répond.',
+          values: {'title': centralUsers.title},
+        ),
         users: const <AppUser>[],
       );
     }
 
-    return const _AdministrationAuthenticationData(
+    return _AdministrationAuthenticationData(
       source: _AdministrationAuthenticationSource.localOnly,
-      message:
-          'Terminal non autorisé : veuillez autoriser ce terminal avant d’accéder aux fonctions protégées.',
-      users: <AppUser>[],
+      message: OpenIrnLocalizations.instance.tr(
+        'home.auth.device_not_authorized',
+        fallback:
+            'Terminal non autorisé : veuillez autoriser ce terminal avant d’accéder aux fonctions protégées.',
+      ),
+      users: const <AppUser>[],
     );
   }
 
@@ -853,11 +964,25 @@ class _HomeContentState extends State<_HomeContent> {
         final isConfigured = configuration?.isConfigured ?? false;
         final currentTenantName = _currentTenantName(configuration);
         final currentTenantSentence = currentTenantName.isEmpty
-            ? 'Espace actuel : espace sélectionné.'
-            : 'Espace actuel : « $currentTenantName ».';
+            ? context.tr(
+                'home.workspace.current_selected',
+                fallback: 'Espace actuel : espace sélectionné.',
+              )
+            : context.tr(
+                'home.workspace.current_named',
+                fallback: 'Espace actuel : « {workspace} ».',
+                values: {'workspace': currentTenantName},
+              );
         final currentTenantPhrase = currentTenantName.isEmpty
-            ? 'l’espace de travail sélectionné'
-            : 'l’espace de travail « $currentTenantName »';
+            ? context.tr(
+                'home.workspace.selected_phrase',
+                fallback: 'l’espace de travail sélectionné',
+              )
+            : context.tr(
+                'home.workspace.named_phrase',
+                fallback: 'l’espace de travail « {workspace} »',
+                values: {'workspace': currentTenantName},
+              );
 
         return Center(
           child: ConstrainedBox(
@@ -879,8 +1004,12 @@ class _HomeContentState extends State<_HomeContent> {
                   _HomeActionCard(
                     icon: Icons.phonelink_lock_outlined,
                     title: 'Autoriser ce terminal',
-                    subtitle:
-                        'Autoriser ce poste dans $currentTenantPhrase avant d’accéder aux campagnes et à l’administration.',
+                    subtitle: context.tr(
+                      'home.action.enroll.subtitle',
+                      fallback:
+                          'Autoriser ce poste dans {workspace} avant d’accéder aux campagnes et à l’administration.',
+                      values: {'workspace': currentTenantPhrase},
+                    ),
                     buttonLabel: 'Appairer',
                     onPressed: _openDeviceEnrollment,
                   ),
@@ -907,8 +1036,12 @@ class _HomeContentState extends State<_HomeContent> {
                   _HomeActionCard(
                     icon: Icons.swap_horiz_outlined,
                     title: 'Changer d’espace de travail',
-                    subtitle:
-                        '$currentTenantSentence Revenir au choix de l’espace de travail OpenIRN avant d’ouvrir une session.',
+                    subtitle: context.tr(
+                      'home.action.change_workspace.subtitle',
+                      fallback:
+                          '{current} Revenir au choix de l’espace de travail OpenIRN avant d’ouvrir une session.',
+                      values: {'current': currentTenantSentence},
+                    ),
                     buttonLabel: 'Changer',
                     onPressed: _chooseTenant,
                   ),
@@ -1000,11 +1133,27 @@ class _SessionStatusCard extends StatelessWidget {
     final displayName = user.displayName.trim();
     final effectiveTenantLabel = tenantLabel.trim();
     final expirationText = expiresAt == null
-        ? 'Expiration serveur non communiquée'
-        : 'Expire à ${_formatSessionExpiration(expiresAt!.toLocal())}';
+        ? context.tr(
+            'home.session.expiration_unknown',
+            fallback: 'Expiration serveur non communiquée',
+          )
+        : context.tr(
+            'home.session.expires_at',
+            fallback: 'Expire à {time}',
+            values: {'time': _formatSessionExpiration(expiresAt!.toLocal())},
+          );
     final idleText = idleExpiresAt == null
-        ? 'Verrouillage automatique après inactivité'
-        : 'Verrouillage auto à ${_formatSessionExpiration(idleExpiresAt!.toLocal())} en l’absence d’activité';
+        ? context.tr(
+            'home.session.idle_unknown',
+            fallback: 'Verrouillage automatique après inactivité',
+          )
+        : context.tr(
+            'home.session.idle_expires_at',
+            fallback: 'Verrouillage auto à {time} en l’absence d’activité',
+            values: {
+              'time': _formatSessionExpiration(idleExpiresAt!.toLocal()),
+            },
+          );
     final isNarrow = MediaQuery.sizeOf(context).width < 680;
 
     final content = Row(
@@ -1020,13 +1169,20 @@ class _SessionStatusCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Session ouverte', style: theme.textTheme.titleLarge),
+              Text(
+                context.tr('home.session.open', fallback: 'Session ouverte'),
+                style: theme.textTheme.titleLarge,
+              ),
               const SizedBox(height: 6),
               Text('$displayName — ${user.role.label}'),
               if (effectiveTenantLabel.isNotEmpty) ...[
                 const SizedBox(height: 4),
                 Text(
-                  'Espace de travail : $effectiveTenantLabel',
+                  context.tr(
+                    'home.session.workspace',
+                    fallback: 'Espace de travail : {workspace}',
+                    values: {'workspace': effectiveTenantLabel},
+                  ),
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w600,
@@ -1067,7 +1223,9 @@ class _SessionStatusCard extends StatelessWidget {
                       onLock();
                     },
                     icon: const Icon(Icons.lock_outline),
-                    label: const Text('Verrouiller'),
+                    label: Text(
+                      context.tr('home.session.lock', fallback: 'Verrouiller'),
+                    ),
                   ),
                 ],
               )
@@ -1080,7 +1238,9 @@ class _SessionStatusCard extends StatelessWidget {
                       onLock();
                     },
                     icon: const Icon(Icons.lock_outline),
-                    label: const Text('Verrouiller'),
+                    label: Text(
+                      context.tr('home.session.lock', fallback: 'Verrouiller'),
+                    ),
                   ),
                 ],
               ),
@@ -1106,8 +1266,12 @@ class _ServerReferentialWarningCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final effectiveMessage = message == null || message!.trim().isEmpty
-        ? 'Aucun référentiel officiel actif n’est disponible côté serveur.'
-        : message!.trim();
+        ? context.tr(
+            'home.server_referential.default_error',
+            fallback:
+                'Aucun référentiel officiel actif n’est disponible côté serveur.',
+          )
+        : context.trText(message!.trim());
 
     return Card(
       child: Padding(
@@ -1125,12 +1289,19 @@ class _ServerReferentialWarningCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Référentiel serveur non chargé',
+                        context.tr(
+                          'home.server_referential.title',
+                          fallback: 'Référentiel serveur non chargé',
+                        ),
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                       const SizedBox(height: 6),
-                      const Text(
-                        'OpenIRN ne charge plus le référentiel embarqué dans l’application. Installe ou recharge le référentiel officiel aDRI depuis le serveur.',
+                      Text(
+                        context.tr(
+                          'home.server_referential.description',
+                          fallback:
+                              'OpenIRN ne charge plus le référentiel embarqué dans l’application. Installe ou recharge le référentiel officiel aDRI depuis le serveur.',
+                        ),
                       ),
                     ],
                   ),
@@ -1145,7 +1316,12 @@ class _ServerReferentialWarningCard extends StatelessWidget {
               child: FilledButton.icon(
                 onPressed: onOpenAdministration,
                 icon: const Icon(Icons.admin_panel_settings_outlined),
-                label: const Text('Ouvrir l’administration'),
+                label: Text(
+                  context.tr(
+                    'home.server_referential.open_admin',
+                    fallback: 'Ouvrir l’administration',
+                  ),
+                ),
               ),
             ),
           ],
@@ -1182,9 +1358,12 @@ class _HomeActionCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: Theme.of(context).textTheme.titleLarge),
+              Text(
+                context.trText(title),
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
               const SizedBox(height: 6),
-              Text(subtitle),
+              Text(context.trText(subtitle)),
             ],
           ),
         ),
@@ -1203,7 +1382,7 @@ class _HomeActionCard extends StatelessWidget {
                   FilledButton.icon(
                     onPressed: onPressed,
                     icon: const Icon(Icons.arrow_forward),
-                    label: Text(buttonLabel),
+                    label: Text(context.trText(buttonLabel)),
                   ),
                 ],
               )
@@ -1214,7 +1393,7 @@ class _HomeActionCard extends StatelessWidget {
                   FilledButton.icon(
                     onPressed: onPressed,
                     icon: const Icon(Icons.arrow_forward),
-                    label: Text(buttonLabel),
+                    label: Text(context.trText(buttonLabel)),
                   ),
                 ],
               ),
@@ -1238,7 +1417,12 @@ class _TenantSelectionDialog extends StatelessWidget {
     final dialogMaxHeight = MediaQuery.sizeOf(context).height * 0.62;
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
-      title: const Text('Choisir l’espace de travail'),
+      title: Text(
+        context.tr(
+          'home.tenant_dialog.title',
+          fallback: 'Choisir l’espace de travail',
+        ),
+      ),
       content: ResponsiveDialogContent(
         maxWidth: 720,
         child: ConstrainedBox(
@@ -1248,7 +1432,11 @@ class _TenantSelectionDialog extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Veuillez d’abord sélectionner l’espace de travail. OpenIRN affichera ensuite uniquement les utilisateurs rattachés à cet espace.',
+                context.tr(
+                  'home.tenant_dialog.intro',
+                  fallback:
+                      'Veuillez d’abord sélectionner l’espace de travail. OpenIRN affichera ensuite uniquement les utilisateurs rattachés à cet espace.',
+                ),
                 style: theme.textTheme.bodyMedium,
               ),
               const SizedBox(height: 14),
@@ -1271,10 +1459,25 @@ class _TenantSelectionDialog extends StatelessWidget {
                         ),
                         title: Text(tenant.label),
                         subtitle: Text(
-                          '${tenant.activeUserCount} utilisateur(s) actif(s) · ${tenant.campaignCount} campagne(s)',
+                          context.tr(
+                            'home.tenant_dialog.summary',
+                            fallback:
+                                '{users} utilisateur(s) actif(s) · {campaigns} campagne(s)',
+                            values: {
+                              'users': tenant.activeUserCount,
+                              'campaigns': tenant.campaignCount,
+                            },
+                          ),
                         ),
                         trailing: selected
-                            ? const Chip(label: Text('Actuel'))
+                            ? Chip(
+                                label: Text(
+                                  context.tr(
+                                    'home.tenant_dialog.current',
+                                    fallback: 'Actuel',
+                                  ),
+                                ),
+                              )
                             : const Icon(Icons.arrow_forward),
                         onTap: () => Navigator.of(context).pop(tenant),
                       ),
@@ -1289,7 +1492,7 @@ class _TenantSelectionDialog extends StatelessWidget {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Annuler'),
+          child: Text(context.tr('common.cancel', fallback: 'Annuler')),
         ),
       ],
     );
@@ -1394,7 +1597,7 @@ class _AdministrationAuthenticationDialog extends StatelessWidget {
 
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
-      title: Text(title),
+      title: Text(context.trText(title)),
       content: ResponsiveDialogContent(
         maxWidth: 760,
         child: ConstrainedBox(
@@ -1403,7 +1606,7 @@ class _AdministrationAuthenticationDialog extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(intro, style: theme.textTheme.bodyMedium),
+              Text(context.trText(intro), style: theme.textTheme.bodyMedium),
               const SizedBox(height: 10),
               Wrap(
                 spacing: 8,
@@ -1411,13 +1614,21 @@ class _AdministrationAuthenticationDialog extends StatelessWidget {
                 children: [
                   Chip(
                     avatar: Icon(sourceData.sourceIcon, size: 18),
-                    label: Text(sourceData.sourceLabel),
+                    label: Text(context.trText(sourceData.sourceLabel)),
                   ),
-                  Chip(label: Text('${users.length} profil(s) autorisé(s)')),
+                  Chip(
+                    label: Text(
+                      context.tr(
+                        'home.auth_dialog.authorized_profiles',
+                        fallback: '{count} profil(s) autorisé(s)',
+                        values: {'count': users.length},
+                      ),
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 8),
-              Text(message, style: theme.textTheme.bodySmall),
+              Text(context.trText(message), style: theme.textTheme.bodySmall),
               const SizedBox(height: 14),
               Flexible(
                 fit: FlexFit.loose,
@@ -1451,7 +1662,7 @@ class _AdministrationAuthenticationDialog extends StatelessWidget {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Annuler'),
+          child: Text(context.tr('common.cancel', fallback: 'Annuler')),
         ),
       ],
     );
@@ -1536,7 +1747,10 @@ class _AdministrationPinAuthenticationDialogState
     final pin = _pinController.text.trim();
     if (pin.isEmpty) {
       setState(() {
-        _errorText = 'Veuillez saisir votre code personnel.';
+        _errorText = context.tr(
+          'home.pin.required',
+          fallback: 'Veuillez saisir votre code personnel.',
+        );
       });
       return;
     }
@@ -1552,7 +1766,12 @@ class _AdministrationPinAuthenticationDialogState
 
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
-      title: const Text('Authentification utilisateur'),
+      title: Text(
+        context.tr(
+          'home.pin_dialog.title',
+          fallback: 'Authentification utilisateur',
+        ),
+      ),
       content: ResponsiveDialogContent(
         maxWidth: 520,
         child: SingleChildScrollView(
@@ -1561,7 +1780,12 @@ class _AdministrationPinAuthenticationDialogState
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                displayName.isEmpty ? 'Utilisateur sans nom' : displayName,
+                displayName.isEmpty
+                    ? context.tr(
+                        'home.pin_dialog.unnamed_user',
+                        fallback: 'Utilisateur sans nom',
+                      )
+                    : displayName,
                 style: Theme.of(context).textTheme.titleMedium,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
@@ -1590,9 +1814,15 @@ class _AdministrationPinAuthenticationDialogState
                   smartQuotesType: SmartQuotesType.disabled,
                   textInputAction: TextInputAction.done,
                   decoration: InputDecoration(
-                    labelText: 'Code personnel',
-                    helperText:
-                        'Code initial serveur : 0000 si aucun code n’a encore été défini.',
+                    labelText: context.tr(
+                      'home.pin.label',
+                      fallback: 'Code personnel',
+                    ),
+                    helperText: context.tr(
+                      'home.pin.initial_code_help',
+                      fallback:
+                          'Code initial serveur : 0000 si aucun code n’a encore été défini.',
+                    ),
                     errorText: _errorText,
                     prefixIcon: const Icon(Icons.lock_outline),
                   ),
@@ -1612,13 +1842,13 @@ class _AdministrationPinAuthenticationDialogState
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Annuler'),
+          child: Text(context.tr('common.cancel', fallback: 'Annuler')),
         ),
         if (!useSecureMobilePinPad)
           FilledButton.icon(
             onPressed: _submit,
             icon: const Icon(Icons.login_outlined),
-            label: const Text('Ouvrir'),
+            label: Text(context.tr('common.open', fallback: 'Ouvrir')),
           ),
       ],
     );
@@ -1647,15 +1877,30 @@ class _AdministrationMobilePinPad extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final displayedDots = pinLength.clamp(0, 8);
-    final semanticDigits = pinLength > 1 ? 'chiffres saisis' : 'chiffre saisi';
+    final semanticDigits = pinLength > 1
+        ? context.tr(
+            'home.pin.semantic_digits_plural',
+            fallback: 'chiffres saisis',
+          )
+        : context.tr(
+            'home.pin.semantic_digits_singular',
+            fallback: 'chiffre saisi',
+          );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('Code personnel', style: theme.textTheme.labelLarge),
+        Text(
+          context.tr('home.pin.label', fallback: 'Code personnel'),
+          style: theme.textTheme.labelLarge,
+        ),
         const SizedBox(height: 8),
         Semantics(
-          label: 'Code personnel, $pinLength $semanticDigits',
+          label: context.tr(
+            'home.pin.semantic_label',
+            fallback: 'Code personnel, {count} {digits}',
+            values: {'count': pinLength, 'digits': semanticDigits},
+          ),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             decoration: BoxDecoration(
@@ -1695,7 +1940,11 @@ class _AdministrationMobilePinPad extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(
-          'Code initial serveur : 0000 si aucun code n’a encore été défini.',
+          context.tr(
+            'home.pin.initial_code_help',
+            fallback:
+                'Code initial serveur : 0000 si aucun code n’a encore été défini.',
+          ),
           style: theme.textTheme.bodySmall?.copyWith(
             color: colorScheme.onSurfaceVariant,
           ),
@@ -1725,7 +1974,7 @@ class _AdministrationMobilePinPad extends StatelessWidget {
               ),
             TextButton(
               onPressed: pinLength == 0 ? null : onClear,
-              child: const Text('Effacer'),
+              child: Text(context.tr('common.clear', fallback: 'Effacer')),
             ),
             OutlinedButton(
               onPressed: () => onDigit('0'),
@@ -1733,7 +1982,10 @@ class _AdministrationMobilePinPad extends StatelessWidget {
             ),
             IconButton.outlined(
               onPressed: pinLength == 0 ? null : onBackspace,
-              tooltip: 'Supprimer le dernier chiffre',
+              tooltip: context.tr(
+                'home.pin.backspace',
+                fallback: 'Supprimer le dernier chiffre',
+              ),
               icon: const Icon(Icons.backspace_outlined),
             ),
           ],
@@ -1742,7 +1994,7 @@ class _AdministrationMobilePinPad extends StatelessWidget {
         FilledButton.icon(
           onPressed: onSubmit,
           icon: const Icon(Icons.login_outlined),
-          label: const Text('Ouvrir'),
+          label: Text(context.tr('common.open', fallback: 'Ouvrir')),
         ),
       ],
     );
@@ -1825,13 +2077,22 @@ class _ReferentialContent extends StatelessWidget {
             TextField(
               controller: searchController,
               decoration: InputDecoration(
-                labelText: 'Rechercher dans le référentiel',
-                hintText: 'Ex. RES-6, gouvernance, actif, portabilité...',
+                labelText: context.tr(
+                  'referential_catalog.search.label',
+                  fallback: 'Rechercher dans le référentiel',
+                ),
+                hintText: context.tr(
+                  'referential_catalog.search.hint',
+                  fallback: 'Ex. RES-6, gouvernance, actif, portabilité...',
+                ),
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: query.trim().isEmpty
                     ? null
                     : IconButton(
-                        tooltip: 'Effacer',
+                        tooltip: context.tr(
+                          'common.clear',
+                          fallback: 'Effacer',
+                        ),
                         onPressed: searchController.clear,
                         icon: const Icon(Icons.close),
                       ),
@@ -1879,12 +2140,31 @@ class _HeaderCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              '${referential.pillars.length} piliers · ${referential.criteria.length} critères',
+              context.tr(
+                'referential_catalog.header.counts',
+                fallback: '{pillars} piliers · {criteria} critères',
+                values: {
+                  'pillars': referential.pillars.length,
+                  'criteria': referential.criteria.length,
+                },
+              ),
             ),
             const SizedBox(height: 8),
-            SelectableText('Source : ${referential.sourceUrl}'),
+            SelectableText(
+              context.tr(
+                'referential_catalog.header.source',
+                fallback: 'Source : {source}',
+                values: {'source': referential.sourceUrl},
+              ),
+            ),
             const SizedBox(height: 4),
-            Text('Licence : ${referential.license}'),
+            Text(
+              context.tr(
+                'referential_catalog.header.license',
+                fallback: 'Licence : {license}',
+                values: {'license': referential.license},
+              ),
+            ),
           ],
         ),
       ),
@@ -1907,7 +2187,9 @@ class _ScopeChips extends StatelessWidget {
       runSpacing: 8,
       children: [
         for (final entry in entries)
-          Chip(label: Text('${entry.key.label} : ${entry.value}')),
+          Chip(
+            label: Text('${context.trText(entry.key.label)} : ${entry.value}'),
+          ),
       ],
     );
   }
@@ -1931,14 +2213,26 @@ class _PillarExpansionTile extends StatelessWidget {
         initiallyExpanded: initiallyExpanded && criteria.isNotEmpty,
         title: Text('${pillar.code} — ${pillar.label}'),
         subtitle: Text(
-          '${criteria.length} critère${criteria.length > 1 ? 's' : ''}',
+          context.tr(
+            criteria.length > 1
+                ? 'referential_catalog.pillar.criteria_plural'
+                : 'referential_catalog.pillar.criteria_singular',
+            fallback: criteria.length > 1
+                ? '{count} critères'
+                : '{count} critère',
+            values: {'count': criteria.length},
+          ),
         ),
         children: [
           if (criteria.isEmpty)
-            const ListTile(
-              leading: Icon(Icons.info_outline),
+            ListTile(
+              leading: const Icon(Icons.info_outline),
               title: Text(
-                'Aucun critère ne correspond à la recherche dans ce pilier.',
+                context.tr(
+                  'referential_catalog.pillar.no_match',
+                  fallback:
+                      'Aucun critère ne correspond à la recherche dans ce pilier.',
+                ),
               ),
             ),
           for (final criterion in criteria)
@@ -1948,7 +2242,14 @@ class _PillarExpansionTile extends StatelessWidget {
               ),
               title: Text('${criterion.code} — ${criterion.label}'),
               subtitle: Text(
-                'Portée : ${criterion.scope.label} · Réponse : ${criterion.answerMode}',
+                context.tr(
+                  'referential_catalog.criterion.subtitle',
+                  fallback: 'Portée : {scope} · Réponse : {answerMode}',
+                  values: {
+                    'scope': context.trText(criterion.scope.label),
+                    'answerMode': criterion.answerMode,
+                  },
+                ),
               ),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => Navigator.of(context).push(
@@ -1982,15 +2283,22 @@ class _ErrorState extends StatelessWidget {
             const Icon(Icons.error_outline, size: 48),
             const SizedBox(height: 16),
             Text(
-              'Impossible de charger le référentiel',
+              context.tr(
+                'referential_catalog.error.title',
+                fallback: 'Impossible de charger le référentiel',
+              ),
               style: Theme.of(context).textTheme.titleLarge,
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
             SelectableText(error, textAlign: TextAlign.center),
             const SizedBox(height: 16),
-            const Text(
-              'Veuillez vérifier que le terminal est autorisé et que le référentiel officiel est disponible.',
+            Text(
+              context.tr(
+                'referential_catalog.error.help',
+                fallback:
+                    'Veuillez vérifier que le terminal est autorisé et que le référentiel officiel est disponible.',
+              ),
               textAlign: TextAlign.center,
             ),
           ],

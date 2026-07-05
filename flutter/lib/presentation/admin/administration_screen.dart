@@ -6,6 +6,7 @@ import '../../domain/services/access_policy_service.dart';
 import '../campaigns/campaign_management_screen.dart';
 import '../common/change_access_code_card.dart';
 import '../common/openirn_app_bar.dart';
+import '../../l10n/openirn_localizations.dart';
 import '../users/user_list_screen.dart';
 import 'asset_inventory_management_screen.dart';
 import 'authorized_devices_screen.dart';
@@ -34,7 +35,7 @@ class AdministrationScreen extends StatelessWidget {
   void _showForbidden(BuildContext context, String message) {
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ).showSnackBar(SnackBar(content: Text(context.trText(message))));
   }
 
   Future<void> _openCampaignManagement(BuildContext context) async {
@@ -327,18 +328,22 @@ class AdministrationScreen extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Session administration',
+                              context.trText('Session administration'),
                               style: Theme.of(context).textTheme.titleLarge,
                             ),
                             const SizedBox(height: 6),
                             Text(
-                              '$authenticatedName — ${activeUser.role.label}',
+                              '$authenticatedName — ${context.trText(activeUser.role.label)}',
                             ),
                             const SizedBox(height: 6),
                             Text(
                               activeUser.role == AppUserRole.administrator
-                                  ? 'Matrice des permissions : administration complète.'
-                                  : 'Matrice des permissions : périmètre Pilote IRN.',
+                                  ? context.trText(
+                                      'Matrice des permissions : administration complète.',
+                                    )
+                                  : context.trText(
+                                      'Matrice des permissions : périmètre Pilote IRN.',
+                                    ),
                             ),
                           ],
                         ),
@@ -368,11 +373,13 @@ class _NoAdministrationPermissionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Card(
+    return Card(
       child: Padding(
-        padding: EdgeInsets.all(18),
+        padding: const EdgeInsets.all(18),
         child: Text(
-          'Aucune opération d’administration n’est autorisée pour ce profil.',
+          context.trText(
+            'Aucune opération d’administration n’est autorisée pour ce profil.',
+          ),
         ),
       ),
     );
@@ -406,9 +413,12 @@ class _AdministrationActionCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: Theme.of(context).textTheme.titleLarge),
+              Text(
+                context.trText(title),
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
               const SizedBox(height: 6),
-              Text(subtitle),
+              Text(context.trText(subtitle)),
             ],
           ),
         ),
@@ -427,7 +437,7 @@ class _AdministrationActionCard extends StatelessWidget {
                   FilledButton.icon(
                     onPressed: onPressed,
                     icon: const Icon(Icons.arrow_forward),
-                    label: Text(buttonLabel),
+                    label: Text(context.trText(buttonLabel)),
                   ),
                 ],
               )
@@ -438,7 +448,7 @@ class _AdministrationActionCard extends StatelessWidget {
                   FilledButton.icon(
                     onPressed: onPressed,
                     icon: const Icon(Icons.arrow_forward),
-                    label: Text(buttonLabel),
+                    label: Text(context.trText(buttonLabel)),
                   ),
                 ],
               ),
