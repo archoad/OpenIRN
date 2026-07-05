@@ -130,21 +130,22 @@ class IrnScoringMethod {
   });
 
   const IrnScoringMethod.openIrnRnr()
-    : method =
-          'Moyenne des niveaux IRN : NR=10, Intention=25, Moyen=50, Résultat=95',
-      methodLabel = 'Score IRN',
-      methodStatus = 'irn_scale_unweighted_v1',
+    : method = 'Maturité IRN : moyenne géométrique pondérée des actifs du SI',
+      methodLabel = 'Maturité IRN',
+      methodStatus = 'irn_asset_maturity_weighted_geometric_v1',
       notAnsweredPolicy =
           'not_answered_excluded_nc_excluded_from_score_included_in_completion',
-      criteriaWeightPolicy = 'uniform_per_scored_criterion',
-      globalAggregationPolicy = 'average_numeric_scored_criteria',
-      weightedOfficialMethodImplemented = false,
+      criteriaWeightPolicy =
+          'pillar_geometric_mean_then_asset_criticality_weighting',
+      globalAggregationPolicy = 'weighted_geometric_mean_by_asset_criticality',
+      weightedOfficialMethodImplemented = true,
       officialWeightedMethodStatus =
-          'implemented_public_level_scale_without_additional_weighting',
+          'implemented_asset_maturity_weighted_geometric_mean',
       disclaimer =
-          'OpenIRN applique la grille de notation IRN : N.C. exclu du score, '
-          'Non résilient = 10/100, Intention = 25/100, Moyen = 50/100, '
-          'Résultat = 95/100. Aucune pondération additionnelle n’est appliquée.';
+          'OpenIRN applique la formule de maturité IRN : la note de chaque actif '
+          'est calculée par moyenne géométrique des scores de piliers RES, puis '
+          'la note du SI est calculée par moyenne géométrique pondérée par la '
+          'criticité des actifs. N.C. est exclu du score et inclus dans la complétude.';
 
   factory IrnScoringMethod.fromJson(Map<String, dynamic> json) {
     const fallback = IrnScoringMethod.openIrnRnr();

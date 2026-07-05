@@ -6,6 +6,7 @@ import 'package:pdf/widgets.dart' as pw;
 import '../models/irn_assessment.dart';
 import '../models/irn_referential.dart';
 import '../models/local_campaign.dart';
+import 'official_rnr_scoring_service.dart';
 
 class AssessmentPdfExportService {
   const AssessmentPdfExportService();
@@ -14,6 +15,7 @@ class AssessmentPdfExportService {
     required LocalCampaign campaign,
     required IrnReferential referential,
     required IrnScoreSummary globalSummary,
+    IrnSystemMaturitySummary? maturitySummary,
     required Map<IrnPillar, IrnScoreSummary> pillarSummaries,
     required Map<CriterionScope, IrnScoreSummary> scopeSummaries,
     required List<MapEntry<IrnPillar, IrnScoreSummary>> strongestPillars,
@@ -42,7 +44,7 @@ class AssessmentPdfExportService {
         build: (context) => [
           _documentHeader(campaign, referential, generatedAtUtc),
           pw.SizedBox(height: 14),
-          _globalSummaryBlock(globalSummary),
+          _globalSummaryBlock(globalSummary, maturitySummary),
           pw.SizedBox(height: 14),
           _sectionTitle('Indicateurs IRN'),
           pw.SizedBox(height: 6),
@@ -96,7 +98,13 @@ class AssessmentPdfExportService {
     );
   }
 
-  pw.Widget _globalSummaryBlock(IrnScoreSummary summary) {
+  pw.Widget _globalSummaryBlock(
+    IrnScoreSummary summary,
+    IrnSystemMaturitySummary? maturitySummary,
+  ) {
+    final maturity = maturitySummary;
+    final scoreLabel =
+        maturity?.formattedMaturityScore ?? summary.formattedOpenIrnRnrScore;
     return pw.Container(
       padding: const pw.EdgeInsets.all(14),
       decoration: _panelDecoration,
@@ -107,7 +115,10 @@ class AssessmentPdfExportService {
           pw.SizedBox(height: 8),
           pw.Row(
             children: [
-              _metricBox('Score IRN', summary.formattedOpenIrnRnrScore),
+              _metricBox(
+                maturity == null ? 'Score IRN' : 'Maturite SI',
+                scoreLabel,
+              ),
               pw.SizedBox(width: 8),
               _metricBox(
                 'Completude',
@@ -131,6 +142,12 @@ class AssessmentPdfExportService {
               _chip('Moyen : ${summary.mediumCriteria}'),
               _chip('Resultat : ${summary.resultCriteria}'),
               _chip('Non renseignes : ${summary.notAnsweredCriteria}'),
+              if (maturity != null)
+                _chip(
+                  'Actifs notes : ${maturity.scoredAssetCount}/${maturity.totalAssetCount}',
+                ),
+              if (maturity != null)
+                _chip('Poids criticite : ${maturity.maturityWeightTotal}'),
             ],
           ),
         ],
@@ -330,7 +347,7 @@ class AssessmentPdfExportService {
           pw.Text('Note methodologique', style: _labelStyle),
           pw.SizedBox(height: 4),
           pw.Text(
-            'Score OpenIRN selon la grille IRN : NR=10, Intention=25, Moyen=50, Resultat=95. Les criteres N.C. sont exclus du score et inclus dans la completude.',
+            'Maturite IRN : pour chaque actif, moyenne geometrique des scores de piliers RES ; pour le SI, moyenne geometrique ponderee par la criticite des actifs. N.C. est exclu du score et inclus dans la completude.',
             style: _smallTextStyle,
           ),
           if (referential.scoring.disclaimer.trim().isNotEmpty) ...[

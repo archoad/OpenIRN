@@ -1,19 +1,20 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openirn/domain/models/irn_assessment.dart';
 import 'package:openirn/domain/models/irn_referential.dart';
+import 'package:openirn/domain/models/local_campaign.dart';
 import 'package:openirn/domain/services/official_rnr_scoring_service.dart';
 
 void main() {
-  test('methodMetadata explicite que le score IRN n’est pas pondéré', () {
+  test('methodMetadata explicite la maturité IRN pondérée par actifs', () {
     expect(
       OfficialRnrScoringService.methodMetadata.methodStatus,
-      'irn_scale_unweighted_v1',
+      'irn_asset_maturity_weighted_geometric_v1',
     );
     expect(
       OfficialRnrScoringService
           .methodMetadata
           .weightedOfficialMethodImplemented,
-      isFalse,
+      isTrue,
     );
   });
 
@@ -80,6 +81,67 @@ void main() {
     expect(summaries[CriterionScope.organization]?.officialScore, 52.5);
     expect(summaries[CriterionScope.asset]?.officialScore, 95);
   });
+
+  test(
+    'computeSystemMaturity applique la moyenne géométrique pondérée par la criticité',
+    () {
+      final referential = _sampleReferential();
+      const service = OfficialRnrScoringService();
+      final campaign = LocalCampaign(
+        id: 'campaign-asset-scope',
+        referentialId: 'adri-irn-v1.1',
+        name: 'Campagne SI',
+        information: CampaignInformation(
+          systemName: 'SI critique',
+          informationSystemId: 'system-1',
+          assets: [
+            CampaignInformationAsset(
+              id: 'asset-vital',
+              name: 'Actif vital',
+              criticality: '4',
+            ),
+            CampaignInformationAsset(
+              id: 'asset-standard',
+              name: 'Actif standard',
+              criticality: '1',
+            ),
+          ],
+        ),
+        createdAt: DateTime.utc(2026),
+        updatedAt: DateTime.utc(2026),
+        statusUpdatedAt: DateTime.utc(2026),
+      );
+
+      final maturity = service.computeSystemMaturity(
+        referential,
+        campaign,
+        const <String, CriterionAnswer>{
+          'asset:asset-vital:criterion:RES-1.1': CriterionAnswer(
+            criterionId: 'asset:asset-vital:criterion:RES-1.1',
+            answer: IrnAnswer.result,
+          ),
+          'asset:asset-vital:criterion:RES-2.1': CriterionAnswer(
+            criterionId: 'asset:asset-vital:criterion:RES-2.1',
+            answer: IrnAnswer.result,
+          ),
+          'asset:asset-standard:criterion:RES-1.1': CriterionAnswer(
+            criterionId: 'asset:asset-standard:criterion:RES-1.1',
+            answer: IrnAnswer.nonResilient,
+          ),
+          'asset:asset-standard:criterion:RES-2.1': CriterionAnswer(
+            criterionId: 'asset:asset-standard:criterion:RES-2.1',
+            answer: IrnAnswer.nonResilient,
+          ),
+        },
+      );
+
+      expect(maturity.scoredAssetCount, 2);
+      expect(maturity.maturityWeightTotal, 5);
+      expect(maturity.assetScores[0].maturityScore, closeTo(95, 0.001));
+      expect(maturity.assetScores[1].maturityScore, closeTo(10, 0.001));
+      expect(maturity.maturityScore, closeTo(60.56, 0.02));
+    },
+  );
 }
 
 IrnReferential _sampleReferential() {

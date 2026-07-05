@@ -2381,18 +2381,19 @@ ADRI_EXPECTED_HEADERS = {
 }
 
 OPENIRN_RNR_SCORING_METADATA = {
-    "method": "Moyenne des niveaux IRN : NR=10, Intention=25, Moyen=50, Résultat=95",
-    "methodLabel": "Score OpenIRN",
-    "methodStatus": "irn_scale_unweighted_v1",
+    "method": "Maturité IRN : moyenne géométrique pondérée des actifs du SI",
+    "methodLabel": "Maturité IRN",
+    "methodStatus": "irn_asset_maturity_weighted_geometric_v1",
     "notAnsweredPolicy": "not_answered_excluded_nc_excluded_from_score_included_in_completion",
-    "criteriaWeightPolicy": "uniform_per_scored_criterion",
-    "globalAggregationPolicy": "average_numeric_scored_criteria",
-    "weightedOfficialMethodImplemented": False,
-    "officialWeightedMethodStatus": "implemented_public_level_scale_without_additional_weighting",
+    "criteriaWeightPolicy": "pillar_geometric_mean_then_asset_criticality_weighting",
+    "globalAggregationPolicy": "weighted_geometric_mean_by_asset_criticality",
+    "weightedOfficialMethodImplemented": True,
+    "officialWeightedMethodStatus": "implemented_asset_maturity_weighted_geometric_mean",
     "disclaimer": (
-        "OpenIRN applique la grille de notation IRN : N.C. exclu du score, "
-        "Non résilient = 10/100, Intention = 25/100, Moyen = 50/100, "
-        "Résultat = 95/100. Aucune pondération additionnelle n’est appliquée."
+        "OpenIRN applique la formule de maturité IRN : la note de chaque actif "
+        "est calculée par moyenne géométrique des scores de piliers RES, puis "
+        "la note du SI est calculée par moyenne géométrique pondérée par la "
+        "criticité des actifs. N.C. est exclu du score et inclus dans la complétude."
     ),
 }
 
@@ -6170,6 +6171,23 @@ def _inventory_text(value: Any, limit: int = 255) -> str:
     return str(value or "").strip()[: max(1, limit)]
 
 
+def _inventory_asset_criticality(value: Any, *, default: str = "") -> str:
+    text = str(value or "").strip()
+    if not text:
+        return default
+    allowed = {"1", "2", "3", "4"}
+    if text in allowed:
+        return text
+    # Accepte les saisies Excel usuelles : "1/4", "1 — faible", "Criticité 1".
+    prefix = re.match(r"^\s*([1-4])(?:\s|/|$|—|-)", text)
+    if prefix:
+        return prefix.group(1)
+    numbers = re.findall(r"\d+", text)
+    if len(numbers) == 1 and numbers[0] in allowed:
+        return numbers[0]
+    raise HTTPException(status_code=400, detail="La criticité de l'actif doit être comprise entre 1 et 4")
+
+
 def _inventory_row_public(row: Any, *, kind: str) -> dict[str, Any]:
     if kind == "function":
         return {
@@ -6303,6 +6321,7 @@ def _inventory_to_excel_bytes(con: Any, tenant_id: str, system_id: str) -> bytes
     openpyxl = _load_openpyxl()
     from openpyxl.styles import Font, PatternFill, Protection
     from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.datavalidation import DataValidation
 
     function, system, assets = _inventory_system_export_context(con, tenant_id, system_id)
 
@@ -6318,15 +6337,15 @@ def _inventory_to_excel_bytes(con: Any, tenant_id: str, system_id: str) -> bytes
 
     # Une seule feuille métier, une ligne par actif. La ligne 1 contient les colonnes attendues à l'import.
     header_row = 1
-    headers = ["ID actif", "Nom actif", "Type actif", "Description actif"]
+    headers = ["ID actif", "Nom actif", "Type actif", "Criticité actif", "Description actif"]
     sheet.append(headers)
     for cell in sheet[header_row]:
         cell.font = Font(bold=True)
         cell.fill = header_fill
         cell.protection = locked
 
-    def append_asset_row(asset_id: str = "", name: str = "", asset_type: str = "", description: str = "") -> None:
-        sheet.append([asset_id, name, asset_type, description])
+    def append_asset_row(asset_id: str = "", name: str = "", asset_type: str = "", criticality: str = "", description: str = "") -> None:
+        sheet.append([asset_id, name, asset_type, criticality, description])
         row_index = sheet.max_row
         for col_index in range(1, len(headers) + 1):
             cell = sheet.cell(row=row_index, column=col_index)
@@ -6341,6 +6360,7 @@ def _inventory_to_excel_bytes(con: Any, tenant_id: str, system_id: str) -> bytes
             str(asset.get("assetId") or ""),
             str(asset.get("name") or ""),
             str(asset.get("assetType") or ""),
+            str(asset.get("criticality") or ""),
             str(asset.get("description") or ""),
         )
 
@@ -6349,18 +6369,30 @@ def _inventory_to_excel_bytes(con: Any, tenant_id: str, system_id: str) -> bytes
     for _ in range(sheet.max_row + 1, min_template_rows + 1):
         append_asset_row()
 
-    # Déverrouille les métadonnées éditables B:D, mais garde la colonne A verrouillée partout.
+    # Déverrouille les métadonnées éditables B:E, mais garde la colonne A verrouillée partout.
     for row in range(1, min_template_rows + 1):
         sheet.cell(row=row, column=1).protection = locked
-        for col in range(2, 5):
+        for col in range(2, 6):
             sheet.cell(row=row, column=col).protection = unlocked
+
+    criticality_validation = DataValidation(
+        type="list",
+        formula1='"1,2,3,4"',
+        allow_blank=True,
+        showErrorMessage=True,
+        errorTitle="Criticité invalide",
+        error="La criticité de l'actif doit être comprise entre 1 et 4.",
+    )
+    sheet.add_data_validation(criticality_validation)
+    criticality_validation.add(f"D{header_row + 1}:D{min_template_rows}")
 
     sheet.freeze_panes = f"A{header_row + 1}"
     sheet.auto_filter.ref = f"A{header_row}:{get_column_letter(len(headers))}{max(sheet.max_row, header_row)}"
     sheet.column_dimensions["A"].width = 38
     sheet.column_dimensions["B"].width = 36
     sheet.column_dimensions["C"].width = 24
-    sheet.column_dimensions["D"].width = 56
+    sheet.column_dimensions["D"].width = 18
+    sheet.column_dimensions["E"].width = 56
 
     sheet.protection.sheet = True
     sheet.protection.password = password
@@ -6452,22 +6484,24 @@ def _inventory_import_from_excel_bytes(con: Any, tenant_id: str, system_id: str,
         raise HTTPException(status_code=400, detail="La feuille Actifs SI ne contient aucune ligne importable")
 
     existing_asset_rows = con.execute(
-        "SELECT asset_id FROM information_assets WHERE tenant_id = ? AND system_id = ?",
+        "SELECT asset_id, criticality FROM information_assets WHERE tenant_id = ? AND system_id = ?",
         (tenant_id, system_id),
     ).fetchall()
     existing_asset_ids = {str(row["asset_id"]) for row in existing_asset_rows}
+    existing_criticalities = {str(row["asset_id"]): str(row["criticality"] or "").strip() for row in existing_asset_rows}
 
     now = _utc_now().isoformat()
-    assets: list[tuple[str, str, str, str]] = []
+    assets: list[tuple[str, str, str, str, str]] = []
     used_asset_ids: set[str] = set()
 
     for index, row in enumerate(rows, start=2):
         asset_name = _inventory_text(_excel_get(row, "Nom actif", "Actif", "name"), 255)
         asset_type = _inventory_text(_excel_get(row, "Type actif", "Type d'actif", "asset type"), 120)
+        asset_criticality_raw = _excel_get(row, "Criticité actif", "Criticite actif", "Criticité", "Criticite", "criticality")
         asset_description = _inventory_text(_excel_get(row, "Description actif", "description actif"), 4000)
         raw_asset_id = _normalize_uuid(_excel_get(row, "ID actif", "asset id", "assetId"))
 
-        if not asset_name and not asset_type and not asset_description and not raw_asset_id:
+        if not asset_name and not asset_type and not asset_criticality_raw and not asset_description and not raw_asset_id:
             continue
         if not asset_name:
             raise HTTPException(status_code=400, detail=f"Ligne {index}: le nom de l'actif est obligatoire")
@@ -6482,19 +6516,29 @@ def _inventory_import_from_excel_bytes(con: Any, tenant_id: str, system_id: str,
         else:
             asset_id = _new_uuid()
 
+        if asset_criticality_raw:
+            try:
+                asset_criticality = _inventory_asset_criticality(asset_criticality_raw)
+            except HTTPException as exc:
+                raise HTTPException(status_code=400, detail=f"Ligne {index}: {exc.detail}") from exc
+        elif raw_asset_id:
+            asset_criticality = _inventory_asset_criticality(existing_criticalities.get(raw_asset_id), default="")
+        else:
+            raise HTTPException(status_code=400, detail=f"Ligne {index}: la criticité de l'actif est obligatoire pour un nouvel actif (1 à 4)")
+
         if asset_id in used_asset_ids:
             raise HTTPException(status_code=400, detail=f"Ligne {index}: ID actif dupliqué dans le fichier Excel: {asset_id}")
         used_asset_ids.add(asset_id)
-        assets.append((asset_id, asset_name, asset_type, asset_description))
+        assets.append((asset_id, asset_name, asset_type, asset_criticality, asset_description))
 
     con.execute("DELETE FROM information_assets WHERE tenant_id = ? AND system_id = ?", (tenant_id, system_id))
-    for asset_id, name, asset_type, description in assets:
+    for asset_id, name, asset_type, criticality, description in assets:
         con.execute(
             """
             INSERT INTO information_assets(tenant_id, asset_id, system_id, name, asset_type, description, criticality, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (tenant_id, asset_id, system_id, name, asset_type, description, "", now, now),
+            (tenant_id, asset_id, system_id, name, asset_type, description, criticality, now, now),
         )
     return {"assets": len(assets)}
 
@@ -6781,11 +6825,13 @@ async def information_asset_create(request: Request) -> dict[str, Any]:
     name = _inventory_text(payload.get("name"), 255)
     asset_type = _inventory_text(payload.get("assetType") or payload.get("type"), 120)
     description = _inventory_text(payload.get("description"), 4000)
-    criticality = _inventory_text(payload.get("criticality"), 80)
+    criticality = _inventory_asset_criticality(payload.get("criticality"))
     if not system_id:
         raise HTTPException(status_code=400, detail="Le système d'information est obligatoire")
     if not name:
         raise HTTPException(status_code=400, detail="Le nom de l'actif est obligatoire")
+    if not criticality:
+        raise HTTPException(status_code=400, detail="La criticité de l'actif est obligatoire (1 à 4)")
     now = _utc_now().isoformat()
     asset_id = _normalize_uuid(payload.get("assetId") or payload.get("id")) or _new_uuid()
     with _db() as con:
@@ -6817,11 +6863,13 @@ async def information_asset_update(asset_id: str, request: Request) -> dict[str,
     name = _inventory_text(payload.get("name"), 255)
     asset_type = _inventory_text(payload.get("assetType") or payload.get("type"), 120)
     description = _inventory_text(payload.get("description"), 4000)
-    criticality = _inventory_text(payload.get("criticality"), 80)
+    criticality = _inventory_asset_criticality(payload.get("criticality"))
     if not system_id:
         raise HTTPException(status_code=400, detail="Le système d'information est obligatoire")
     if not name:
         raise HTTPException(status_code=400, detail="Le nom de l'actif est obligatoire")
+    if not criticality:
+        raise HTTPException(status_code=400, detail="La criticité de l'actif est obligatoire (1 à 4)")
     now = _utc_now().isoformat()
     with _db() as con:
         with con:
