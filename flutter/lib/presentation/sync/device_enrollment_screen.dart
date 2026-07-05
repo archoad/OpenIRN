@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../../data/api/openirn_api_client.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/sync_configuration.dart';
+import '../../l10n/openirn_localizations.dart';
 import '../common/openirn_app_bar.dart';
 import '../common/responsive_autofocus.dart';
 
@@ -100,16 +101,23 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
     final tenantId = _tenantIdController.text.trim();
     final deviceName = _terminalNameLocked
         ? (_deviceNameController.text.trim().isEmpty
-              ? 'Terminal OpenIRN'
+              ? context.tr(
+                  'device_enrollment.default_device_name',
+                  fallback: 'Terminal OpenIRN',
+                )
               : _deviceNameController.text.trim())
         : _deviceNameController.text.trim();
     if (tenantId.isEmpty ||
         (!_terminalNameLocked && deviceName.isEmpty) ||
         _working) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Indiquez d’abord l’espace de travail et le nom de ce terminal.',
+            context.tr(
+              'device_enrollment.validation.workspace_and_name',
+              fallback:
+                  'Indiquez d’abord l’espace de travail et le nom de ce terminal.',
+            ),
           ),
         ),
       );
@@ -192,9 +200,15 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
           status: OpenIrnApiEnrollmentStatus.rejected,
           url: result.url,
           statusCode: result.statusCode,
-          title: 'Réponse serveur incomplète',
-          message:
-              'Le serveur a accepté le code, mais n’a pas retourné l’identifiant du terminal.',
+          title: OpenIrnLocalizations.instance.tr(
+            'device_enrollment.error.incomplete_response.title',
+            fallback: 'Réponse serveur incomplète',
+          ),
+          message: OpenIrnLocalizations.instance.tr(
+            'device_enrollment.error.incomplete_response.message',
+            fallback:
+                'Le serveur a accepté le code, mais n’a pas retourné l’identifiant du terminal.',
+          ),
           tenantId: result.tenantId,
           enrollmentId: result.enrollmentId,
           code: '',
@@ -231,9 +245,13 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
+      SnackBar(
         content: Text(
-          'Terminal autorisé. Le référentiel serveur va être chargé.',
+          context.tr(
+            'device_enrollment.success.authorized',
+            fallback:
+                'Terminal autorisé. Le référentiel serveur va être chargé.',
+          ),
         ),
       ),
     );
@@ -293,26 +311,34 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
     final payload = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Coller une invitation'),
+        title: Text(
+          context.tr(
+            'device_enrollment.paste.title',
+            fallback: 'Coller une invitation',
+          ),
+        ),
         content: TextField(
           controller: controller,
           autofocus: shouldAutofocusTextField(context),
           minLines: 4,
           maxLines: 8,
-          decoration: const InputDecoration(
-            labelText: 'Code ou payload JSON',
+          decoration: InputDecoration(
+            labelText: context.tr(
+              'device_enrollment.paste.payload_label',
+              fallback: 'Code ou payload JSON',
+            ),
             hintText: '{"type":"openirn.deviceEnrollment", ...}',
-            border: OutlineInputBorder(),
+            border: const OutlineInputBorder(),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Annuler'),
+            child: Text(context.tr('common.cancel', fallback: 'Annuler')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(controller.text),
-            child: const Text('Utiliser'),
+            child: Text(context.tr('common.use', fallback: 'Utiliser')),
           ),
         ],
       ),
@@ -333,7 +359,12 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
     final isNarrow = width < 760;
 
     return Scaffold(
-      appBar: const OpenIrnAppBar(title: 'Autoriser ce terminal'),
+      appBar: OpenIrnAppBar(
+        title: context.tr(
+          'device_enrollment.title',
+          fallback: 'Autoriser ce terminal',
+        ),
+      ),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 980),
@@ -365,12 +396,19 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Text(
-                          'Code d’appairage',
+                          context.tr(
+                            'device_enrollment.pairing_code.title',
+                            fallback: 'Code d’appairage',
+                          ),
                           style: theme.textTheme.titleLarge,
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Saisissez un code d’appairage fourni par un Pilote IRN ou demandez une autorisation depuis ce terminal.',
+                          context.tr(
+                            'device_enrollment.pairing_code.help',
+                            fallback:
+                                'Saisissez un code d’appairage fourni par un Pilote IRN ou demandez une autorisation depuis ce terminal.',
+                          ),
                           style: theme.textTheme.bodyMedium,
                         ),
                         const SizedBox(height: 18),
@@ -384,10 +422,25 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
                           autocorrect: false,
                           enableSuggestions: false,
                           decoration: InputDecoration(
-                            labelText: 'Nom de ce terminal',
-                            hintText: 'Ex. iPhone Michel, PC Salle 1...',
+                            labelText: context.tr(
+                              'device_enrollment.device_name.label',
+                              fallback: 'Nom de ce terminal',
+                            ),
+                            hintText: context.tr(
+                              'device_enrollment.device_name.hint',
+                              fallback: 'Ex. iPhone Michel, PC Salle 1...',
+                            ),
                             helperText: _terminalNameLocked
-                                ? 'Terminal déjà identifié ${_shortDeviceId(_localDeviceId)} : le nom canonique serveur sera conservé.'
+                                ? context.tr(
+                                    'device_enrollment.device_name.locked_help',
+                                    fallback:
+                                        'Terminal déjà identifié {deviceId} : le nom canonique serveur sera conservé.',
+                                    values: {
+                                      'deviceId': _shortDeviceId(
+                                        _localDeviceId,
+                                      ),
+                                    },
+                                  )
                                 : null,
                             border: const OutlineInputBorder(),
                             prefixIcon: const Icon(
@@ -399,7 +452,11 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
                               return null;
                             }
                             if ((value ?? '').trim().isEmpty) {
-                              return 'Indique un nom reconnaissable pour ce terminal.';
+                              return context.tr(
+                                'device_enrollment.device_name.required',
+                                fallback:
+                                    'Indique un nom reconnaissable pour ce terminal.',
+                              );
                             }
                             return null;
                           },
@@ -417,11 +474,14 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
                               RegExp(r'[a-zA-Z0-9\-\s]'),
                             ),
                           ],
-                          decoration: const InputDecoration(
-                            labelText: 'Code d’appairage',
+                          decoration: InputDecoration(
+                            labelText: context.tr(
+                              'device_enrollment.code.label',
+                              fallback: 'Code d’appairage',
+                            ),
                             hintText: '123-456 ou ABCD-EFGH',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.password_outlined),
+                            border: const OutlineInputBorder(),
+                            prefixIcon: const Icon(Icons.password_outlined),
                           ),
                           onFieldSubmitted: (_) => _consumeEnrollment(),
                           validator: (value) {
@@ -429,7 +489,11 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
                                 .replaceAll(RegExp(r'[^a-zA-Z0-9]'), '')
                                 .trim();
                             if (normalized.length < 8) {
-                              return 'Veuillez saisir le code d’autorisation complet.';
+                              return context.tr(
+                                'device_enrollment.code.required',
+                                fallback:
+                                    'Veuillez saisir le code d’autorisation complet.',
+                              );
                             }
                             return null;
                           },
@@ -437,7 +501,12 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
                         const SizedBox(height: 12),
                         ExpansionTile(
                           tilePadding: EdgeInsets.zero,
-                          title: const Text('Paramètres avancés'),
+                          title: Text(
+                            context.tr(
+                              'device_enrollment.advanced.title',
+                              fallback: 'Paramètres avancés',
+                            ),
+                          ),
                           childrenPadding: const EdgeInsets.only(bottom: 8),
                           children: [
                             TextFormField(
@@ -445,14 +514,23 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
                               textInputAction: TextInputAction.done,
                               autocorrect: false,
                               enableSuggestions: false,
-                              decoration: const InputDecoration(
-                                labelText: 'Espace de travail',
-                                border: OutlineInputBorder(),
-                                prefixIcon: Icon(Icons.account_tree_outlined),
+                              decoration: InputDecoration(
+                                labelText: context.tr(
+                                  'common.workspace',
+                                  fallback: 'Espace de travail',
+                                ),
+                                border: const OutlineInputBorder(),
+                                prefixIcon: const Icon(
+                                  Icons.account_tree_outlined,
+                                ),
                               ),
                               validator: (value) {
                                 if ((value ?? '').trim().isEmpty) {
-                                  return 'L’espace de travail est obligatoire.';
+                                  return context.tr(
+                                    'validation.workspace_required',
+                                    fallback:
+                                        'L’espace de travail est obligatoire.',
+                                  );
                                 }
                                 return null;
                               },
@@ -468,21 +546,36 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
                             OutlinedButton.icon(
                               onPressed: _working ? null : _testServer,
                               icon: const Icon(Icons.wifi_tethering_outlined),
-                              label: const Text('Tester le serveur'),
+                              label: Text(
+                                context.tr(
+                                  'device_enrollment.test_server',
+                                  fallback: 'Tester le serveur',
+                                ),
+                              ),
                             ),
                             OutlinedButton.icon(
                               onPressed: _working
                                   ? null
                                   : _openPastePayloadDialog,
                               icon: const Icon(Icons.content_paste_go_outlined),
-                              label: const Text('Coller invitation'),
+                              label: Text(
+                                context.tr(
+                                  'device_enrollment.paste.short',
+                                  fallback: 'Coller invitation',
+                                ),
+                              ),
                             ),
                             OutlinedButton.icon(
                               onPressed: _working
                                   ? null
                                   : _requestEnrollmentApproval,
                               icon: const Icon(Icons.notification_add_outlined),
-                              label: const Text('Demander une autorisation'),
+                              label: Text(
+                                context.tr(
+                                  'device_enrollment.request_approval',
+                                  fallback: 'Demander une autorisation',
+                                ),
+                              ),
                             ),
                             FilledButton.icon(
                               onPressed: _working ? null : _consumeEnrollment,
@@ -496,8 +589,14 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
                                   : const Icon(Icons.verified_user_outlined),
                               label: Text(
                                 _working
-                                    ? 'Autorisation...'
-                                    : 'Autoriser ce terminal',
+                                    ? context.tr(
+                                        'device_enrollment.authorizing',
+                                        fallback: 'Autorisation...',
+                                      )
+                                    : context.tr(
+                                        'device_enrollment.authorize_device',
+                                        fallback: 'Autoriser ce terminal',
+                                      ),
                               ),
                             ),
                           ],
@@ -541,7 +640,7 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
   }
 
   String _defaultDeviceName() {
-    return 'Terminal ${_platformLabel()}';
+    return '${OpenIrnLocalizations.instance.tr('device_enrollment.default_device_prefix', fallback: 'Terminal')} ${_platformLabel()}';
   }
 
   String _platformLabel() {
@@ -592,19 +691,50 @@ class _IntroColumn extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Appairage sécurisé', style: theme.textTheme.headlineSmall),
+        Text(
+          context.tr(
+            'device_enrollment.intro.title',
+            fallback: 'Appairage sécurisé',
+          ),
+          style: theme.textTheme.headlineSmall,
+        ),
         const SizedBox(height: 8),
-        const Text(
-          'Ce terminal va recevoir son propre jeton serveur révocable. Aucun secret global n’est saisi par l’utilisateur.',
+        Text(
+          context.tr(
+            'device_enrollment.intro.body',
+            fallback:
+                'Ce terminal va recevoir son propre jeton serveur révocable. Aucun secret global n’est saisi par l’utilisateur.',
+          ),
         ),
         const SizedBox(height: 12),
-        const Wrap(
+        Wrap(
           spacing: 8,
           runSpacing: 8,
           children: [
-            Chip(label: Text('Code à usage unique')),
-            Chip(label: Text('Expiration courte')),
-            Chip(label: Text('Révocation par terminal')),
+            Chip(
+              label: Text(
+                context.tr(
+                  'device_enrollment.intro.chip_code',
+                  fallback: 'Code à usage unique',
+                ),
+              ),
+            ),
+            Chip(
+              label: Text(
+                context.tr(
+                  'device_enrollment.intro.chip_expiration',
+                  fallback: 'Expiration courte',
+                ),
+              ),
+            ),
+            Chip(
+              label: Text(
+                context.tr(
+                  'device_enrollment.intro.chip_revocation',
+                  fallback: 'Révocation par terminal',
+                ),
+              ),
+            ),
           ],
         ),
       ],
@@ -638,12 +768,19 @@ class _BackToSessionOpeningCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Retour au choix de l’espace de travail',
+                    context.tr(
+                      'device_enrollment.back_to_session.title',
+                      fallback: 'Retour au choix de l’espace de travail',
+                    ),
                     style: theme.textTheme.titleMedium,
                   ),
                   const SizedBox(height: 4),
-                  const Text(
-                    'Abandonner l’autorisation de ce terminal et revenir au choix de l’espace de travail.',
+                  Text(
+                    context.tr(
+                      'device_enrollment.back_to_session.body',
+                      fallback:
+                          'Abandonner l’autorisation de ce terminal et revenir au choix de l’espace de travail.',
+                    ),
                   ),
                 ],
               ),
@@ -652,7 +789,7 @@ class _BackToSessionOpeningCard extends StatelessWidget {
             OutlinedButton.icon(
               onPressed: working ? null : onPressed,
               icon: const Icon(Icons.arrow_back_outlined),
-              label: const Text('Retour'),
+              label: Text(context.tr('common.back', fallback: 'Retour')),
             ),
           ],
         ),

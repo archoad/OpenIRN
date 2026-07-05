@@ -11,6 +11,7 @@ import '../../domain/models/local_activity_event.dart';
 import '../../domain/models/local_campaign.dart';
 import '../../domain/services/access_policy_service.dart';
 import '../../domain/services/referential_catalog_service.dart';
+import '../../l10n/openirn_localizations.dart';
 import '../common/openirn_app_bar.dart';
 
 class CriterionAssignmentScreen extends StatefulWidget {
@@ -180,13 +181,16 @@ class _CriterionAssignmentScreenState extends State<CriterionAssignmentScreen> {
           }
           if (state == null && snapshot.hasError) {
             return Center(
-              child: Text('Chargement impossible : ${snapshot.error}'),
+              child: Text(
+                context.tr(
+                  'assignment.error.load_failed',
+                  values: {'error': snapshot.error},
+                ),
+              ),
             );
           }
           if (state == null) {
-            return const Center(
-              child: Text('Aucune donnée d’affectation disponible.'),
-            );
+            return Center(child: Text(context.tr('assignment.empty')));
           }
           final criteriaByPillar = _catalogService.criteriaByPillar(
             widget.referential,
@@ -238,7 +242,12 @@ class _CriterionAssignmentScreenState extends State<CriterionAssignmentScreen> {
                           });
                         },
                         title: Text('${entry.key.code} — ${entry.key.label}'),
-                        subtitle: Text('${entry.value.length} critère(s)'),
+                        subtitle: Text(
+                          context.tr(
+                            'assignment.count.criteria',
+                            values: {'count': entry.value.length},
+                          ),
+                        ),
                         children: [
                           for (final criterion in entry.value)
                             _CriterionAssignmentTile(
@@ -325,43 +334,62 @@ class _AssignmentHeaderCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Affectations — ${campaign.name}',
+              context.tr(
+                'assignment.header.title',
+                values: {'campaign': campaign.name},
+              ),
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 6),
-            const Text(
-              'Affectez chaque critère à un utilisateur de secours disposant du profil Évaluateur. Les droits serveur et la connexion réelle seront gérés par OpenIRN.',
-            ),
+            Text(context.tr('assignment.header.description')),
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                Chip(label: Text('Évaluateurs actifs : $userCount')),
                 Chip(
                   label: Text(
-                    'Critères affectés : $assignedCount/$totalCriteria',
+                    context.tr(
+                      'assignment.chip.evaluators',
+                      values: {'count': userCount},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'assignment.chip.assigned',
+                      values: {
+                        'assigned': assignedCount,
+                        'total': totalCriteria,
+                      },
+                    ),
                   ),
                 ),
                 Chip(
                   avatar: const Icon(Icons.verified_user_outlined, size: 18),
-                  label: Text('Session : ${activeUser.displayName}'),
+                  label: Text(
+                    context.tr(
+                      'assignment.chip.session',
+                      values: {'user': activeUser.displayName},
+                    ),
+                  ),
                 ),
-                Chip(label: Text(activeUser.role.label)),
+                Chip(label: Text(context.trText(activeUser.role.label))),
                 if (!canManageAssignments)
-                  const Chip(
-                    avatar: Icon(Icons.lock_outline, size: 18),
-                    label: Text('Lecture seule par rôle'),
+                  Chip(
+                    avatar: const Icon(Icons.lock_outline, size: 18),
+                    label: Text(context.tr('assignment.chip.read_only_role')),
                   ),
                 if (userCount == 0)
-                  const Chip(
-                    avatar: Icon(Icons.warning_amber_outlined, size: 18),
-                    label: Text('Aucun évaluateur actif'),
+                  Chip(
+                    avatar: const Icon(Icons.warning_amber_outlined, size: 18),
+                    label: Text(context.tr('assignment.chip.no_evaluator')),
                   ),
                 if (campaign.isReadOnly)
-                  const Chip(
-                    avatar: Icon(Icons.lock_outline, size: 18),
-                    label: Text('Lecture seule'),
+                  Chip(
+                    avatar: const Icon(Icons.lock_outline, size: 18),
+                    label: Text(context.tr('common.read_only')),
                   ),
               ],
             ),
@@ -392,14 +420,19 @@ class _CriterionAssignmentTile extends StatelessWidget {
     final criterionInfo = ListTile(
       contentPadding: EdgeInsets.zero,
       title: Text('${criterion.code} — ${criterion.label}'),
-      subtitle: Text('Portée : ${criterion.scope.label}'),
+      subtitle: Text(
+        context.tr(
+          'criterion.scope.value',
+          values: {'scope': context.trText(criterion.scope.label)},
+        ),
+      ),
     );
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final dropdown = _buildAssigneeDropdown();
+          final dropdown = _buildAssigneeDropdown(context);
 
           if (constraints.maxWidth < 760) {
             return Column(
@@ -421,7 +454,7 @@ class _CriterionAssignmentTile extends StatelessWidget {
     );
   }
 
-  Widget _buildAssigneeDropdown() {
+  Widget _buildAssigneeDropdown(BuildContext context) {
     final selectedUserId = users.any((user) => user.id == assignment?.userId)
         ? assignment!.userId
         : '';
@@ -429,12 +462,15 @@ class _CriterionAssignmentTile extends StatelessWidget {
     return DropdownButtonFormField<String>(
       initialValue: selectedUserId,
       isExpanded: true,
-      decoration: const InputDecoration(
-        labelText: 'Évaluateur affecté',
-        border: OutlineInputBorder(),
+      decoration: InputDecoration(
+        labelText: context.tr('assignment.field.evaluator'),
+        border: const OutlineInputBorder(),
       ),
       selectedItemBuilder: (context) => [
-        const Text('Non affecté', overflow: TextOverflow.ellipsis),
+        Text(
+          context.tr('assignment.unassigned'),
+          overflow: TextOverflow.ellipsis,
+        ),
         for (final user in users)
           Text(
             _shortUserLabel(user),
@@ -443,9 +479,12 @@ class _CriterionAssignmentTile extends StatelessWidget {
           ),
       ],
       items: [
-        const DropdownMenuItem<String>(
+        DropdownMenuItem<String>(
           value: '',
-          child: Text('Non affecté', overflow: TextOverflow.ellipsis),
+          child: Text(
+            context.tr('assignment.unassigned'),
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
         for (final user in users)
           DropdownMenuItem<String>(
@@ -472,6 +511,6 @@ class _CriterionAssignmentTile extends StatelessWidget {
 
   static String _fullUserLabel(AppUser user) {
     final identity = user.fullName.trim().isEmpty ? user.email : user.fullName;
-    return '$identity · ${user.role.label}';
+    return '$identity · ${OpenIrnLocalizations.instance.text(user.role.label)}';
   }
 }

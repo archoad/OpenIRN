@@ -14,6 +14,7 @@ import '../../domain/models/local_activity_event.dart';
 import '../../domain/models/local_campaign.dart';
 import '../../domain/services/app_sync_coordinator.dart';
 import '../../domain/services/sync_automation_service.dart';
+import '../../l10n/openirn_localizations.dart';
 import '../common/openirn_app_bar.dart';
 import '../common/responsive_autofocus.dart';
 import '../common/responsive_dialog.dart';
@@ -114,6 +115,11 @@ class _CampaignManagementScreenState extends State<CampaignManagementScreen> {
       return;
     }
 
+    final campaignCreatedTitle = context.tr(
+      'screen.campaign.created',
+      fallback: 'Campagne créée',
+    );
+
     setState(() {
       _isWorking = true;
     });
@@ -130,7 +136,7 @@ class _CampaignManagementScreenState extends State<CampaignManagementScreen> {
           referentialId: widget.referential.id,
           campaignId: campaign.id,
           type: LocalActivityType.campaignCreated,
-          title: 'Campagne créée',
+          title: campaignCreatedTitle,
           description: campaign.name,
         ),
       );
@@ -291,17 +297,23 @@ class _HeaderCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Administration des campagnes',
+                        context.tr(
+                          'screen.campaign.manage.header.title',
+                          fallback: 'Administration des campagnes',
+                        ),
                         style: theme.textTheme.titleLarge,
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '${activeUser.displayName} · ${activeUser.role.label}',
+                        '${activeUser.displayName} · ${context.trText(activeUser.role.label)}',
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Créer une nouvelle campagne ou supprimer une campagne existante. '
-                        'La suppression efface aussi les réponses, les affectations et le journal de la campagne concernée.',
+                        context.tr(
+                          'screen.campaign.manage.header.subtitle',
+                          fallback:
+                              'Créer une nouvelle campagne ou supprimer une campagne existante. La suppression efface aussi les réponses, les affectations et le journal de la campagne concernée.',
+                        ),
                         style: theme.textTheme.bodyMedium,
                       ),
                     ],
@@ -315,20 +327,38 @@ class _HeaderCard extends StatelessWidget {
               runSpacing: 8,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Chip(label: Text('$campaignCount campagne(s)')),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'screen.campaign.manage.chip.count',
+                      fallback: '{count} campagne(s)',
+                      values: {'count': campaignCount},
+                    ),
+                  ),
+                ),
                 if (isWorking)
-                  const Chip(
-                    avatar: SizedBox(
+                  Chip(
+                    avatar: const SizedBox(
                       width: 16,
                       height: 16,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
-                    label: Text('Synchronisation en cours'),
+                    label: Text(
+                      context.tr(
+                        'sync.status.in_progress',
+                        fallback: 'Synchronisation en cours',
+                      ),
+                    ),
                   ),
                 FilledButton.icon(
                   onPressed: onCreate,
                   icon: const Icon(Icons.add),
-                  label: const Text('Créer une campagne'),
+                  label: Text(
+                    context.tr(
+                      'screen.campaign.manage.create',
+                      fallback: 'Créer une campagne',
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -378,9 +408,25 @@ class _ManagedCampaignCard extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                Chip(label: Text(campaign.status.label)),
-                Chip(label: Text('Maj : ${_formatDate(campaign.updatedAt)}')),
-                Chip(label: Text('Créée : ${_formatDate(campaign.createdAt)}')),
+                Chip(label: Text(_statusLabel(context, campaign.status))),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'common.updated_at_short',
+                      fallback: 'Maj : {date}',
+                      values: {'date': _formatDate(campaign.updatedAt)},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'common.created_at_short',
+                      fallback: 'Créée : {date}',
+                      values: {'date': _formatDate(campaign.createdAt)},
+                    ),
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -389,7 +435,7 @@ class _ManagedCampaignCard extends StatelessWidget {
               child: OutlinedButton.icon(
                 onPressed: onDelete,
                 icon: const Icon(Icons.delete_outline),
-                label: const Text('Supprimer'),
+                label: Text(context.tr('action.delete', fallback: 'Supprimer')),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: theme.colorScheme.error,
                 ),
@@ -399,6 +445,22 @@ class _ManagedCampaignCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  String _statusLabel(BuildContext context, LocalCampaignStatus status) {
+    switch (status) {
+      case LocalCampaignStatus.draft:
+        return context.tr('campaign.status.draft', fallback: 'Brouillon');
+      case LocalCampaignStatus.readyForReview:
+        return context.tr(
+          'campaign.status.ready_for_review',
+          fallback: 'Prêt pour revue',
+        );
+      case LocalCampaignStatus.validated:
+        return context.tr('campaign.status.validated', fallback: 'Validé');
+      case LocalCampaignStatus.archived:
+        return context.tr('campaign.status.archived', fallback: 'Archivé');
+    }
   }
 
   String _formatDate(DateTime date) {
@@ -489,11 +551,18 @@ class _CreateCampaignDialogState extends State<_CreateCampaignDialog> {
       final system = _selectedSystem;
       if (system != null) {
         if (_nameController.text.trim().isEmpty) {
-          _nameController.text = 'IRN — ${system.name}';
+          _nameController.text = context.tr(
+            'screen.campaign.manage.default_name',
+            fallback: 'IRN — {system}',
+            values: {'system': system.name},
+          );
         }
         if (_descriptionController.text.trim().isEmpty) {
-          _descriptionController.text =
-              'Campagne de notation IRN des actifs du SI « ${system.name} ».';
+          _descriptionController.text = context.tr(
+            'screen.campaign.manage.default_description',
+            fallback: 'Campagne de notation IRN des actifs du SI « {system} ».',
+            values: {'system': system.name},
+          );
         }
       }
     });
@@ -553,7 +622,12 @@ class _CreateCampaignDialogState extends State<_CreateCampaignDialog> {
 
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
-      title: const Text('Créer une campagne'),
+      title: Text(
+        context.tr(
+          'screen.campaign.manage.dialog.create.title',
+          fallback: 'Créer une campagne',
+        ),
+      ),
       content: ResponsiveDialogContent(
         maxWidth: 760,
         child: Form(
@@ -567,14 +641,22 @@ class _CreateCampaignDialogState extends State<_CreateCampaignDialog> {
               else ...[
                 DropdownButtonFormField<String>(
                   initialValue: _selectedSystemId,
-                  decoration: const InputDecoration(
-                    labelText: 'Système d’information à évaluer',
-                    prefixIcon: Icon(Icons.dns_outlined),
+                  decoration: InputDecoration(
+                    labelText: context.tr(
+                      'screen.campaign.manage.form.system',
+                      fallback: 'Système d’information à évaluer',
+                    ),
+                    prefixIcon: const Icon(Icons.dns_outlined),
                   ),
                   items: [
-                    const DropdownMenuItem<String>(
+                    DropdownMenuItem<String>(
                       value: '',
-                      child: Text('Campagne libre, sans SI rattaché'),
+                      child: Text(
+                        context.tr(
+                          'screen.campaign.manage.form.free_campaign',
+                          fallback: 'Campagne libre, sans SI rattaché',
+                        ),
+                      ),
                     ),
                     for (final system in systems)
                       DropdownMenuItem<String>(
@@ -597,10 +679,16 @@ class _CreateCampaignDialogState extends State<_CreateCampaignDialog> {
                       }
                     }
                     if (system == null) {
-                      return 'SI inconnu.';
+                      return context.tr(
+                        'screen.campaign.manage.validation.unknown_system',
+                        fallback: 'SI inconnu.',
+                      );
                     }
                     if (_assetsForSystem(system).isEmpty) {
-                      return 'Le SI sélectionné ne contient aucun actif.';
+                      return context.tr(
+                        'screen.campaign.manage.validation.no_assets',
+                        fallback: 'Le SI sélectionné ne contient aucun actif.',
+                      );
                     }
                     return null;
                   },
@@ -618,13 +706,19 @@ class _CreateCampaignDialogState extends State<_CreateCampaignDialog> {
               TextFormField(
                 controller: _nameController,
                 autofocus: shouldAutofocusTextField(context),
-                decoration: const InputDecoration(
-                  labelText: 'Nom de la campagne',
-                  prefixIcon: Icon(Icons.drive_file_rename_outline),
+                decoration: InputDecoration(
+                  labelText: context.tr(
+                    'screen.campaign.manage.form.name',
+                    fallback: 'Nom de la campagne',
+                  ),
+                  prefixIcon: const Icon(Icons.drive_file_rename_outline),
                 ),
                 validator: (value) {
                   if ((value ?? '').trim().isEmpty) {
-                    return 'Le nom de la campagne est obligatoire.';
+                    return context.tr(
+                      'screen.campaign.manage.validation.name_required',
+                      fallback: 'Le nom de la campagne est obligatoire.',
+                    );
                   }
                   return null;
                 },
@@ -633,9 +727,12 @@ class _CreateCampaignDialogState extends State<_CreateCampaignDialog> {
               const SizedBox(height: 12),
               TextFormField(
                 controller: _descriptionController,
-                decoration: const InputDecoration(
-                  labelText: 'Description',
-                  prefixIcon: Icon(Icons.notes_outlined),
+                decoration: InputDecoration(
+                  labelText: context.tr(
+                    'common.description',
+                    fallback: 'Description',
+                  ),
+                  prefixIcon: const Icon(Icons.notes_outlined),
                 ),
                 maxLines: 3,
               ),
@@ -646,12 +743,12 @@ class _CreateCampaignDialogState extends State<_CreateCampaignDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Annuler'),
+          child: Text(context.tr('action.cancel', fallback: 'Annuler')),
         ),
         FilledButton.icon(
           onPressed: _submit,
           icon: const Icon(Icons.add),
-          label: const Text('Créer'),
+          label: Text(context.tr('action.create', fallback: 'Créer')),
         ),
       ],
     );
@@ -666,16 +763,20 @@ class _InventoryUnavailableNotice extends StatelessWidget {
     final theme = Theme.of(context);
     return Card(
       color: theme.colorScheme.surfaceContainerHighest,
-      child: const Padding(
-        padding: EdgeInsets.all(12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.info_outline),
-            SizedBox(width: 10),
+            const Icon(Icons.info_outline),
+            const SizedBox(width: 10),
             Expanded(
               child: Text(
-                'Aucun inventaire SI disponible sur ce terminal. Vous pouvez créer une campagne libre, ou renseigner d’abord les fonctions critiques, SI et actifs.',
+                context.tr(
+                  'screen.campaign.manage.inventory_unavailable',
+                  fallback:
+                      'Aucun inventaire SI disponible sur ce terminal. Vous pouvez créer une campagne libre, ou renseigner d’abord les fonctions critiques, SI et actifs.',
+                ),
               ),
             ),
           ],
@@ -709,13 +810,50 @@ class _SelectedSystemPreview extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Périmètre de notation', style: theme.textTheme.titleSmall),
+            Text(
+              context.tr(
+                'screen.campaign.manage.scope.title',
+                fallback: 'Périmètre de notation',
+              ),
+              style: theme.textTheme.titleSmall,
+            ),
             const SizedBox(height: 6),
-            Text('Fonction critique : ${function?.name ?? 'non renseignée'}'),
-            Text('SI : ${system.name}'),
+            Text(
+              context.tr(
+                'screen.campaign.manage.scope.function',
+                fallback: 'Fonction critique : {function}',
+                values: {
+                  'function':
+                      function?.name ??
+                      context.tr(
+                        'common.not_provided',
+                        fallback: 'non renseignée',
+                      ),
+                },
+              ),
+            ),
+            Text(
+              context.tr(
+                'screen.campaign.manage.scope.system',
+                fallback: 'SI : {system}',
+                values: {'system': system.name},
+              ),
+            ),
             if (system.owner.trim().isNotEmpty)
-              Text('Porteur SI : ${system.owner}'),
-            Text('Actifs à noter : $assetCount'),
+              Text(
+                context.tr(
+                  'screen.campaign.manage.scope.owner',
+                  fallback: 'Porteur SI : {owner}',
+                  values: {'owner': system.owner},
+                ),
+              ),
+            Text(
+              context.tr(
+                'screen.campaign.manage.scope.assets',
+                fallback: 'Actifs à noter : {count}',
+                values: {'count': assetCount},
+              ),
+            ),
           ],
         ),
       ),
@@ -732,7 +870,12 @@ class _DeleteCampaignDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
-      title: const Text('Supprimer la campagne ?'),
+      title: Text(
+        context.tr(
+          'screen.campaign.manage.delete.title',
+          fallback: 'Supprimer la campagne ?',
+        ),
+      ),
       content: ResponsiveDialogContent(
         maxWidth: 680,
         child: Column(
@@ -741,9 +884,12 @@ class _DeleteCampaignDialog extends StatelessWidget {
           children: [
             Text(campaign.name, style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 10),
-            const Text(
-              'Cette action supprime la campagne de ce terminal, ses réponses, ses affectations et son journal. '
-              'La suppression sera ensuite publiée au serveur pour synchroniser les autres terminaux.',
+            Text(
+              context.tr(
+                'screen.campaign.manage.delete.body',
+                fallback:
+                    'Cette action supprime la campagne de ce terminal, ses réponses, ses affectations et son journal. La suppression sera ensuite publiée au serveur pour synchroniser les autres terminaux.',
+              ),
             ),
           ],
         ),
@@ -751,12 +897,12 @@ class _DeleteCampaignDialog extends StatelessWidget {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('Annuler'),
+          child: Text(context.tr('action.cancel', fallback: 'Annuler')),
         ),
         FilledButton.icon(
           onPressed: () => Navigator.of(context).pop(true),
           icon: const Icon(Icons.delete_outline),
-          label: const Text('Supprimer'),
+          label: Text(context.tr('action.delete', fallback: 'Supprimer')),
           style: FilledButton.styleFrom(
             backgroundColor: Theme.of(context).colorScheme.error,
             foregroundColor: Theme.of(context).colorScheme.onError,
@@ -784,16 +930,27 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Card(
+    return Card(
       child: Padding(
-        padding: EdgeInsets.all(24),
+        padding: const EdgeInsets.all(24),
         child: Column(
           children: [
-            Icon(Icons.folder_off_outlined, size: 44),
-            SizedBox(height: 12),
-            Text('Aucune campagne.'),
-            SizedBox(height: 6),
-            Text('Créez une première campagne depuis le bouton ci-dessus.'),
+            const Icon(Icons.folder_off_outlined, size: 44),
+            const SizedBox(height: 12),
+            Text(
+              context.tr(
+                'screen.campaign.manage.empty.title',
+                fallback: 'Aucune campagne.',
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              context.tr(
+                'screen.campaign.manage.empty.subtitle',
+                fallback:
+                    'Créez une première campagne depuis le bouton ci-dessus.',
+              ),
+            ),
           ],
         ),
       ),
@@ -817,12 +974,19 @@ class _ErrorState extends StatelessWidget {
           children: [
             const Icon(Icons.error_outline, size: 42),
             const SizedBox(height: 12),
-            Text('Impossible de charger la gestion des campagnes : $error'),
+            Text(
+              context.tr(
+                'screen.campaign.manage.error.load',
+                fallback:
+                    'Impossible de charger la gestion des campagnes : {error}',
+                values: {'error': error},
+              ),
+            ),
             const SizedBox(height: 12),
             FilledButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh),
-              label: const Text('Réessayer'),
+              label: Text(context.tr('action.retry', fallback: 'Réessayer')),
             ),
           ],
         ),

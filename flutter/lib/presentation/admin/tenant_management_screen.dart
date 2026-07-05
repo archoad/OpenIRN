@@ -6,9 +6,14 @@ import '../../domain/models/app_user.dart';
 import '../../domain/models/sync_configuration.dart';
 import '../../domain/models/tenant_info.dart';
 import '../../domain/services/app_session_manager.dart';
+import '../../l10n/openirn_localizations.dart';
 import '../common/openirn_app_bar.dart';
 import '../common/responsive_autofocus.dart';
 import '../common/responsive_dialog.dart';
+
+String _localizedText(BuildContext context, String text) {
+  return context.tr(text, fallback: context.trText(text));
+}
 
 class TenantManagementScreen extends StatefulWidget {
   final AppUser activeUser;
@@ -35,9 +40,8 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
     if (!configuration.isConfigured) {
       return _TenantManagementStateData(
         configuration: configuration,
-        title: 'Terminal non autorisé',
-        message:
-            'Veuillez autoriser ce terminal avant de gérer les espaces de travail.',
+        title: 'tenant.source.terminal_not_authorized',
+        message: 'tenant.source.authorize_terminal_first',
         tenants: const <TenantInfo>[],
         solutionAdministrator: false,
       );
@@ -138,7 +142,7 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
         .toList(growable: false);
     if (deletableTenants.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Aucun espace de travail supprimable.')),
+        SnackBar(content: Text(context.tr('tenant.delete.none_available'))),
       );
       return;
     }
@@ -206,6 +210,18 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
     TenantInfo tenant, {
     required bool solutionAdministrator,
   }) async {
+    final sessionReason = context.tr(
+      'tenant.switch.session_reason',
+      values: {'tenant': tenant.label},
+    );
+    final administeredMessage = context.tr(
+      'tenant.switch.administered',
+      values: {'tenant': tenant.label},
+    );
+    final selectedMessage = context.tr(
+      'tenant.switch.selected',
+      values: {'tenant': tenant.label},
+    );
     final configuration = await _configurationRepository.loadConfiguration();
     if (solutionAdministrator) {
       await _configurationRepository
@@ -224,10 +240,7 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
           apiToken: '',
         ),
       );
-      AppSessionManager.instance.clearSession(
-        reason:
-            'Espace de travail changé : veuillez ouvrir une session dans ${tenant.label}.',
-      );
+      AppSessionManager.instance.clearSession(reason: sessionReason);
     }
     if (!mounted) {
       return;
@@ -235,9 +248,7 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          solutionAdministrator
-              ? 'Espace administré : ${tenant.label}. La session d’administration globale reste active.'
-              : 'Espace sélectionné : ${tenant.label}. Veuillez déverrouiller la session pour continuer.',
+          solutionAdministrator ? administeredMessage : selectedMessage,
         ),
       ),
     );
@@ -247,7 +258,7 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const OpenIrnAppBar(title: 'Espaces de travail'),
+      appBar: OpenIrnAppBar(title: context.tr('tenant.title')),
       body: FutureBuilder<_TenantManagementStateData>(
         future: _future,
         builder: (context, snapshot) {
@@ -256,9 +267,7 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
           }
           final state = snapshot.data;
           if (state == null) {
-            return const Center(
-              child: Text('État de l’espace de travail indisponible.'),
-            );
+            return Center(child: Text(context.tr('tenant.state.unavailable')));
           }
 
           return Center(
@@ -346,12 +355,12 @@ class _TenantIntroCard extends StatelessWidget {
         ),
       ),
       icon: const Icon(Icons.delete_forever_outlined),
-      label: const Text('Supprimer un espace'),
+      label: Text(context.tr('tenant.action.delete_workspace')),
     );
     final createButton = FilledButton.icon(
       onPressed: onCreateTenant,
       icon: const Icon(Icons.add_business_outlined),
-      label: const Text('Créer un espace'),
+      label: Text(context.tr('tenant.action.create_workspace')),
     );
     final content = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -363,25 +372,37 @@ class _TenantIntroCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Gestion des espaces de travail',
+                context.tr('tenant.intro.title'),
                 style: theme.textTheme.titleLarge,
               ),
               const SizedBox(height: 6),
-              Text(state.message),
+              Text(_localizedText(context, state.message)),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  Chip(label: Text('${state.tenants.length} espace(s)')),
                   Chip(
                     label: Text(
-                      'Espace actif : ${state.configuration.tenantLabel}',
+                      context.tr(
+                        'tenant.chip.workspace_count',
+                        values: {'count': state.tenants.length},
+                      ),
                     ),
                   ),
-                  const Chip(label: Text('Espace par défaut permanent')),
+                  Chip(
+                    label: Text(
+                      context.tr(
+                        'tenant.chip.active_workspace',
+                        values: {'tenant': state.configuration.tenantLabel},
+                      ),
+                    ),
+                  ),
+                  Chip(
+                    label: Text(context.tr('tenant.chip.default_permanent')),
+                  ),
                   if (state.solutionAdministrator)
-                    const Chip(label: Text('Administrateur solution')),
+                    Chip(label: Text(context.tr('tenant.chip.solution_admin'))),
                 ],
               ),
             ],
@@ -470,20 +491,42 @@ class _TenantCard extends StatelessWidget {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  if (isCurrent) const Chip(label: Text('Espace actif')),
-                  if (tenant.permanent) const Chip(label: Text('Permanent')),
+                  if (isCurrent)
+                    Chip(label: Text(context.tr('tenant.chip.current'))),
+                  if (tenant.permanent)
+                    Chip(label: Text(context.tr('tenant.chip.permanent'))),
                   Chip(
                     label: Text(
-                      '${tenant.activeUserCount} utilisateur(s) actif(s)',
+                      context.tr(
+                        'tenant.chip.active_users',
+                        values: {'count': tenant.activeUserCount},
+                      ),
                     ),
                   ),
                   Chip(
                     label: Text(
-                      '${tenant.administratorCount} administrateur(s)',
+                      context.tr(
+                        'tenant.chip.admin_count',
+                        values: {'count': tenant.administratorCount},
+                      ),
                     ),
                   ),
-                  Chip(label: Text('${tenant.pilotCount} pilote(s)')),
-                  Chip(label: Text('${tenant.campaignCount} campagne(s)')),
+                  Chip(
+                    label: Text(
+                      context.tr(
+                        'tenant.chip.pilot_count',
+                        values: {'count': tenant.pilotCount},
+                      ),
+                    ),
+                  ),
+                  Chip(
+                    label: Text(
+                      context.tr(
+                        'tenant.chip.campaign_count',
+                        values: {'count': tenant.campaignCount},
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ],
@@ -509,15 +552,15 @@ class _TenantCard extends StatelessWidget {
                       OutlinedButton.icon(
                         onPressed: onRename,
                         icon: const Icon(Icons.edit_outlined),
-                        label: const Text('Renommer'),
+                        label: Text(context.tr('tenant.action.rename')),
                       ),
                       OutlinedButton.icon(
                         onPressed: onSwitch,
                         icon: const Icon(Icons.login_outlined),
                         label: Text(
                           solutionAdministrator
-                              ? 'Administrer cet espace'
-                              : 'Utiliser cet espace',
+                              ? context.tr('tenant.action.administer_workspace')
+                              : context.tr('tenant.action.use_workspace'),
                         ),
                       ),
                     ],
@@ -536,15 +579,15 @@ class _TenantCard extends StatelessWidget {
                       OutlinedButton.icon(
                         onPressed: onRename,
                         icon: const Icon(Icons.edit_outlined),
-                        label: const Text('Renommer'),
+                        label: Text(context.tr('tenant.action.rename')),
                       ),
                       OutlinedButton.icon(
                         onPressed: onSwitch,
                         icon: const Icon(Icons.login_outlined),
                         label: Text(
                           solutionAdministrator
-                              ? 'Administrer cet espace'
-                              : 'Utiliser cet espace',
+                              ? context.tr('tenant.action.administer_workspace')
+                              : context.tr('tenant.action.use_workspace'),
                         ),
                       ),
                     ],
@@ -565,16 +608,14 @@ class _TenantDeleteSelectionDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
-      title: const Text('Supprimer un espace de travail'),
+      title: Text(context.tr('tenant.delete.select_title')),
       content: ResponsiveDialogContent(
         maxWidth: 620,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Choisissez l’espace de travail à supprimer. L’espace par défaut n’est pas supprimable.',
-            ),
+            Text(context.tr('tenant.delete.select_body')),
             const SizedBox(height: 12),
             for (final tenant in tenants)
               Card(
@@ -583,7 +624,13 @@ class _TenantDeleteSelectionDialog extends StatelessWidget {
                   leading: const Icon(Icons.business_outlined),
                   title: Text(tenant.label),
                   subtitle: Text(
-                    '${tenant.activeUserCount} utilisateur(s) actif(s) · ${tenant.campaignCount} campagne(s)',
+                    context.tr(
+                      'tenant.delete.summary',
+                      values: {
+                        'users': tenant.activeUserCount,
+                        'campaigns': tenant.campaignCount,
+                      },
+                    ),
                   ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.of(context).pop(tenant),
@@ -595,7 +642,7 @@ class _TenantDeleteSelectionDialog extends StatelessWidget {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Annuler'),
+          child: Text(context.tr('common.action.cancel')),
         ),
       ],
     );
@@ -613,7 +660,7 @@ class _TenantDeleteConfirmationDialog extends StatelessWidget {
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
       icon: Icon(Icons.warning_amber_rounded, color: theme.colorScheme.error),
-      title: const Text('Êtes-vous sûr ?'),
+      title: Text(context.tr('tenant.delete.confirm_title')),
       content: ResponsiveDialogContent(
         maxWidth: 560,
         child: Column(
@@ -621,11 +668,14 @@ class _TenantDeleteConfirmationDialog extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Cette action va supprimer définitivement l’espace de travail « ${tenant.label} ».',
+              context.tr(
+                'tenant.delete.confirm_body',
+                values: {'tenant': tenant.label},
+              ),
             ),
             const SizedBox(height: 8),
             Text(
-              'Les utilisateurs, campagnes, terminaux, demandes d’enrôlement, sessions et journaux associés à cet espace seront effacés.',
+              context.tr('tenant.delete.confirm_warning'),
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.error,
                 fontWeight: FontWeight.w600,
@@ -638,10 +688,20 @@ class _TenantDeleteConfirmationDialog extends StatelessWidget {
               children: [
                 Chip(
                   label: Text(
-                    '${tenant.activeUserCount} utilisateur(s) actif(s)',
+                    context.tr(
+                      'tenant.chip.active_users',
+                      values: {'count': tenant.activeUserCount},
+                    ),
                   ),
                 ),
-                Chip(label: Text('${tenant.campaignCount} campagne(s)')),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'tenant.chip.campaign_count',
+                      values: {'count': tenant.campaignCount},
+                    ),
+                  ),
+                ),
               ],
             ),
           ],
@@ -650,7 +710,7 @@ class _TenantDeleteConfirmationDialog extends StatelessWidget {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('Annuler'),
+          child: Text(context.tr('common.action.cancel')),
         ),
         FilledButton.icon(
           onPressed: () => Navigator.of(context).pop(true),
@@ -659,7 +719,7 @@ class _TenantDeleteConfirmationDialog extends StatelessWidget {
             foregroundColor: theme.colorScheme.onError,
           ),
           icon: const Icon(Icons.delete_forever_outlined),
-          label: const Text('Supprimer définitivement'),
+          label: Text(context.tr('tenant.action.delete_permanently')),
         ),
       ],
     );
@@ -710,7 +770,7 @@ class _TenantRenameDialogState extends State<_TenantRenameDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
-      title: const Text('Renommer l’espace de travail'),
+      title: Text(context.tr('tenant.rename.title')),
       content: ResponsiveDialogContent(
         maxWidth: 520,
         child: Form(
@@ -722,17 +782,21 @@ class _TenantRenameDialogState extends State<_TenantRenameDialog> {
               TextFormField(
                 controller: _displayNameController,
                 autofocus: shouldAutofocusTextField(context),
-                decoration: const InputDecoration(
-                  labelText: 'Nouveau nom affiché',
-                  prefixIcon: Icon(Icons.business_outlined),
+                decoration: InputDecoration(
+                  labelText: context.tr('tenant.field.new_display_name'),
+                  prefixIcon: const Icon(Icons.business_outlined),
                 ),
                 validator: (value) {
                   final raw = value?.trim() ?? '';
                   if (raw.isEmpty) {
-                    return 'Le nom affiché est obligatoire.';
+                    return context.tr(
+                      'tenant.validation.display_name_required',
+                    );
                   }
                   if (raw.length > 160) {
-                    return 'Le nom ne doit pas dépasser 160 caractères.';
+                    return context.tr(
+                      'tenant.validation.display_name_too_long',
+                    );
                   }
                   return null;
                 },
@@ -745,12 +809,12 @@ class _TenantRenameDialogState extends State<_TenantRenameDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Annuler'),
+          child: Text(context.tr('common.action.cancel')),
         ),
         FilledButton.icon(
           onPressed: _submit,
           icon: const Icon(Icons.save_outlined),
-          label: const Text('Enregistrer'),
+          label: Text(context.tr('common.action.save')),
         ),
       ],
     );
@@ -822,7 +886,7 @@ class _TenantCreateDialogState extends State<_TenantCreateDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
-      title: const Text('Créer un espace de travail'),
+      title: Text(context.tr('tenant.create.title')),
       content: ResponsiveDialogContent(
         maxWidth: 640,
         child: SingleChildScrollView(
@@ -832,48 +896,48 @@ class _TenantCreateDialogState extends State<_TenantCreateDialog> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'L’identifiant technique sera généré automatiquement au format UUID.',
+                  context.tr('tenant.create.uuid_hint'),
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _displayNameController,
                   autofocus: shouldAutofocusTextField(context),
-                  decoration: const InputDecoration(
-                    labelText: 'Nom affiché',
-                    prefixIcon: Icon(Icons.business_outlined),
+                  decoration: InputDecoration(
+                    labelText: context.tr('tenant.field.display_name'),
+                    prefixIcon: const Icon(Icons.business_outlined),
                   ),
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _descriptionController,
-                  decoration: const InputDecoration(
-                    labelText: 'Description',
-                    prefixIcon: Icon(Icons.notes_outlined),
+                  decoration: InputDecoration(
+                    labelText: context.tr('common.field.description'),
+                    prefixIcon: const Icon(Icons.notes_outlined),
                   ),
                 ),
                 const SizedBox(height: 18),
                 Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
-                    'Pilote IRN initial',
+                    context.tr('tenant.create.initial_pilot'),
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _pilotFirstNameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Prénom',
-                    prefixIcon: Icon(Icons.person_outline),
+                  decoration: InputDecoration(
+                    labelText: context.tr('users.field.first_name'),
+                    prefixIcon: const Icon(Icons.person_outline),
                   ),
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _pilotLastNameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Nom',
-                    prefixIcon: Icon(Icons.person_outline),
+                  decoration: InputDecoration(
+                    labelText: context.tr('users.field.last_name'),
+                    prefixIcon: const Icon(Icons.person_outline),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -883,17 +947,19 @@ class _TenantCreateDialogState extends State<_TenantCreateDialog> {
                     context,
                     TextInputType.emailAddress,
                   ),
-                  decoration: const InputDecoration(
-                    labelText: 'Email du pilote',
-                    prefixIcon: Icon(Icons.alternate_email),
+                  decoration: InputDecoration(
+                    labelText: context.tr('tenant.field.pilot_email'),
+                    prefixIcon: const Icon(Icons.alternate_email),
                   ),
                   validator: (value) {
                     final raw = value?.trim() ?? '';
                     if (raw.isEmpty) {
-                      return 'L’email du pilote est obligatoire.';
+                      return context.tr(
+                        'tenant.validation.pilot_email_required',
+                      );
                     }
                     if (!raw.contains('@')) {
-                      return 'Email invalide.';
+                      return context.tr('users.validation.email_invalid');
                     }
                     return null;
                   },
@@ -903,16 +969,15 @@ class _TenantCreateDialogState extends State<_TenantCreateDialog> {
                   controller: _pilotPinController,
                   obscureText: true,
                   keyboardType: safeKeyboardType(context, TextInputType.number),
-                  decoration: const InputDecoration(
-                    labelText: 'Code personnel initial',
-                    helperText:
-                        '4 à 32 caractères. À transmettre au pilote IRN.',
-                    prefixIcon: Icon(Icons.lock_outline),
+                  decoration: InputDecoration(
+                    labelText: context.tr('tenant.field.initial_pin'),
+                    helperText: context.tr('tenant.field.initial_pin_helper'),
+                    prefixIcon: const Icon(Icons.lock_outline),
                   ),
                   validator: (value) {
                     final raw = value?.trim() ?? '';
                     if (raw.length < 4 || raw.length > 32) {
-                      return 'Le code doit contenir entre 4 et 32 caractères.';
+                      return context.tr('tenant.validation.initial_pin_length');
                     }
                     return null;
                   },
@@ -925,12 +990,12 @@ class _TenantCreateDialogState extends State<_TenantCreateDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Annuler'),
+          child: Text(context.tr('common.action.cancel')),
         ),
         FilledButton.icon(
           onPressed: _submit,
           icon: const Icon(Icons.add_business_outlined),
-          label: const Text('Créer'),
+          label: Text(context.tr('common.action.create')),
         ),
       ],
     );

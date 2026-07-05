@@ -8,6 +8,7 @@ import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/sync_configuration.dart';
 import '../../domain/services/access_policy_service.dart';
+import '../../l10n/openirn_localizations.dart';
 import '../common/openirn_app_bar.dart';
 import '../common/responsive_dialog.dart';
 
@@ -58,8 +59,9 @@ class _CampaignHistoryScreenState extends State<CampaignHistoryScreen> {
     if (!_canView) {
       setState(() {
         _isLoading = false;
-        _errorMessage =
-            'Cette page est réservée aux administrateurs et pilotes IRN.';
+        _errorMessage = OpenIrnLocalizations.instance.tr(
+          'campaign_history.error.access_denied',
+        );
       });
       return;
     }
@@ -75,8 +77,9 @@ class _CampaignHistoryScreenState extends State<CampaignHistoryScreen> {
         setState(() {
           _configuration = configuration;
           _isLoading = false;
-          _errorMessage =
-              'La synchronisation serveur n’est pas configurée sur ce terminal.';
+          _errorMessage = OpenIrnLocalizations.instance.tr(
+            'security.error.server_not_configured.message',
+          );
         });
         return;
       }
@@ -131,7 +134,10 @@ class _CampaignHistoryScreenState extends State<CampaignHistoryScreen> {
       }
       setState(() {
         _isLoading = false;
-        _errorMessage = 'Impossible de charger l’historique serveur : $error';
+        _errorMessage = OpenIrnLocalizations.instance.tr(
+          'campaign_history.error.load_failed',
+          values: {'error': error},
+        );
       });
     }
   }
@@ -235,7 +241,10 @@ class _CampaignHistoryScreenState extends State<CampaignHistoryScreen> {
           builder: (context) => AlertDialog(
             insetPadding: responsiveDialogInsetPadding(context),
             title: Text(
-              'Impact du conflit — révision ${revision.serverRevision}',
+              context.tr(
+                'campaign_history.conflict_impact.title',
+                values: {'revision': revision.serverRevision},
+              ),
             ),
             content: ResponsiveDialogContent(
               maxWidth: 920,
@@ -250,7 +259,7 @@ class _CampaignHistoryScreenState extends State<CampaignHistoryScreen> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Fermer'),
+                child: Text(context.tr('common.close')),
               ),
             ],
           ),
@@ -269,7 +278,12 @@ class _CampaignHistoryScreenState extends State<CampaignHistoryScreen> {
         context: context,
         builder: (context) => AlertDialog(
           insetPadding: responsiveDialogInsetPadding(context),
-          title: Text('Révision serveur ${revision.serverRevision}'),
+          title: Text(
+            context.tr(
+              'campaign_history.revision_payload.title',
+              values: {'revision': revision.serverRevision},
+            ),
+          ),
           content: ResponsiveDialogContent(
             maxWidth: 920,
             child: SingleChildScrollView(
@@ -282,7 +296,7 @@ class _CampaignHistoryScreenState extends State<CampaignHistoryScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Fermer'),
+              child: Text(context.tr('common.close')),
             ),
           ],
         ),
@@ -294,7 +308,10 @@ class _CampaignHistoryScreenState extends State<CampaignHistoryScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Impossible de charger le détail de la révision : $error',
+            context.tr(
+              'campaign_history.revision_payload.load_failed',
+              values: {'error': error},
+            ),
           ),
         ),
       );
@@ -311,10 +328,8 @@ class _CampaignHistoryScreenState extends State<CampaignHistoryScreen> {
     final configuration = _configuration;
     if (!_canRestore) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'La restauration d’une révision est réservée aux administrateurs et pilotes IRN.',
-          ),
+        SnackBar(
+          content: Text(context.tr('campaign_history.restore.access_denied')),
         ),
       );
       return;
@@ -327,23 +342,28 @@ class _CampaignHistoryScreenState extends State<CampaignHistoryScreen> {
       context: context,
       builder: (context) => AlertDialog(
         insetPadding: responsiveDialogInsetPadding(context),
-        title: const Text('Restaurer cette révision ?'),
+        title: Text(context.tr('campaign_history.restore.dialog.title')),
         content: ResponsiveDialogContent(
           maxWidth: 680,
           child: Text(
-            'La révision serveur ${revision.serverRevision} de la campagne "${revision.campaignName}" deviendra la version courante. '
-            'Une nouvelle révision serveur sera créée et les terminaux connectés recevront automatiquement la mise à jour.',
+            context.tr(
+              'campaign_history.restore.dialog.message',
+              values: {
+                'revision': revision.serverRevision,
+                'campaign': revision.campaignName,
+              },
+            ),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Annuler'),
+            child: Text(context.tr('common.cancel')),
           ),
           FilledButton.icon(
             onPressed: () => Navigator.of(context).pop(true),
             icon: const Icon(Icons.restore_outlined),
-            label: const Text('Restaurer'),
+            label: Text(context.tr('campaign_history.restore.action')),
           ),
         ],
       ),
@@ -379,8 +399,11 @@ class _CampaignHistoryScreenState extends State<CampaignHistoryScreen> {
         SnackBar(
           content: Text(
             status == 'no_change'
-                ? 'Cette révision est déjà la version courante.'
-                : 'Révision restaurée. Nouvelle révision serveur : ${newRevision ?? '—'}',
+                ? context.tr('campaign_history.restore.no_change')
+                : context.tr(
+                    'campaign_history.restore.success',
+                    values: {'revision': newRevision ?? '—'},
+                  ),
           ),
         ),
       );
@@ -390,7 +413,14 @@ class _CampaignHistoryScreenState extends State<CampaignHistoryScreen> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Impossible de restaurer la révision : $error')),
+        SnackBar(
+          content: Text(
+            context.tr(
+              'campaign_history.restore.failed',
+              values: {'error': error},
+            ),
+          ),
+        ),
       );
     } finally {
       if (mounted) {
@@ -443,7 +473,9 @@ class _CampaignHistoryScreenState extends State<CampaignHistoryScreen> {
       }
       return decodedBody;
     } on TimeoutException {
-      throw const HttpException('délai dépassé');
+      throw HttpException(
+        OpenIrnLocalizations.instance.tr('maintenance.error.timeout'),
+      );
     } finally {
       client.close(force: true);
     }
@@ -494,7 +526,9 @@ class _CampaignHistoryScreenState extends State<CampaignHistoryScreen> {
       }
       return decodedBody;
     } on TimeoutException {
-      throw const HttpException('délai dépassé');
+      throw HttpException(
+        OpenIrnLocalizations.instance.tr('maintenance.error.timeout'),
+      );
     } finally {
       client.close(force: true);
     }
@@ -534,7 +568,7 @@ class _CampaignHistoryScreenState extends State<CampaignHistoryScreen> {
         children: [
           _MessageCard(
             icon: Icons.warning_amber_outlined,
-            title: 'Historique indisponible',
+            title: context.tr('campaign_history.error.unavailable_title'),
             message: _errorMessage!,
           ),
         ],
@@ -595,12 +629,22 @@ class _ServerSummaryCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'État serveur MariaDB',
+              context.tr('campaign_history.server_state.title'),
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 8),
-            Text('Espace de travail : ${configuration?.tenantLabel ?? '—'}'),
-            Text('Serveur : ${configuration?.apiBaseUrl ?? '—'}'),
+            Text(
+              context.tr(
+                'campaign_history.server_state.workspace',
+                values: {'workspace': configuration?.tenantLabel ?? '—'},
+              ),
+            ),
+            Text(
+              context.tr(
+                'campaign_history.server_state.server',
+                values: {'server': configuration?.apiBaseUrl ?? '—'},
+              ),
+            ),
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
@@ -647,26 +691,32 @@ class _CampaignSelectorCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Campagne serveur',
+              context.tr('campaign_history.selector.title'),
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 12),
             if (campaigns.isEmpty)
-              const Text('Aucune campagne trouvée côté serveur.')
+              Text(context.tr('campaign_history.selector.empty'))
             else
               DropdownButtonFormField<String>(
                 initialValue: selectedCampaignId,
                 isExpanded: true,
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                  labelText: 'Campagne',
+                decoration: InputDecoration(
+                  border: const OutlineInputBorder(),
+                  labelText: context.tr('campaign_history.selector.field'),
                 ),
                 items: campaigns
                     .map(
                       (campaign) => DropdownMenuItem<String>(
                         value: campaign.campaignId,
                         child: Text(
-                          '${campaign.campaignName} — rév. ${campaign.serverRevision}',
+                          context.tr(
+                            'campaign_history.selector.item',
+                            values: {
+                              'campaign': campaign.campaignName,
+                              'revision': campaign.serverRevision,
+                            },
+                          ),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -710,7 +760,7 @@ class _ConflictSection extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Conflits détectés',
+                    context.tr('campaign_history.conflicts.title'),
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
@@ -719,7 +769,7 @@ class _ConflictSection extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             if (conflicts.isEmpty)
-              const Text('Aucun conflit détecté pour cette campagne.')
+              Text(context.tr('campaign_history.conflicts.empty'))
             else
               ...conflicts.map(
                 (revision) => _RevisionTile(
@@ -761,12 +811,12 @@ class _RevisionSection extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Historique des révisions',
+              context.tr('campaign_history.revisions.title'),
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
             if (revisions.isEmpty)
-              const Text('Aucune révision disponible pour cette campagne.')
+              Text(context.tr('campaign_history.revisions.empty'))
             else
               ...revisions.map(
                 (revision) => _RevisionTile(
@@ -817,20 +867,48 @@ class _RevisionTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Révision ${revision.serverRevision} — ${revision.campaignName}',
+                    context.tr(
+                      'campaign_history.revision_tile.title',
+                      values: {
+                        'revision': revision.serverRevision,
+                        'campaign': revision.campaignName,
+                      },
+                    ),
                     style: Theme.of(context).textTheme.titleSmall,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 4),
-                  Text('Terminal : ${revision.deviceId}'),
-                  Text('Reçue : ${revision.receivedAt ?? '—'}'),
-                  Text('Checksum : ${revision.shortChecksum}'),
+                  Text(
+                    context.tr(
+                      'campaign_history.revision_tile.device',
+                      values: {'device': revision.deviceId},
+                    ),
+                  ),
+                  Text(
+                    context.tr(
+                      'campaign_history.revision_tile.received',
+                      values: {'date': revision.receivedAt ?? '—'},
+                    ),
+                  ),
+                  Text(
+                    context.tr(
+                      'campaign_history.revision_tile.checksum',
+                      values: {'checksum': revision.shortChecksum},
+                    ),
+                  ),
                   if (revision.conflictDetected)
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
                       child: Text(
-                        'Conflit : ${revision.conflictReason.isEmpty ? 'last_write_wins' : revision.conflictReason}',
+                        context.tr(
+                          'campaign_history.revision_tile.conflict',
+                          values: {
+                            'reason': revision.conflictReason.isEmpty
+                                ? 'last_write_wins'
+                                : revision.conflictReason,
+                          },
+                        ),
                         style: TextStyle(
                           color: Theme.of(context).colorScheme.error,
                         ),
@@ -848,7 +926,11 @@ class _RevisionTile extends StatelessWidget {
                         : () => onOpenPayload(revision),
                     icon: const Icon(Icons.data_object_outlined),
                     label: Text(
-                      revision.conflictDetected ? 'Impact' : 'Payload',
+                      context.tr(
+                        revision.conflictDetected
+                            ? 'campaign_history.action.impact'
+                            : 'campaign_history.action.payload',
+                      ),
                     ),
                   ),
                   FilledButton.tonalIcon(
@@ -856,7 +938,7 @@ class _RevisionTile extends StatelessWidget {
                         ? null
                         : () => onRestoreRevision(revision),
                     icon: const Icon(Icons.restore_outlined),
-                    label: const Text('Restaurer'),
+                    label: Text(context.tr('campaign_history.restore.action')),
                   ),
                 ],
               );
@@ -890,7 +972,7 @@ class _MetricChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Chip(label: Text('$label : $value'));
+    return Chip(label: Text('${context.trText(label)} : $value'));
   }
 }
 
@@ -915,9 +997,12 @@ class _MessageCard extends StatelessWidget {
           children: [
             Icon(icon, size: 32),
             const SizedBox(height: 12),
-            Text(title, style: Theme.of(context).textTheme.titleLarge),
+            Text(
+              context.trText(title),
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
             const SizedBox(height: 8),
-            Text(message),
+            Text(context.trText(message)),
           ],
         ),
       ),
@@ -1051,22 +1136,48 @@ class _ConflictImpactView extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          'Comparaison entre la révision $comparedRevision et la révision ${revision.serverRevision}.',
+          context.tr(
+            'campaign_history.conflict_impact.comparison',
+            values: {
+              'previous': comparedRevision,
+              'current': revision.serverRevision,
+            },
+          ),
         ),
         const SizedBox(height: 8),
-        Text('Campagne : ${revision.campaignName}'),
-        Text('Terminal source : ${revision.deviceId}'),
         Text(
-          'Règle appliquée : ${revision.conflictReason.isEmpty ? 'last_write_wins' : revision.conflictReason}',
+          context.tr(
+            'campaign_history.conflict_impact.campaign',
+            values: {'campaign': revision.campaignName},
+          ),
+        ),
+        Text(
+          context.tr(
+            'campaign_history.conflict_impact.source_device',
+            values: {'device': revision.deviceId},
+          ),
+        ),
+        Text(
+          context.tr(
+            'campaign_history.conflict_impact.rule',
+            values: {
+              'rule': revision.conflictReason.isEmpty
+                  ? 'last_write_wins'
+                  : revision.conflictReason,
+            },
+          ),
           style: TextStyle(color: theme.colorScheme.error),
         ),
         const SizedBox(height: 16),
         if (impacts.isEmpty)
-          const _MessageCard(
+          _MessageCard(
             icon: Icons.info_outline,
-            title: 'Aucune valeur métier différente détectée',
-            message:
-                'La révision est marquée en conflit côté serveur, mais les champs métier comparés ne présentent pas de différence exploitable. Les différences peuvent concerner uniquement des métadonnées ou le journal technique.',
+            title: context.tr(
+              'campaign_history.conflict_impact.no_business_diff_title',
+            ),
+            message: context.tr(
+              'campaign_history.conflict_impact.no_business_diff_message',
+            ),
           )
         else
           ...impacts.map((impact) => _PayloadImpactTile(impact: impact)),
@@ -1149,7 +1260,10 @@ class _ImpactValueCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: Theme.of(context).textTheme.labelMedium),
+            Text(
+              context.trText(title),
+              style: Theme.of(context).textTheme.labelMedium,
+            ),
             const SizedBox(height: 4),
             SelectableText(
               value,

@@ -6,6 +6,7 @@ import '../../domain/models/app_user.dart';
 import '../../domain/models/security_audit_event.dart';
 import '../../domain/models/sync_configuration.dart';
 import '../../domain/services/access_policy_service.dart';
+import '../../l10n/openirn_localizations.dart';
 import '../common/openirn_app_bar.dart';
 
 class SecurityAuditScreen extends StatefulWidget {
@@ -39,8 +40,12 @@ class _SecurityAuditScreenState extends State<SecurityAuditScreen> {
         configuration: SyncConfiguration.empty(),
         events: const <SecurityAuditEvent>[],
         serverAvailable: false,
-        title: 'Accès refusé',
-        message: 'Le journal sécurité est réservé aux administrateurs.',
+        title: OpenIrnLocalizations.instance.tr(
+          'screen.security.access_denied',
+        ),
+        message: OpenIrnLocalizations.instance.tr(
+          'security.error.access_denied.message',
+        ),
       );
     }
     final configuration = await _configurationRepository.loadConfiguration();
@@ -49,9 +54,12 @@ class _SecurityAuditScreenState extends State<SecurityAuditScreen> {
         configuration: configuration,
         events: const <SecurityAuditEvent>[],
         serverAvailable: false,
-        title: 'Serveur non configuré',
-        message:
-            'La synchronisation serveur n’est pas configurée sur ce terminal.',
+        title: OpenIrnLocalizations.instance.tr(
+          'screen.security.server_not_configured',
+        ),
+        message: OpenIrnLocalizations.instance.tr(
+          'security.error.server_not_configured.message',
+        ),
       );
     }
 
@@ -109,8 +117,8 @@ class _SecurityAuditScreenState extends State<SecurityAuditScreen> {
 
           final state = snapshot.data;
           if (state == null) {
-            return const Center(
-              child: Text('Impossible de charger le journal sécurité.'),
+            return Center(
+              child: Text(context.tr('security.error.load_failed')),
             );
           }
 
@@ -151,11 +159,10 @@ class _SecurityAuditScreenState extends State<SecurityAuditScreen> {
                         message: state.message,
                       )
                     else if (state.events.isEmpty)
-                      const _MessageCard(
+                      _MessageCard(
                         icon: Icons.security_outlined,
-                        title: 'Aucun événement sécurité',
-                        message:
-                            'Aucun événement ne correspond aux filtres sélectionnés.',
+                        title: context.tr('screen.security.empty'),
+                        message: context.tr('security.empty.message'),
                       )
                     else
                       for (final event in state.events) ...[
@@ -211,14 +218,23 @@ class _HeaderCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Journal sécurité serveur',
+                context.tr('security.header.title'),
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: 6),
               Text(
                 state.serverAvailable
-                    ? '${state.events.length} événement(s) — $authCount authentification(s), $deviceCount terminal(aux), $failureCount échec(s) — ${state.configuration.tenantLabel}'
-                    : state.message,
+                    ? context.tr(
+                        'security.header.summary',
+                        values: {
+                          'events': state.events.length,
+                          'auth': authCount,
+                          'devices': deviceCount,
+                          'failures': failureCount,
+                          'workspace': state.configuration.tenantLabel,
+                        },
+                      )
+                    : context.trText(state.message),
               ),
             ],
           ),
@@ -230,27 +246,59 @@ class _HeaderCard extends StatelessWidget {
       children: [
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
-          title: const Text('Authentifications'),
+          title: Text(context.tr('security.filter.authentications')),
           value: includeAuthAttempts,
           onChanged: onIncludeAuthAttemptsChanged,
         ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
-          title: const Text('Terminaux / sessions'),
+          title: Text(context.tr('security.filter.devices_sessions')),
           value: includeDeviceAudit,
           onChanged: onIncludeDeviceAuditChanged,
         ),
         DropdownButtonFormField<int>(
           initialValue: limit,
-          decoration: const InputDecoration(
-            labelText: 'Nombre maximum',
-            border: OutlineInputBorder(),
+          decoration: InputDecoration(
+            labelText: context.tr('security.filter.limit'),
+            border: const OutlineInputBorder(),
           ),
-          items: const [
-            DropdownMenuItem(value: 50, child: Text('50 événements')),
-            DropdownMenuItem(value: 100, child: Text('100 événements')),
-            DropdownMenuItem(value: 200, child: Text('200 événements')),
-            DropdownMenuItem(value: 500, child: Text('500 événements')),
+          items: [
+            DropdownMenuItem(
+              value: 50,
+              child: Text(
+                context.tr(
+                  'security.filter.event_limit',
+                  values: {'count': 50},
+                ),
+              ),
+            ),
+            DropdownMenuItem(
+              value: 100,
+              child: Text(
+                context.tr(
+                  'security.filter.event_limit',
+                  values: {'count': 100},
+                ),
+              ),
+            ),
+            DropdownMenuItem(
+              value: 200,
+              child: Text(
+                context.tr(
+                  'security.filter.event_limit',
+                  values: {'count': 200},
+                ),
+              ),
+            ),
+            DropdownMenuItem(
+              value: 500,
+              child: Text(
+                context.tr(
+                  'security.filter.event_limit',
+                  values: {'count': 500},
+                ),
+              ),
+            ),
           ],
           onChanged: onLimitChanged,
         ),
@@ -310,14 +358,17 @@ class _AuditEventCard extends StatelessWidget {
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       Text(
-                        event.title,
+                        context.trText(event.title),
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
-                      _Badge(label: event.sourceLabel, colors: colors),
+                      _Badge(
+                        label: context.trText(event.sourceLabel),
+                        colors: colors,
+                      ),
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Text(event.subtitle),
+                  Text(_localizedAuditSubtitle(context, event)),
                   const SizedBox(height: 4),
                   Text(
                     _formatDateTime(event.createdAt),
@@ -412,9 +463,12 @@ class _MessageCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: Theme.of(context).textTheme.titleMedium),
+                  Text(
+                    context.trText(title),
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                   const SizedBox(height: 6),
-                  Text(message),
+                  Text(context.trText(message)),
                 ],
               ),
             ),
@@ -461,6 +515,29 @@ String _compactPayload(Map<String, dynamic> payload) {
       .map((entry) => '${entry.key}: ${entry.value}')
       .join(' — ');
   return visible.isEmpty
-      ? 'Détails techniques disponibles côté serveur.'
+      ? OpenIrnLocalizations.instance.tr('security.event.technical_details')
       : visible;
+}
+
+String _localizedAuditSubtitle(BuildContext context, SecurityAuditEvent event) {
+  final parts = <String>[];
+  if (event.deviceId.trim().isNotEmpty) {
+    parts.add(
+      context.tr('security.event.device', values: {'device': event.deviceId}),
+    );
+  }
+  if (event.userId.trim().isNotEmpty) {
+    parts.add(
+      context.tr('security.event.user', values: {'user': event.userId}),
+    );
+  }
+  if (event.ipAddress.trim().isNotEmpty) {
+    parts.add('IP ${event.ipAddress}');
+  }
+  if (event.reason.trim().isNotEmpty) {
+    parts.add(event.reason);
+  }
+  return parts.isEmpty
+      ? context.tr('security.event.no_details')
+      : parts.join(' — ');
 }

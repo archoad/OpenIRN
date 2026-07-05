@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../l10n/openirn_localizations.dart';
 import 'sync_connectivity_indicator.dart';
 
 /// AppBar commune OpenIRN.
@@ -23,13 +24,14 @@ class OpenIrnAppBar extends StatelessWidget implements PreferredSizeWidget {
 
   @override
   Widget build(BuildContext context) {
+    final i18n = context.i18n;
     final visibleActions = actions.where((action) => !action.hidden).toList();
 
     return AppBar(
       automaticallyImplyLeading: automaticallyImplyLeading,
       centerTitle: true,
       title: Text(
-        title,
+        i18n.text(title),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         textAlign: TextAlign.center,
@@ -37,9 +39,11 @@ class OpenIrnAppBar extends StatelessWidget implements PreferredSizeWidget {
       actions: [
         const SyncConnectivityIndicator(),
         const SizedBox(width: 2),
+        const OpenIrnLanguageSwitcher(),
+        const SizedBox(width: 2),
         if (visibleActions.isNotEmpty)
           PopupMenuButton<String>(
-            tooltip: 'Actions',
+            tooltip: context.tr('common.actions', fallback: 'Actions'),
             icon: const Icon(Icons.more_vert),
             onSelected: (id) {
               final action = visibleActions
@@ -75,7 +79,7 @@ class OpenIrnAppBar extends StatelessWidget implements PreferredSizeWidget {
                       ],
                       Flexible(
                         child: Text(
-                          action.label,
+                          context.trText(action.label),
                           overflow: TextOverflow.ellipsis,
                           style: action.destructive
                               ? TextStyle(
@@ -92,6 +96,65 @@ class OpenIrnAppBar extends StatelessWidget implements PreferredSizeWidget {
           ),
         const SizedBox(width: 4),
       ],
+    );
+  }
+}
+
+class OpenIrnLanguageSwitcher extends StatelessWidget {
+  const OpenIrnLanguageSwitcher({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final i18n = context.i18n;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: OpenIrnLanguage.values.map((language) {
+        final selected = i18n.language == language;
+        final tooltipKey = switch (language) {
+          OpenIrnLanguage.fr => 'common.language.switch_to_fr',
+          OpenIrnLanguage.en => 'common.language.switch_to_en',
+        };
+        return Tooltip(
+          message: context.tr(tooltipKey, fallback: language.label),
+          child: Semantics(
+            button: true,
+            selected: selected,
+            label: context.tr(
+              'common.language.current',
+              fallback: 'Langue actuelle : {language}',
+              values: {'language': language.label},
+            ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: selected
+                  ? null
+                  : () {
+                      i18n.setLanguage(language);
+                    },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                margin: const EdgeInsets.symmetric(horizontal: 1),
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: selected
+                        ? Theme.of(context).colorScheme.primary
+                        : Theme.of(context).colorScheme.outlineVariant,
+                  ),
+                  color: selected
+                      ? Theme.of(context).colorScheme.primaryContainer
+                      : Colors.transparent,
+                ),
+                child: Text(
+                  language.flag,
+                  style: const TextStyle(fontSize: 16),
+                ),
+              ),
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 }

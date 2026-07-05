@@ -21,6 +21,7 @@ import '../../domain/services/app_sync_coordinator.dart';
 import '../../domain/services/official_rnr_scoring_service.dart';
 import '../../domain/services/referential_catalog_service.dart';
 import '../../domain/services/sync_automation_service.dart';
+import '../../l10n/openirn_localizations.dart';
 import '../activity/activity_log_screen.dart';
 import '../assignments/criterion_assignment_screen.dart';
 import '../common/openirn_app_bar.dart';
@@ -30,6 +31,101 @@ import 'assessment_export_screen.dart';
 import 'assessment_quality_screen.dart';
 import 'assessment_summary_screen.dart';
 import 'scoring_method_screen.dart';
+
+String _campaignStatusLabel(BuildContext context, LocalCampaignStatus status) {
+  return context.tr(
+    'campaign.status.${status.jsonValue}',
+    fallback: status.label,
+  );
+}
+
+String _campaignStatusHelper(BuildContext context, LocalCampaignStatus status) {
+  return context.tr(
+    'campaign.status.${status.jsonValue}.helper',
+    fallback: status.helperText,
+  );
+}
+
+String _roleLabel(BuildContext context, AppUserRole role) {
+  return context.tr('role.${role.jsonValue}', fallback: role.label);
+}
+
+String _criterionScopeLabel(BuildContext context, CriterionScope scope) {
+  return context.tr(
+    'assessment.criterion.scope.${scope.jsonValue}',
+    fallback: scope.label,
+  );
+}
+
+String _answerLabel(BuildContext context, IrnAnswer answer) {
+  switch (answer) {
+    case IrnAnswer.notAnswered:
+      return context.tr(
+        'assessment.answer.not_answered.short',
+        fallback: answer.label,
+      );
+    case IrnAnswer.notConcerned:
+      return context.tr(
+        'assessment.answer.not_concerned.short',
+        fallback: answer.label,
+      );
+    case IrnAnswer.nonResilient:
+      return context.tr(
+        'assessment.answer.non_resilient.short',
+        fallback: answer.label,
+      );
+    case IrnAnswer.intention:
+      return context.tr(
+        'assessment.answer.intention.short',
+        fallback: answer.label,
+      );
+    case IrnAnswer.medium:
+      return context.tr(
+        'assessment.answer.medium.short',
+        fallback: answer.label,
+      );
+    case IrnAnswer.result:
+      return context.tr(
+        'assessment.answer.result.short',
+        fallback: answer.label,
+      );
+  }
+}
+
+String _answerHelp(BuildContext context, IrnAnswer answer) {
+  switch (answer) {
+    case IrnAnswer.notAnswered:
+      return context.tr(
+        'assessment.answer.not_answered.help',
+        fallback: answer.scoringHelp,
+      );
+    case IrnAnswer.notConcerned:
+      return context.tr(
+        'assessment.answer.not_concerned.help',
+        fallback: answer.scoringHelp,
+      );
+    case IrnAnswer.nonResilient:
+      return context.tr(
+        'assessment.answer.non_resilient.help',
+        fallback: answer.scoringHelp,
+      );
+    case IrnAnswer.intention:
+      return context.tr(
+        'assessment.answer.intention.help',
+        fallback: answer.scoringHelp,
+      );
+    case IrnAnswer.medium:
+      return context.tr(
+        'assessment.answer.medium.help',
+        fallback: answer.scoringHelp,
+      );
+    case IrnAnswer.result:
+      return context.tr(
+        'assessment.answer.result.help',
+        fallback: answer.scoringHelp,
+      );
+  }
+}
 
 class AssessmentScreen extends StatefulWidget {
   final IrnReferential referential;
@@ -673,23 +769,20 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         insetPadding: responsiveDialogInsetPadding(dialogContext),
-        title: const Text('Réinitialiser la campagne ?'),
-        content: const ResponsiveDialogContent(
+        title: Text(context.tr('assessment.reset.title')),
+        content: ResponsiveDialogContent(
           maxWidth: 620,
-          child: Text(
-            'Cette action supprimera toutes les notes IRN et toutes les justifications de cette campagne. '
-            'Elle ne peut pas être annulée.',
-          ),
+          child: Text(context.tr('assessment.reset.body')),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Annuler'),
+            child: Text(context.tr('common.action.cancel')),
           ),
           FilledButton.tonalIcon(
             onPressed: () => Navigator.of(dialogContext).pop(true),
             icon: const Icon(Icons.delete_outline),
-            label: const Text('Réinitialiser'),
+            label: Text(context.tr('assessment.action.reset')),
           ),
         ],
       ),
@@ -1005,7 +1098,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
           if (canEditCampaign)
             OpenIrnAppBarAction(
               id: 'info',
-              label: 'Informations',
+              label: context.tr('assessment.action.information'),
               icon: Icons.edit_note_outlined,
               enabled: !_isLoadingAnswers,
               onSelected: _editCampaignInformation,
@@ -1013,21 +1106,21 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
           if (canManageAssignments)
             OpenIrnAppBarAction(
               id: 'assign',
-              label: 'Affectations',
+              label: context.tr('assessment.action.assignments'),
               icon: Icons.assignment_ind_outlined,
               enabled: !_isLoadingAnswers && !_isLoadingAssignments,
               onSelected: _openAssignments,
             ),
           OpenIrnAppBarAction(
             id: 'summary',
-            label: 'Synthèse',
+            label: context.tr('assessment.action.summary'),
             icon: Icons.insights_outlined,
             enabled: !_isLoadingAnswers,
             onSelected: _openSummary,
           ),
           OpenIrnAppBarAction(
             id: 'scoring-method',
-            label: 'Calcul de la note',
+            label: context.tr('assessment.action.scoring_method'),
             icon: Icons.functions_outlined,
             enabled: !_isLoadingAnswers,
             onSelected: _openScoringMethod,
@@ -1035,14 +1128,14 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
           if (canExportCampaign)
             OpenIrnAppBarAction(
               id: 'export',
-              label: 'Export JSON',
+              label: context.tr('assessment.action.export_json'),
               icon: Icons.data_object_outlined,
               enabled: !_isLoadingAnswers,
               onSelected: _openExport,
             ),
           OpenIrnAppBarAction(
             id: 'quality',
-            label: 'Qualité',
+            label: context.tr('assessment.action.quality'),
             icon: Icons.rule_folder_outlined,
             enabled: !_isLoadingAnswers,
             onSelected: _openQuality,
@@ -1050,7 +1143,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
           if (canViewActivityLog)
             OpenIrnAppBarAction(
               id: 'journal',
-              label: 'Journal',
+              label: context.tr('assessment.action.activity_log'),
               icon: Icons.history_outlined,
               enabled: !_isLoadingAnswers,
               onSelected: _openActivityLog,
@@ -1060,7 +1153,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
           if (canResetAnswers)
             OpenIrnAppBarAction(
               id: 'reset',
-              label: 'Réinitialiser',
+              label: context.tr('assessment.action.reset'),
               icon: Icons.refresh,
               enabled:
                   canEditCampaign &&
@@ -1197,13 +1290,11 @@ class _NoAssignedCriteriaCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Aucun critère affecté',
+                    context.tr('assessment.no_assigned.title'),
                     style: theme.textTheme.titleMedium,
                   ),
                   const SizedBox(height: 4),
-                  const Text(
-                    'Votre profil Évaluateur ne possède actuellement aucune affectation sur cette campagne.',
-                  ),
+                  Text(context.tr('assessment.no_assigned.body')),
                 ],
               ),
             ),
@@ -1247,31 +1338,47 @@ class _CampaignContextCard extends StatelessWidget {
                 children: [
                   Text(campaign.name, style: theme.textTheme.titleMedium),
                   const SizedBox(height: 4),
-                  Text('Référentiel ${referential.version}'),
+                  Text(
+                    context.tr(
+                      'assessment.context.referential_version',
+                      values: {'version': referential.version},
+                    ),
+                  ),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
                     children: [
-                      Chip(label: Text(campaign.status.label)),
+                      Chip(
+                        label: Text(
+                          _campaignStatusLabel(context, campaign.status),
+                        ),
+                      ),
                       Chip(
                         avatar: const Icon(
                           Icons.verified_user_outlined,
                           size: 18,
                         ),
-                        label: Text('Session : ${activeUser.displayName}'),
+                        label: Text(
+                          context.tr(
+                            'assessment.context.session',
+                            values: {'name': activeUser.displayName},
+                          ),
+                        ),
                       ),
-                      Chip(label: Text(activeUser.role.label)),
+                      Chip(label: Text(_roleLabel(context, activeUser.role))),
                       if (campaign.isReadOnly)
-                        const Chip(
-                          avatar: Icon(Icons.lock_outline, size: 18),
-                          label: Text('Lecture seule'),
+                        Chip(
+                          avatar: const Icon(Icons.lock_outline, size: 18),
+                          label: Text(
+                            context.tr('assessment.context.read_only'),
+                          ),
                         ),
                     ],
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    campaign.status.helperText,
+                    _campaignStatusHelper(context, campaign.status),
                     style: theme.textTheme.bodySmall,
                   ),
                   if (campaign.description.isNotEmpty) ...[
@@ -1286,8 +1393,8 @@ class _CampaignContextCard extends StatelessWidget {
                     child: FilledButton.tonalIcon(
                       onPressed: canEdit ? onEditInformation : null,
                       icon: const Icon(Icons.edit_note_outlined),
-                      label: const Text(
-                        'Modifier les informations de campagne',
+                      label: Text(
+                        context.tr('assessment.context.edit_information'),
                       ),
                     ),
                   ),
@@ -1317,41 +1424,63 @@ class _CampaignInfoRows extends StatelessWidget {
           avatar: const Icon(Icons.dns_outlined, size: 18),
           label: Text(
             info.systemName.trim().isEmpty
-                ? 'SI non renseigné'
-                : 'SI : ${info.systemName}',
+                ? context.tr('assessment.context.system_missing')
+                : context.tr(
+                    'assessment.context.system',
+                    values: {'name': info.systemName},
+                  ),
           ),
         ),
         if (info.criticalFunctionName.trim().isNotEmpty)
           Chip(
             avatar: const Icon(Icons.account_tree_outlined, size: 18),
-            label: Text('Fonction : ${info.criticalFunctionName}'),
+            label: Text(
+              context.tr(
+                'assessment.context.critical_function',
+                values: {'name': info.criticalFunctionName},
+              ),
+            ),
           ),
         if (info.isAssetScoped)
           Chip(
             avatar: const Icon(Icons.inventory_2_outlined, size: 18),
-            label: Text('${info.assets.length} actif(s) à noter'),
+            label: Text(
+              context.tr(
+                'assessment.context.assets_to_score',
+                values: {'count': info.assets.length},
+              ),
+            ),
           ),
         Chip(
           avatar: const Icon(Icons.person_outline, size: 18),
-          label: Text(_projectDirectorLabel(info)),
+          label: Text(_projectDirectorLabel(context, info)),
         ),
       ],
     );
   }
 
-  String _projectDirectorLabel(CampaignInformation info) {
+  String _projectDirectorLabel(BuildContext context, CampaignInformation info) {
     final name = info.projectDirectorFullName;
     final email = info.projectDirectorEmail.trim();
     if (name.isNotEmpty && email.isNotEmpty) {
-      return 'Directeur : $name <$email>';
+      return context.tr(
+        'assessment.context.project_director_name_email',
+        values: {'name': name, 'email': email},
+      );
     }
     if (name.isNotEmpty) {
-      return 'Directeur : $name';
+      return context.tr(
+        'assessment.context.project_director_name',
+        values: {'name': name},
+      );
     }
     if (email.isNotEmpty) {
-      return 'Directeur : $email';
+      return context.tr(
+        'assessment.context.project_director_email',
+        values: {'email': email},
+      );
     }
-    return 'Directeur projet non renseigné';
+    return context.tr('assessment.context.project_director_missing');
   }
 }
 
@@ -1447,7 +1576,7 @@ class _CampaignInformationDialogState
   Widget build(BuildContext context) {
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
-      title: const Text('Informations de campagne'),
+      title: Text(context.tr('assessment.information.title')),
       content: ResponsiveDialogContent(
         maxWidth: 880,
         child: Form(
@@ -1458,20 +1587,26 @@ class _CampaignInformationDialogState
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Campagne',
+                  context.tr('assessment.information.section.campaign'),
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 10),
                 TextFormField(
                   controller: _nameController,
                   autofocus: shouldAutofocusTextField(context),
-                  decoration: const InputDecoration(
-                    labelText: 'Nom de la campagne',
-                    hintText: 'Ex. Évaluation IRN 2026 — SI Facturation',
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: context.tr(
+                      'assessment.information.campaign_name',
+                    ),
+                    hintText: context.tr(
+                      'assessment.information.campaign_name_hint',
+                    ),
+                    border: const OutlineInputBorder(),
                   ),
                   validator: (value) => value == null || value.trim().isEmpty
-                      ? 'Le nom de campagne est obligatoire.'
+                      ? context.tr(
+                          'assessment.validation.campaign_name_required',
+                        )
                       : null,
                 ),
                 const SizedBox(height: 10),
@@ -1479,28 +1614,35 @@ class _CampaignInformationDialogState
                   controller: _descriptionController,
                   minLines: 2,
                   maxLines: 4,
-                  decoration: const InputDecoration(
-                    labelText: 'Description de la campagne',
-                    hintText:
-                        'Périmètre, contexte ou objectif de l’évaluation.',
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: context.tr(
+                      'assessment.information.campaign_description',
+                    ),
+                    hintText: context.tr(
+                      'assessment.information.campaign_description_hint',
+                    ),
+                    border: const OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 18),
                 Text(
-                  'Système d’information concerné',
+                  context.tr(
+                    'assessment.information.section.information_system',
+                  ),
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 10),
                 TextFormField(
                   controller: _systemNameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Nom du système d’information',
-                    hintText: 'Ex. SI Facturation',
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: context.tr('assessment.information.system_name'),
+                    hintText: context.tr(
+                      'assessment.information.system_name_hint',
+                    ),
+                    border: const OutlineInputBorder(),
                   ),
                   validator: (value) => value == null || value.trim().isEmpty
-                      ? 'Le nom du SI est obligatoire.'
+                      ? context.tr('assessment.validation.system_name_required')
                       : null,
                 ),
                 const SizedBox(height: 10),
@@ -1508,19 +1650,24 @@ class _CampaignInformationDialogState
                   controller: _systemDescriptionController,
                   minLines: 3,
                   maxLines: 6,
-                  decoration: const InputDecoration(
-                    labelText: 'Description du système d’information',
-                    hintText:
-                        'Fonction métier supportée, criticité, principaux composants ou dépendances.',
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: context.tr(
+                      'assessment.information.system_description',
+                    ),
+                    hintText: context.tr(
+                      'assessment.information.system_description_hint',
+                    ),
+                    border: const OutlineInputBorder(),
                   ),
                   validator: (value) => value == null || value.trim().isEmpty
-                      ? 'La description du SI est obligatoire.'
+                      ? context.tr(
+                          'assessment.validation.system_description_required',
+                        )
                       : null,
                 ),
                 const SizedBox(height: 18),
                 Text(
-                  'Directeur de projet',
+                  context.tr('assessment.information.section.project_director'),
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 10),
@@ -1529,13 +1676,17 @@ class _CampaignInformationDialogState
                     Expanded(
                       child: TextFormField(
                         controller: _projectDirectorFirstNameController,
-                        decoration: const InputDecoration(
-                          labelText: 'Prénom',
-                          border: OutlineInputBorder(),
+                        decoration: InputDecoration(
+                          labelText: context.tr(
+                            'assessment.information.first_name',
+                          ),
+                          border: const OutlineInputBorder(),
                         ),
                         validator: (value) =>
                             value == null || value.trim().isEmpty
-                            ? 'Prénom obligatoire.'
+                            ? context.tr(
+                                'assessment.validation.first_name_required',
+                              )
                             : null,
                       ),
                     ),
@@ -1543,13 +1694,17 @@ class _CampaignInformationDialogState
                     Expanded(
                       child: TextFormField(
                         controller: _projectDirectorLastNameController,
-                        decoration: const InputDecoration(
-                          labelText: 'Nom',
-                          border: OutlineInputBorder(),
+                        decoration: InputDecoration(
+                          labelText: context.tr(
+                            'assessment.information.last_name',
+                          ),
+                          border: const OutlineInputBorder(),
                         ),
                         validator: (value) =>
                             value == null || value.trim().isEmpty
-                            ? 'Nom obligatoire.'
+                            ? context.tr(
+                                'assessment.validation.last_name_required',
+                              )
                             : null,
                       ),
                     ),
@@ -1566,18 +1721,18 @@ class _CampaignInformationDialogState
                   enableSuggestions: false,
                   smartDashesType: SmartDashesType.disabled,
                   smartQuotesType: SmartQuotesType.disabled,
-                  decoration: const InputDecoration(
-                    labelText: 'Email',
-                    hintText: 'prenom.nom@entreprise.fr',
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: context.tr('assessment.information.email'),
+                    hintText: context.tr('assessment.information.email_hint'),
+                    border: const OutlineInputBorder(),
                   ),
                   validator: (value) {
                     final email = value?.trim() ?? '';
                     if (email.isEmpty) {
-                      return 'Email obligatoire.';
+                      return context.tr('assessment.validation.email_required');
                     }
                     if (!email.contains('@') || !email.contains('.')) {
-                      return 'Email invalide.';
+                      return context.tr('assessment.validation.email_invalid');
                     }
                     return null;
                   },
@@ -1590,9 +1745,12 @@ class _CampaignInformationDialogState
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Annuler'),
+          child: Text(context.tr('common.action.cancel')),
         ),
-        FilledButton(onPressed: _submit, child: const Text('Enregistrer')),
+        FilledButton(
+          onPressed: _submit,
+          child: Text(context.tr('common.action.save')),
+        ),
       ],
     );
   }
@@ -1614,8 +1772,11 @@ class _AssignmentStatusCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final label = isLoading
-        ? 'Chargement des affectations…'
-        : 'Critères affectés : $assignmentCount/$totalCriteria';
+        ? context.tr('assessment.assignments.loading')
+        : context.tr(
+            'assessment.assignments.count',
+            values: {'assigned': assignmentCount, 'total': totalCriteria},
+          );
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -1627,7 +1788,7 @@ class _AssignmentStatusCard extends StatelessWidget {
             TextButton.icon(
               onPressed: isLoading ? null : onOpenAssignments,
               icon: const Icon(Icons.edit_outlined),
-              label: const Text('Gérer les affectations'),
+              label: Text(context.tr('assessment.assignments.manage')),
             ),
           ],
         ),
@@ -1642,7 +1803,7 @@ class _AssignmentChip extends StatelessWidget {
 
   const _AssignmentChip({required this.assignment, required this.assignedUser});
 
-  String get _assignedUserLabel {
+  String _assignedUserLabel(BuildContext context) {
     final user = assignedUser;
     if (user != null) {
       final fullName = user.fullName.trim();
@@ -1654,7 +1815,7 @@ class _AssignmentChip extends StatelessWidget {
         return email;
       }
     }
-    return 'Utilisateur non résolu';
+    return context.tr('assessment.assignment.user_unresolved');
   }
 
   @override
@@ -1662,8 +1823,11 @@ class _AssignmentChip extends StatelessWidget {
     final theme = Theme.of(context);
     final isAssigned = assignment != null;
     final label = isAssigned
-        ? 'Évaluateur : $_assignedUserLabel'
-        : 'Non affecté';
+        ? context.tr(
+            'assessment.assignment.evaluator',
+            values: {'user': _assignedUserLabel(context)},
+          )
+        : context.tr('assessment.assignment.unassigned');
     final icon = isAssigned ? Icons.person_outline : Icons.person_off_outlined;
     final backgroundColor = isAssigned
         ? theme.colorScheme.secondaryContainer
@@ -1731,12 +1895,19 @@ class _ScoreCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Score IRN', style: theme.textTheme.titleLarge),
+                      Text(
+                        context.tr('assessment.score.title'),
+                        style: theme.textTheme.titleLarge,
+                      ),
                       const SizedBox(height: 4),
                       Text(
                         maturity == null
-                            ? 'Grille IRN : NR=10, Intention=25, Moyen=50, Résultat=95. Les critères N.C. sont exclus du score.'
-                            : 'Maturité IRN du SI : moyenne géométrique des scores par pilier pour chaque actif, puis moyenne géométrique pondérée par la criticité des actifs.',
+                            ? context.tr(
+                                'assessment.score.standard_description',
+                              )
+                            : context.tr(
+                                'assessment.score.si_maturity_description',
+                              ),
                       ),
                     ],
                   ),
@@ -1751,34 +1922,109 @@ class _ScoreCard extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                Chip(label: Text('Critères : ${summary.totalCriteria}')),
-                Chip(label: Text('Renseignés : ${summary.answeredCriteria}')),
-                Chip(label: Text('N.C. : ${summary.notConcernedCriteria}')),
-                Chip(label: Text('NR : ${summary.nonResilientCriteria}')),
-                Chip(label: Text('Intention : ${summary.intentionCriteria}')),
-                Chip(label: Text('Moyen : ${summary.mediumCriteria}')),
-                Chip(label: Text('Résultat : ${summary.resultCriteria}')),
                 Chip(
                   label: Text(
-                    'Non renseignés : ${summary.notAnsweredCriteria}',
+                    context.tr(
+                      'assessment.score.criteria',
+                      values: {'count': summary.totalCriteria},
+                    ),
                   ),
                 ),
-                Chip(label: Text('Justifications : $justificationCount')),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'assessment.score.answered',
+                      values: {'count': summary.answeredCriteria},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'assessment.score.not_concerned',
+                      values: {'count': summary.notConcernedCriteria},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'assessment.score.non_resilient',
+                      values: {'count': summary.nonResilientCriteria},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'assessment.score.intention',
+                      values: {'count': summary.intentionCriteria},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'assessment.score.medium',
+                      values: {'count': summary.mediumCriteria},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'assessment.score.result',
+                      values: {'count': summary.resultCriteria},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'assessment.score.not_answered',
+                      values: {'count': summary.notAnsweredCriteria},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'assessment.score.justifications',
+                      values: {'count': justificationCount},
+                    ),
+                  ),
+                ),
                 if (maturity != null) ...[
                   Chip(
                     label: Text(
-                      'Actifs notés : ${maturity.scoredAssetCount}/${maturity.totalAssetCount}',
+                      context.tr(
+                        'assessment.score.scored_assets',
+                        values: {
+                          'scored': maturity.scoredAssetCount,
+                          'total': maturity.totalAssetCount,
+                        },
+                      ),
                     ),
                   ),
                   Chip(
                     label: Text(
-                      'Poids criticité : ${maturity.maturityWeightTotal}',
+                      context.tr(
+                        'assessment.score.criticality_weight',
+                        values: {'weight': maturity.maturityWeightTotal},
+                      ),
                     ),
                   ),
                 ],
                 Chip(
                   label: Text(
-                    'Complétude : ${(summary.completionRate * 100).toStringAsFixed(0)} %',
+                    context.tr(
+                      'assessment.score.completion',
+                      values: {
+                        'rate': (summary.completionRate * 100).toStringAsFixed(
+                          0,
+                        ),
+                      },
+                    ),
                   ),
                 ),
               ],
@@ -1805,7 +2051,9 @@ class _LocalPersistenceCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final icon = isLoading || isSaving ? Icons.sync : Icons.save_outlined;
-    final label = message ?? 'Sauvegarde prête.';
+    final label = message == null
+        ? context.tr('assessment.persistence.ready')
+        : context.trText(message!);
 
     return Card(
       child: Padding(
@@ -1864,12 +2112,12 @@ class _AssetScopeCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Notation par actif',
+                        context.tr('assessment.asset_scope.title'),
                         style: theme.textTheme.titleMedium,
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'Sélectionnez un actif avec les boutons ci-dessous. Les réponses restent enregistrées séparément pour chaque actif.',
+                        context.tr('assessment.asset_scope.description'),
                         style: theme.textTheme.bodySmall,
                       ),
                     ],
@@ -1879,7 +2127,7 @@ class _AssetScopeCard extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             if (assets.isEmpty)
-              const Text('Aucun actif n’est associé à cette campagne.')
+              Text(context.tr('assessment.asset_scope.empty'))
             else
               Wrap(
                 spacing: 8,
@@ -1925,16 +2173,32 @@ class _AssetProgressButton extends StatelessWidget {
         ? '$answeredCount'
         : '$answeredCount/$totalCriteria';
     final tooltip = asset.description.trim().isEmpty
-        ? '${asset.displayLabel} — $progressLabel critères renseignés'
-        : '${asset.displayLabel} — $progressLabel critères renseignés\n${asset.description.trim()}';
+        ? context.tr(
+            'assessment.asset_scope.tooltip',
+            values: {'asset': asset.displayLabel, 'progress': progressLabel},
+          )
+        : context.tr(
+            'assessment.asset_scope.tooltip_with_description',
+            values: {
+              'asset': asset.displayLabel,
+              'progress': progressLabel,
+              'description': asset.description.trim(),
+            },
+          );
 
     return Tooltip(
       message: tooltip,
       child: Semantics(
         button: true,
         selected: isSelected,
-        label:
-            '${asset.displayLabel}, ${asset.criticalityLabel}, $progressLabel critères renseignés',
+        label: context.tr(
+          'assessment.asset_scope.semantic_label',
+          values: {
+            'asset': asset.displayLabel,
+            'criticality': asset.criticalityLabel,
+            'progress': progressLabel,
+          },
+        ),
         child: ChoiceChip(
           selected: isSelected,
           onSelected: (_) => onTap(),
@@ -2007,8 +2271,15 @@ class _PillarAssessmentCard extends StatelessWidget {
         onExpansionChanged: onExpansionChanged,
         title: Text('${pillar.code} — ${pillar.label}'),
         subtitle: Text(
-          '${summary.answeredCriteria}/${summary.totalCriteria} coté(s) · '
-          '$justificationCount justification(s) · Score : ${summary.formattedOpenIrnRnrScore}',
+          context.tr(
+            'assessment.pillar.subtitle',
+            values: {
+              'answered': summary.answeredCriteria,
+              'total': summary.totalCriteria,
+              'justifications': justificationCount,
+              'score': summary.formattedOpenIrnRnrScore,
+            },
+          ),
         ),
         children: [
           for (final criterion in criteria)
@@ -2088,7 +2359,17 @@ class _CriterionAnswerTile extends StatelessWidget {
                           style: theme.textTheme.titleSmall,
                         ),
                         const SizedBox(height: 4),
-                        Text('Portée : ${criterion.scope.label}'),
+                        Text(
+                          context.tr(
+                            'assessment.criterion.scope_label',
+                            values: {
+                              'scope': _criterionScopeLabel(
+                                context,
+                                criterion.scope,
+                              ),
+                            },
+                          ),
+                        ),
                         const SizedBox(height: 6),
                         _AssignmentChip(
                           assignment: assignment,
@@ -2097,7 +2378,7 @@ class _CriterionAnswerTile extends StatelessWidget {
                         if (!canEdit) ...[
                           const SizedBox(height: 4),
                           Text(
-                            disabledReason,
+                            context.trText(disabledReason),
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: theme.colorScheme.error,
                             ),
@@ -2111,8 +2392,8 @@ class _CriterionAnswerTile extends StatelessWidget {
                       children: [
                         for (final option in IrnAnswer.ratingValues)
                           ChoiceChip(
-                            label: Text(option.label),
-                            tooltip: option.scoringHelp,
+                            label: Text(_answerLabel(context, option)),
+                            tooltip: _answerHelp(context, option),
                             selected: answer == option,
                             onSelected: canEdit
                                 ? (_) => onAnswerChanged(option)
@@ -2159,7 +2440,7 @@ class _CriterionAnswerTile extends StatelessWidget {
                     )
                   else
                     Text(
-                      'Aucune justification renseignée.',
+                      context.tr('assessment.justification.empty'),
                       style: theme.textTheme.bodySmall,
                     ),
                   const SizedBox(height: 6),
@@ -2176,8 +2457,8 @@ class _CriterionAnswerTile extends StatelessWidget {
                       ),
                       label: Text(
                         hasJustification
-                            ? 'Modifier la justification'
-                            : 'Ajouter une justification',
+                            ? context.tr('assessment.justification.edit')
+                            : context.tr('assessment.justification.add'),
                       ),
                     ),
                   ),
@@ -2238,7 +2519,12 @@ class _JustificationDialogState extends State<_JustificationDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
-      title: Text('Justification — ${widget.criterionCode}'),
+      title: Text(
+        context.tr(
+          'assessment.justification.dialog_title',
+          values: {'criterion': widget.criterionCode},
+        ),
+      ),
       content: ResponsiveDialogContent(
         maxWidth: 780,
         child: TextField(
@@ -2246,27 +2532,26 @@ class _JustificationDialogState extends State<_JustificationDialog> {
           autofocus: shouldAutofocusTextField(context),
           minLines: 5,
           maxLines: 10,
-          decoration: const InputDecoration(
-            labelText: 'Justification / commentaire',
+          decoration: InputDecoration(
+            labelText: context.tr('assessment.justification.label'),
             alignLabelWithHint: true,
-            border: OutlineInputBorder(),
-            hintText:
-                'Expliquez la réponse, citez une preuve, une hypothèse ou un point à vérifier.',
+            border: const OutlineInputBorder(),
+            hintText: context.tr('assessment.justification.hint'),
           ),
         ),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Annuler'),
+          child: Text(context.tr('common.action.cancel')),
         ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(''),
-          child: const Text('Effacer'),
+          child: Text(context.tr('assessment.justification.clear')),
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(_controller.text),
-          child: const Text('Enregistrer'),
+          child: Text(context.tr('common.action.save')),
         ),
       ],
     );

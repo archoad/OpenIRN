@@ -10,6 +10,7 @@ import '../../domain/services/app_sync_coordinator.dart';
 import '../../domain/services/assessment_quality_service.dart';
 import '../../domain/services/official_rnr_scoring_service.dart';
 import '../../domain/services/access_policy_service.dart';
+import '../../l10n/openirn_localizations.dart';
 import '../assessment/assessment_screen.dart';
 import '../common/openirn_app_bar.dart';
 
@@ -189,7 +190,12 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
 
   Future<void> _openCampaign(LocalCampaign campaign) async {
     if (!_accessPolicy.canReadCampaign(widget.activeUser)) {
-      _showForbidden('Votre profil ne permet pas d’ouvrir les campagnes.');
+      _showForbidden(
+        context.tr(
+          'screen.campaign.list.forbidden.open',
+          fallback: 'Votre profil ne permet pas d’ouvrir les campagnes.',
+        ),
+      );
       return;
     }
 
@@ -294,12 +300,22 @@ class _HeaderCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Campagnes OpenIRN',
+                    context.tr(
+                      'screen.campaign.list.header.title',
+                      fallback: 'Campagnes OpenIRN',
+                    ),
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Référentiel : ${referential.id} · ${referential.version}',
+                    context.tr(
+                      'screen.campaign.list.header.referential',
+                      fallback: 'Référentiel : {id} · {version}',
+                      values: {
+                        'id': referential.id,
+                        'version': referential.version,
+                      },
+                    ),
                   ),
                   const SizedBox(height: 8),
                 ],
@@ -357,14 +373,24 @@ class _CampaignCard extends StatelessWidget {
                           .isNotEmpty) ...[
                         const SizedBox(height: 6),
                         Text(
-                          'SI : ${campaign.information.systemName}',
+                          context.tr(
+                            'screen.campaign.list.card.system',
+                            fallback: 'SI : {system}',
+                            values: {'system': campaign.information.systemName},
+                          ),
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
                       ],
                       if (campaign.information.isAssetScoped) ...[
                         const SizedBox(height: 2),
                         Text(
-                          'Notation par actif : ${campaign.information.assets.length} actif(s)',
+                          context.tr(
+                            'screen.campaign.list.card.asset_scoring',
+                            fallback: 'Notation par actif : {count} actif(s)',
+                            values: {
+                              'count': campaign.information.assets.length,
+                            },
+                          ),
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
@@ -377,7 +403,16 @@ class _CampaignCard extends StatelessWidget {
                               .isNotEmpty) ...[
                         const SizedBox(height: 2),
                         Text(
-                          'Directeur projet : ${_projectDirectorLabel(campaign.information)}',
+                          context.tr(
+                            'screen.campaign.list.card.project_director',
+                            fallback: 'Directeur projet : {director}',
+                            values: {
+                              'director': _projectDirectorLabel(
+                                context,
+                                campaign.information,
+                              ),
+                            },
+                          ),
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
@@ -401,36 +436,110 @@ class _CampaignCard extends StatelessWidget {
               children: [
                 Chip(
                   avatar: const Icon(Icons.flag_outlined, size: 18),
-                  label: Text(campaign.status.label),
+                  label: Text(_statusLabel(context, campaign.status)),
                 ),
                 Chip(
                   label: Text(
-                    'Renseignés : ${summary.answeredCriteria}/${summary.totalCriteria}',
+                    context.tr(
+                      'screen.campaign.list.chip.answered',
+                      fallback: 'Renseignés : {answered}/{total}',
+                      values: {
+                        'answered': summary.answeredCriteria,
+                        'total': summary.totalCriteria,
+                      },
+                    ),
                   ),
                 ),
-                Chip(label: Text('N.C. : ${summary.notConcernedCriteria}')),
-                Chip(label: Text('NR : ${summary.nonResilientCriteria}')),
-                Chip(label: Text('Intention : ${summary.intentionCriteria}')),
-                Chip(label: Text('Moyen : ${summary.mediumCriteria}')),
-                Chip(label: Text('Résultat : ${summary.resultCriteria}')),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'screen.campaign.list.chip.not_concerned',
+                      fallback: 'N.C. : {count}',
+                      values: {'count': summary.notConcernedCriteria},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'screen.campaign.list.chip.non_resilient',
+                      fallback: 'NR : {count}',
+                      values: {'count': summary.nonResilientCriteria},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'screen.campaign.list.chip.intention',
+                      fallback: 'Intention : {count}',
+                      values: {'count': summary.intentionCriteria},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'screen.campaign.list.chip.medium',
+                      fallback: 'Moyen : {count}',
+                      values: {'count': summary.mediumCriteria},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'screen.campaign.list.chip.result',
+                      fallback: 'Résultat : {count}',
+                      values: {'count': summary.resultCriteria},
+                    ),
+                  ),
+                ),
                 if (maturitySummary != null) ...[
                   Chip(
                     label: Text(
-                      'Actifs notés : ${maturitySummary.scoredAssetCount}/${maturitySummary.totalAssetCount}',
+                      context.tr(
+                        'screen.campaign.list.chip.scored_assets',
+                        fallback: 'Actifs notés : {scored}/{total}',
+                        values: {
+                          'scored': maturitySummary.scoredAssetCount,
+                          'total': maturitySummary.totalAssetCount,
+                        },
+                      ),
                     ),
                   ),
                   Chip(
                     label: Text(
-                      'Poids criticité : ${maturitySummary.maturityWeightTotal}',
+                      context.tr(
+                        'screen.campaign.list.chip.criticality_weight',
+                        fallback: 'Poids criticité : {weight}',
+                        values: {'weight': maturitySummary.maturityWeightTotal},
+                      ),
                     ),
                   ),
                 ],
                 Chip(
                   label: Text(
-                    'Complétude : ${(summary.completionRate * 100).toStringAsFixed(0)} %',
+                    context.tr(
+                      'screen.campaign.list.chip.completion',
+                      fallback: 'Complétude : {rate} %',
+                      values: {
+                        'rate': (summary.completionRate * 100).toStringAsFixed(
+                          0,
+                        ),
+                      },
+                    ),
                   ),
                 ),
-                Chip(label: Text('Maj : ${_formatDate(campaign.updatedAt)}')),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'common.updated_at_short',
+                      fallback: 'Maj : {date}',
+                      values: {'date': _formatDate(campaign.updatedAt)},
+                    ),
+                  ),
+                ),
                 Chip(
                   avatar: Icon(
                     qualityReport.isCampaignInformationComplete
@@ -440,20 +549,35 @@ class _CampaignCard extends StatelessWidget {
                   ),
                   label: Text(
                     qualityReport.isCampaignInformationComplete
-                        ? 'Infos campagne OK'
-                        : 'Infos manquantes : ${qualityReport.missingCampaignInformationCount}',
+                        ? context.tr(
+                            'screen.campaign.list.chip.info_ok',
+                            fallback: 'Infos campagne OK',
+                          )
+                        : context.tr(
+                            'screen.campaign.list.chip.info_missing',
+                            fallback: 'Infos manquantes : {count}',
+                            values: {
+                              'count':
+                                  qualityReport.missingCampaignInformationCount,
+                            },
+                          ),
                   ),
                 ),
                 if (campaign.isReadOnly)
-                  const Chip(
-                    avatar: Icon(Icons.lock_outline, size: 18),
-                    label: Text('Lecture seule'),
+                  Chip(
+                    avatar: const Icon(Icons.lock_outline, size: 18),
+                    label: Text(
+                      context.tr(
+                        'screen.campaign.list.chip.read_only',
+                        fallback: 'Lecture seule',
+                      ),
+                    ),
                   ),
               ],
             ),
             const SizedBox(height: 10),
             Text(
-              campaign.status.helperText,
+              _statusHelperText(context, campaign.status),
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 14),
@@ -462,7 +586,7 @@ class _CampaignCard extends StatelessWidget {
               child: FilledButton.icon(
                 onPressed: onOpen,
                 icon: const Icon(Icons.login_outlined),
-                label: const Text('Ouvrir'),
+                label: Text(context.tr('action.open', fallback: 'Ouvrir')),
               ),
             ),
           ],
@@ -471,7 +595,51 @@ class _CampaignCard extends StatelessWidget {
     );
   }
 
-  String _projectDirectorLabel(CampaignInformation information) {
+  String _statusLabel(BuildContext context, LocalCampaignStatus status) {
+    switch (status) {
+      case LocalCampaignStatus.draft:
+        return context.tr('campaign.status.draft', fallback: 'Brouillon');
+      case LocalCampaignStatus.readyForReview:
+        return context.tr(
+          'campaign.status.ready_for_review',
+          fallback: 'Prêt pour revue',
+        );
+      case LocalCampaignStatus.validated:
+        return context.tr('campaign.status.validated', fallback: 'Validé');
+      case LocalCampaignStatus.archived:
+        return context.tr('campaign.status.archived', fallback: 'Archivé');
+    }
+  }
+
+  String _statusHelperText(BuildContext context, LocalCampaignStatus status) {
+    switch (status) {
+      case LocalCampaignStatus.draft:
+        return context.tr(
+          'campaign.status.draft.helper',
+          fallback: 'La campagne peut encore être complétée.',
+        );
+      case LocalCampaignStatus.readyForReview:
+        return context.tr(
+          'campaign.status.ready_for_review.helper',
+          fallback: 'La campagne est complète et peut être relue.',
+        );
+      case LocalCampaignStatus.validated:
+        return context.tr(
+          'campaign.status.validated.helper',
+          fallback: 'La campagne est validée et passe en lecture seule.',
+        );
+      case LocalCampaignStatus.archived:
+        return context.tr(
+          'campaign.status.archived.helper',
+          fallback: 'La campagne est archivée et reste consultable.',
+        );
+    }
+  }
+
+  String _projectDirectorLabel(
+    BuildContext context,
+    CampaignInformation information,
+  ) {
     final name = information.projectDirectorFullName;
     final email = information.projectDirectorEmail.trim();
     if (name.isNotEmpty && email.isNotEmpty) {
@@ -483,7 +651,7 @@ class _CampaignCard extends StatelessWidget {
     if (email.isNotEmpty) {
       return email;
     }
-    return 'non renseigné';
+    return context.tr('common.not_provided', fallback: 'non renseigné');
   }
 
   String _formatDate(DateTime date) {
@@ -502,17 +670,26 @@ class _NoCampaignState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Card(
+    return Card(
       child: Padding(
-        padding: EdgeInsets.all(24),
+        padding: const EdgeInsets.all(24),
         child: Column(
           children: [
-            Icon(Icons.folder_off_outlined, size: 44),
-            SizedBox(height: 12),
-            Text('Aucune campagne disponible.'),
-            SizedBox(height: 6),
+            const Icon(Icons.folder_off_outlined, size: 44),
+            const SizedBox(height: 12),
             Text(
-              'Utilise le menu ⋮ puis “Gérer les campagnes” pour créer une campagne.',
+              context.tr(
+                'screen.campaign.list.empty.title',
+                fallback: 'Aucune campagne disponible.',
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              context.tr(
+                'screen.campaign.list.empty.subtitle',
+                fallback:
+                    'Utilise le menu ⋮ puis “Gérer les campagnes” pour créer une campagne.',
+              ),
             ),
           ],
         ),
@@ -537,12 +714,18 @@ class _ErrorState extends StatelessWidget {
           children: [
             const Icon(Icons.error_outline, size: 42),
             const SizedBox(height: 12),
-            Text('Impossible de charger les campagnes : $error'),
+            Text(
+              context.tr(
+                'screen.campaign.list.error.load',
+                fallback: 'Impossible de charger les campagnes : {error}',
+                values: {'error': error},
+              ),
+            ),
             const SizedBox(height: 12),
             FilledButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh),
-              label: const Text('Réessayer'),
+              label: Text(context.tr('action.retry', fallback: 'Réessayer')),
             ),
           ],
         ),

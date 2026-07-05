@@ -7,6 +7,7 @@ import '../../domain/models/app_user.dart';
 import '../../domain/models/irn_asset_inventory.dart';
 import '../../domain/models/sync_configuration.dart';
 import '../../domain/services/access_policy_service.dart';
+import '../../l10n/openirn_localizations.dart';
 import '../common/openirn_app_bar.dart';
 import '../common/responsive_autofocus.dart';
 import '../common/responsive_dialog.dart';
@@ -90,7 +91,11 @@ class _AssetInventoryManagementScreenState
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${result.title} — ${result.message}')),
+        SnackBar(
+          content: Text(
+            '${context.trText(result.title)} — ${context.trText(result.message)}',
+          ),
+        ),
       );
       await _refresh();
     } finally {
@@ -149,9 +154,11 @@ class _AssetInventoryManagementScreenState
     CriticalFunctionInfo function,
   ) async {
     final confirmed = await _confirmDelete(
-      title: 'Supprimer la fonction critique ?',
-      message:
-          'La fonction « ${function.name} » sera supprimée avec ses systèmes d’information et actifs associés.',
+      title: context.tr('inventory.confirm.delete_function.title'),
+      message: context.tr(
+        'inventory.confirm.delete_function.message',
+        values: {'name': function.name},
+      ),
     );
     if (!confirmed) {
       return;
@@ -226,9 +233,11 @@ class _AssetInventoryManagementScreenState
     InformationSystemInfo system,
   ) async {
     final confirmed = await _confirmDelete(
-      title: 'Supprimer le système d’information ?',
-      message:
-          'Le SI « ${system.name} » sera supprimé avec les actifs associés.',
+      title: context.tr('inventory.confirm.delete_system.title'),
+      message: context.tr(
+        'inventory.confirm.delete_system.message',
+        values: {'name': system.name},
+      ),
     );
     if (!confirmed) {
       return;
@@ -305,8 +314,11 @@ class _AssetInventoryManagementScreenState
     InformationAssetInfo asset,
   ) async {
     final confirmed = await _confirmDelete(
-      title: 'Supprimer l’actif ?',
-      message: 'L’actif « ${asset.name} » sera supprimé de l’inventaire SI.',
+      title: context.tr('inventory.confirm.delete_asset.title'),
+      message: context.tr(
+        'inventory.confirm.delete_asset.message',
+        values: {'name': asset.name},
+      ),
     );
     if (!confirmed) {
       return;
@@ -340,7 +352,11 @@ class _AssetInventoryManagementScreenState
       }
       if (!result.isAvailable || result.bytes == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${result.title} — ${result.message}')),
+          SnackBar(
+            content: Text(
+              '${context.trText(result.title)} — ${context.trText(result.message)}',
+            ),
+          ),
         );
         return;
       }
@@ -355,8 +371,11 @@ class _AssetInventoryManagementScreenState
         SnackBar(
           content: Text(
             savedPath == null
-                ? 'Export Excel annulé.'
-                : 'Actifs du SI « ${system.name} » exportés : $savedPath',
+                ? context.tr('inventory.excel.export_cancelled')
+                : context.tr(
+                    'inventory.excel.export_success',
+                    values: {'system': system.name, 'path': savedPath},
+                  ),
           ),
         ),
       );
@@ -383,19 +402,22 @@ class _AssetInventoryManagementScreenState
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Importer les actifs du SI ?'),
+        title: Text(context.tr('inventory.excel.import_system.title')),
         content: Text(
-          'Le fichier « ${file.name} » remplacera uniquement la liste des actifs du SI « ${system.name} ». La colonne ID actif permet de mettre à jour les actifs existants ; les lignes sans ID créent de nouveaux actifs. La fonction critique, le SI, les campagnes et notes IRN ne seront pas modifiés.',
+          context.tr(
+            'inventory.excel.import_system.message',
+            values: {'file': file.name, 'system': system.name},
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Annuler'),
+            child: Text(context.tr('action.cancel')),
           ),
           FilledButton.icon(
             onPressed: () => Navigator.of(context).pop(true),
             icon: const Icon(Icons.upload_file_outlined),
-            label: const Text('Importer'),
+            label: Text(context.tr('action.import')),
           ),
         ],
       ),
@@ -418,7 +440,11 @@ class _AssetInventoryManagementScreenState
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${result.title} — ${result.message}')),
+        SnackBar(
+          content: Text(
+            '${context.trText(result.title)} — ${context.trText(result.message)}',
+          ),
+        ),
       );
       if (result.isAvailable) {
         await _refresh();
@@ -444,12 +470,12 @@ class _AssetInventoryManagementScreenState
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Annuler'),
+            child: Text(context.tr('action.cancel')),
           ),
           FilledButton.icon(
             onPressed: () => Navigator.of(context).pop(true),
             icon: const Icon(Icons.delete_outline),
-            label: const Text('Supprimer'),
+            label: Text(context.tr('action.delete')),
           ),
         ],
       ),
@@ -461,11 +487,11 @@ class _AssetInventoryManagementScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: OpenIrnAppBar(
-        title: 'Fonctions critiques & actifs',
+        title: context.tr('inventory.title'),
         actions: [
           OpenIrnAppBarAction(
             id: 'refresh_inventory',
-            label: 'Actualiser',
+            label: context.tr('action.refresh'),
             icon: Icons.refresh,
             onPressed: _working ? null : _refresh,
           ),
@@ -479,15 +505,15 @@ class _AssetInventoryManagementScreenState
           }
           final state = snapshot.data;
           if (state == null) {
-            return const _InventoryErrorCard(
-              title: 'État absent',
-              message: 'Impossible de charger l’inventaire SI.',
+            return _InventoryErrorCard(
+              title: context.tr('inventory.error.missing_state.title'),
+              message: context.tr('inventory.error.missing_state.message'),
             );
           }
           if (!state.available) {
             return _InventoryErrorCard(
-              title: state.title,
-              message: state.message,
+              title: context.trText(state.title),
+              message: context.trText(state.message),
             );
           }
           return _InventoryContent(
@@ -576,12 +602,19 @@ class _InventoryContent extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Inventaire du périmètre IRN',
+                      context.tr('inventory.overview.title'),
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'Espace : ${inventory.tenantDisplayName.isEmpty ? state.configuration.tenantId : inventory.tenantDisplayName}',
+                      context.tr(
+                        'inventory.overview.workspace',
+                        values: {
+                          'workspace': inventory.tenantDisplayName.isEmpty
+                              ? state.configuration.tenantId
+                              : inventory.tenantDisplayName,
+                        },
+                      ),
                     ),
                     const SizedBox(height: 10),
                     Wrap(
@@ -590,16 +623,31 @@ class _InventoryContent extends StatelessWidget {
                       children: [
                         Chip(
                           label: Text(
-                            '${inventory.criticalFunctions.length} fonction(s) critique(s)',
+                            context.tr(
+                              'inventory.count.critical_functions',
+                              values: {
+                                'count': inventory.criticalFunctions.length,
+                              },
+                            ),
                           ),
                         ),
                         Chip(
                           label: Text(
-                            '${inventory.informationSystems.length} système(s) d’information',
+                            context.tr(
+                              'inventory.count.information_systems',
+                              values: {
+                                'count': inventory.informationSystems.length,
+                              },
+                            ),
                           ),
                         ),
                         Chip(
-                          label: Text('${inventory.assets.length} actif(s)'),
+                          label: Text(
+                            context.tr(
+                              'inventory.count.assets',
+                              values: {'count': inventory.assets.length},
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -611,7 +659,9 @@ class _InventoryContent extends StatelessWidget {
                         FilledButton.icon(
                           onPressed: working ? null : onCreateFunction,
                           icon: const Icon(Icons.add),
-                          label: const Text('Ajouter une fonction critique'),
+                          label: Text(
+                            context.tr('inventory.action.add_function'),
+                          ),
                         ),
                       ],
                     ),
@@ -691,8 +741,17 @@ class _FunctionCard extends StatelessWidget {
         title: Text(function.name),
         subtitle: Text(
           function.description.isEmpty
-              ? '${systems.length} SI associé(s)'
-              : '${systems.length} SI associé(s) — ${function.description}',
+              ? context.tr(
+                  'inventory.count.systems_short',
+                  values: {'count': systems.length},
+                )
+              : context.tr(
+                  'inventory.count.systems_with_description',
+                  values: {
+                    'count': systems.length,
+                    'description': function.description,
+                  },
+                ),
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
         ),
@@ -703,27 +762,27 @@ class _FunctionCard extends StatelessWidget {
               TextButton.icon(
                 onPressed: working ? null : onEditFunction,
                 icon: const Icon(Icons.edit_outlined),
-                label: const Text('Modifier'),
+                label: Text(context.tr('action.edit')),
               ),
               const SizedBox(width: 8),
               TextButton.icon(
                 onPressed: working ? null : onDeleteFunction,
                 icon: const Icon(Icons.delete_outline),
-                label: const Text('Supprimer'),
+                label: Text(context.tr('action.delete')),
               ),
               const Spacer(),
               FilledButton.icon(
                 onPressed: working ? null : onCreateSystem,
                 icon: const Icon(Icons.add),
-                label: const Text('Ajouter un SI'),
+                label: Text(context.tr('inventory.action.add_system')),
               ),
             ],
           ),
           const SizedBox(height: 8),
           if (systems.isEmpty)
-            const Align(
+            Align(
               alignment: Alignment.centerLeft,
-              child: Text('Aucun système d’information associé.'),
+              child: Text(context.tr('inventory.empty.systems')),
             )
           else
             for (final system in systems) ...[
@@ -747,18 +806,18 @@ class _FunctionCard extends StatelessWidget {
   }
 }
 
-String _assetCriticalityLabel(String value) {
+String _assetCriticalityLabel(BuildContext context, String value) {
   switch (value.trim()) {
     case '1':
-      return 'N1 — Standard';
+      return context.tr('inventory.asset.criticality.n1');
     case '2':
-      return 'N2 — Modérée';
+      return context.tr('inventory.asset.criticality.n2');
     case '3':
-      return 'N3 — Élevée';
+      return context.tr('inventory.asset.criticality.n3');
     case '4':
-      return 'N4 — Critique';
+      return context.tr('inventory.asset.criticality.n4');
   }
-  return 'Criticité non renseignée';
+  return context.tr('inventory.asset.criticality.missing');
 }
 
 class _SystemTile extends StatelessWidget {
@@ -794,8 +853,15 @@ class _SystemTile extends StatelessWidget {
         title: Text(system.name),
         subtitle: Text(
           [
-            if (system.owner.isNotEmpty) 'Porté par ${system.owner}',
-            '${assets.length} actif(s)',
+            if (system.owner.isNotEmpty)
+              context.tr(
+                'inventory.system.owner',
+                values: {'owner': system.owner},
+              ),
+            context.tr(
+              'inventory.count.assets',
+              values: {'count': assets.length},
+            ),
           ].join(' — '),
         ),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -812,34 +878,34 @@ class _SystemTile extends StatelessWidget {
               TextButton.icon(
                 onPressed: working ? null : onEdit,
                 icon: const Icon(Icons.edit_outlined),
-                label: const Text('Modifier'),
+                label: Text(context.tr('action.edit')),
               ),
               TextButton.icon(
                 onPressed: working ? null : onDelete,
                 icon: const Icon(Icons.delete_outline),
-                label: const Text('Supprimer'),
+                label: Text(context.tr('action.delete')),
               ),
               TextButton.icon(
                 onPressed: working ? null : onImportAssets,
                 icon: const Icon(Icons.upload_file_outlined),
-                label: const Text('Importer Excel'),
+                label: Text(context.tr('inventory.action.import_excel')),
               ),
               TextButton.icon(
                 onPressed: working ? null : onExportAssets,
                 icon: const Icon(Icons.download_outlined),
-                label: const Text('Exporter Excel'),
+                label: Text(context.tr('inventory.action.export_excel')),
               ),
               FilledButton.icon(
                 onPressed: working ? null : onCreateAsset,
                 icon: const Icon(Icons.add),
-                label: const Text('Ajouter un actif'),
+                label: Text(context.tr('inventory.action.add_asset')),
               ),
             ],
           ),
           if (assets.isEmpty)
-            const Align(
+            Align(
               alignment: Alignment.centerLeft,
-              child: Text('Aucun actif associé.'),
+              child: Text(context.tr('inventory.empty.assets')),
             )
           else
             for (final asset in assets)
@@ -849,7 +915,7 @@ class _SystemTile extends StatelessWidget {
                 subtitle: Text(
                   [
                     if (asset.assetType.isNotEmpty) asset.assetType,
-                    _assetCriticalityLabel(asset.criticality),
+                    _assetCriticalityLabel(context, asset.criticality),
                     if (asset.description.isNotEmpty) asset.description,
                   ].join(' — '),
                 ),
@@ -858,12 +924,12 @@ class _SystemTile extends StatelessWidget {
                   children: [
                     IconButton(
                       onPressed: working ? null : () => onEditAsset(asset),
-                      tooltip: 'Modifier l’actif',
+                      tooltip: context.tr('inventory.tooltip.edit_asset'),
                       icon: const Icon(Icons.edit_outlined),
                     ),
                     IconButton(
                       onPressed: working ? null : () => onDeleteAsset(asset),
-                      tooltip: 'Supprimer l’actif',
+                      tooltip: context.tr('inventory.tooltip.delete_asset'),
                       icon: const Icon(Icons.delete_outline),
                     ),
                   ],
@@ -910,12 +976,10 @@ class _EmptyInventoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Card(
+    return Card(
       child: Padding(
-        padding: EdgeInsets.all(18),
-        child: Text(
-          'Aucune fonction critique n’est encore déclarée. Commence par ajouter une fonction critique, puis rattache un système d’information et ses actifs.',
-        ),
+        padding: const EdgeInsets.all(18),
+        child: Text(context.tr('inventory.empty.functions')),
       ),
     );
   }
@@ -977,8 +1041,8 @@ class _FunctionDialogState extends State<_FunctionDialog> {
       insetPadding: responsiveDialogInsetPadding(context),
       title: Text(
         editing
-            ? 'Modifier la fonction critique'
-            : 'Ajouter une fonction critique',
+            ? context.tr('inventory.dialog.function.edit_title')
+            : context.tr('inventory.dialog.function.create_title'),
       ),
       content: ResponsiveDialogContent(
         maxWidth: 560,
@@ -990,12 +1054,12 @@ class _FunctionDialogState extends State<_FunctionDialog> {
               TextFormField(
                 controller: _nameController,
                 autofocus: shouldAutofocusTextField(context),
-                decoration: const InputDecoration(
-                  labelText: 'Nom de la fonction critique',
-                  prefixIcon: Icon(Icons.account_tree_outlined),
+                decoration: InputDecoration(
+                  labelText: context.tr('inventory.field.function_name'),
+                  prefixIcon: const Icon(Icons.account_tree_outlined),
                 ),
                 validator: (value) => (value ?? '').trim().isEmpty
-                    ? 'Le nom est obligatoire.'
+                    ? context.tr('validation.name_required')
                     : null,
               ),
               const SizedBox(height: 12),
@@ -1003,9 +1067,9 @@ class _FunctionDialogState extends State<_FunctionDialog> {
                 controller: _descriptionController,
                 minLines: 2,
                 maxLines: 4,
-                decoration: const InputDecoration(
-                  labelText: 'Description',
-                  prefixIcon: Icon(Icons.notes_outlined),
+                decoration: InputDecoration(
+                  labelText: context.tr('field.description'),
+                  prefixIcon: const Icon(Icons.notes_outlined),
                 ),
               ),
             ],
@@ -1015,12 +1079,12 @@ class _FunctionDialogState extends State<_FunctionDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Annuler'),
+          child: Text(context.tr('action.cancel')),
         ),
         FilledButton.icon(
           onPressed: _submit,
           icon: const Icon(Icons.check),
-          label: const Text('Enregistrer'),
+          label: Text(context.tr('action.save')),
         ),
       ],
     );
@@ -1106,8 +1170,8 @@ class _SystemDialogState extends State<_SystemDialog> {
       insetPadding: responsiveDialogInsetPadding(context),
       title: Text(
         editing
-            ? 'Modifier le système d’information'
-            : 'Ajouter un système d’information',
+            ? context.tr('inventory.dialog.system.edit_title')
+            : context.tr('inventory.dialog.system.create_title'),
       ),
       content: ResponsiveDialogContent(
         maxWidth: 620,
@@ -1126,12 +1190,12 @@ class _SystemDialogState extends State<_SystemDialog> {
                       ),
                     )
                     .toList(growable: false),
-                decoration: const InputDecoration(
-                  labelText: 'Fonction critique porteuse',
-                  prefixIcon: Icon(Icons.account_tree_outlined),
+                decoration: InputDecoration(
+                  labelText: context.tr('inventory.field.parent_function'),
+                  prefixIcon: const Icon(Icons.account_tree_outlined),
                 ),
                 validator: (value) => (value ?? '').isEmpty
-                    ? 'La fonction critique est obligatoire.'
+                    ? context.tr('inventory.validation.function_required')
                     : null,
                 onChanged: (value) => setState(() => _functionId = value ?? ''),
               ),
@@ -1139,20 +1203,20 @@ class _SystemDialogState extends State<_SystemDialog> {
               TextFormField(
                 controller: _nameController,
                 autofocus: shouldAutofocusTextField(context),
-                decoration: const InputDecoration(
-                  labelText: 'Nom du système d’information',
-                  prefixIcon: Icon(Icons.dns_outlined),
+                decoration: InputDecoration(
+                  labelText: context.tr('inventory.field.system_name'),
+                  prefixIcon: const Icon(Icons.dns_outlined),
                 ),
                 validator: (value) => (value ?? '').trim().isEmpty
-                    ? 'Le nom est obligatoire.'
+                    ? context.tr('validation.name_required')
                     : null,
               ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _ownerController,
-                decoration: const InputDecoration(
-                  labelText: 'Porteur / responsable',
-                  prefixIcon: Icon(Icons.person_outline),
+                decoration: InputDecoration(
+                  labelText: context.tr('inventory.field.system_owner'),
+                  prefixIcon: const Icon(Icons.person_outline),
                 ),
               ),
               const SizedBox(height: 12),
@@ -1160,9 +1224,9 @@ class _SystemDialogState extends State<_SystemDialog> {
                 controller: _descriptionController,
                 minLines: 2,
                 maxLines: 4,
-                decoration: const InputDecoration(
-                  labelText: 'Description',
-                  prefixIcon: Icon(Icons.notes_outlined),
+                decoration: InputDecoration(
+                  labelText: context.tr('field.description'),
+                  prefixIcon: const Icon(Icons.notes_outlined),
                 ),
               ),
             ],
@@ -1172,12 +1236,12 @@ class _SystemDialogState extends State<_SystemDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Annuler'),
+          child: Text(context.tr('action.cancel')),
         ),
         FilledButton.icon(
           onPressed: _submit,
           icon: const Icon(Icons.check),
-          label: const Text('Enregistrer'),
+          label: Text(context.tr('action.save')),
         ),
       ],
     );
@@ -1271,7 +1335,11 @@ class _AssetDialogState extends State<_AssetDialog> {
     final editing = widget.asset != null;
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
-      title: Text(editing ? 'Modifier l’actif' : 'Ajouter un actif'),
+      title: Text(
+        editing
+            ? context.tr('inventory.dialog.asset.edit_title')
+            : context.tr('inventory.dialog.asset.create_title'),
+      ),
       content: ResponsiveDialogContent(
         maxWidth: 620,
         child: Form(
@@ -1289,12 +1357,12 @@ class _AssetDialogState extends State<_AssetDialog> {
                       ),
                     )
                     .toList(growable: false),
-                decoration: const InputDecoration(
-                  labelText: 'Système d’information',
-                  prefixIcon: Icon(Icons.dns_outlined),
+                decoration: InputDecoration(
+                  labelText: context.tr('inventory.field.system'),
+                  prefixIcon: const Icon(Icons.dns_outlined),
                 ),
                 validator: (value) => (value ?? '').isEmpty
-                    ? 'Le système d’information est obligatoire.'
+                    ? context.tr('inventory.validation.system_required')
                     : null,
                 onChanged: (value) => setState(() => _systemId = value ?? ''),
               ),
@@ -1302,39 +1370,50 @@ class _AssetDialogState extends State<_AssetDialog> {
               TextFormField(
                 controller: _nameController,
                 autofocus: shouldAutofocusTextField(context),
-                decoration: const InputDecoration(
-                  labelText: 'Nom de l’actif',
-                  prefixIcon: Icon(Icons.inventory_2_outlined),
+                decoration: InputDecoration(
+                  labelText: context.tr('inventory.field.asset_name'),
+                  prefixIcon: const Icon(Icons.inventory_2_outlined),
                 ),
                 validator: (value) => (value ?? '').trim().isEmpty
-                    ? 'Le nom est obligatoire.'
+                    ? context.tr('validation.name_required')
                     : null,
               ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _typeController,
-                decoration: const InputDecoration(
-                  labelText: 'Type d’actif',
-                  hintText:
-                      'Ex. application, base de données, service, infrastructure…',
-                  prefixIcon: Icon(Icons.category_outlined),
+                decoration: InputDecoration(
+                  labelText: context.tr('inventory.field.asset_type'),
+                  hintText: context.tr('inventory.field.asset_type_hint'),
+                  prefixIcon: const Icon(Icons.category_outlined),
                 ),
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 initialValue: _criticality,
-                items: const [
-                  DropdownMenuItem(value: '1', child: Text('1 — standard')),
-                  DropdownMenuItem(value: '2', child: Text('2 — modérée')),
-                  DropdownMenuItem(value: '3', child: Text('3 — élevée')),
-                  DropdownMenuItem(value: '4', child: Text('4 — critique')),
+                items: [
+                  DropdownMenuItem(
+                    value: '1',
+                    child: Text(context.tr('inventory.asset.criticality.1')),
+                  ),
+                  DropdownMenuItem(
+                    value: '2',
+                    child: Text(context.tr('inventory.asset.criticality.2')),
+                  ),
+                  DropdownMenuItem(
+                    value: '3',
+                    child: Text(context.tr('inventory.asset.criticality.3')),
+                  ),
+                  DropdownMenuItem(
+                    value: '4',
+                    child: Text(context.tr('inventory.asset.criticality.4')),
+                  ),
                 ],
-                decoration: const InputDecoration(
-                  labelText: 'Criticité de l’actif',
-                  prefixIcon: Icon(Icons.flag_outlined),
+                decoration: InputDecoration(
+                  labelText: context.tr('inventory.field.asset_criticality'),
+                  prefixIcon: const Icon(Icons.flag_outlined),
                 ),
                 validator: (value) => value == null || value.isEmpty
-                    ? 'La criticité est obligatoire.'
+                    ? context.tr('inventory.validation.criticality_required')
                     : null,
                 onChanged: (value) =>
                     setState(() => _criticality = value ?? '1'),
@@ -1344,9 +1423,9 @@ class _AssetDialogState extends State<_AssetDialog> {
                 controller: _descriptionController,
                 minLines: 2,
                 maxLines: 4,
-                decoration: const InputDecoration(
-                  labelText: 'Description',
-                  prefixIcon: Icon(Icons.notes_outlined),
+                decoration: InputDecoration(
+                  labelText: context.tr('field.description'),
+                  prefixIcon: const Icon(Icons.notes_outlined),
                 ),
               ),
             ],
@@ -1356,12 +1435,12 @@ class _AssetDialogState extends State<_AssetDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Annuler'),
+          child: Text(context.tr('action.cancel')),
         ),
         FilledButton.icon(
           onPressed: _submit,
           icon: const Icon(Icons.check),
-          label: const Text('Enregistrer'),
+          label: Text(context.tr('action.save')),
         ),
       ],
     );

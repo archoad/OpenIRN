@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/api/openirn_api_client.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/services/app_session_manager.dart';
+import '../../l10n/openirn_localizations.dart';
 import 'responsive_autofocus.dart';
 import 'responsive_dialog.dart';
 
@@ -76,7 +77,7 @@ class _ChangeAccessCodeCardState extends State<ChangeAccessCodeCard> {
     }
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ).showSnackBar(SnackBar(content: Text(context.trText(message))));
   }
 
   @override
@@ -91,9 +92,12 @@ class _ChangeAccessCodeCardState extends State<ChangeAccessCodeCard> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(widget.title, style: Theme.of(context).textTheme.titleLarge),
+              Text(
+                context.trText(widget.title),
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
               const SizedBox(height: 6),
-              Text(widget.subtitle),
+              Text(context.trText(widget.subtitle)),
             ],
           ),
         ),
@@ -110,7 +114,11 @@ class _ChangeAccessCodeCardState extends State<ChangeAccessCodeCard> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.lock_reset_outlined),
-            label: Text(_isUpdating ? 'Mise à jour...' : widget.buttonLabel),
+            label: Text(
+              _isUpdating
+                  ? context.trText('Mise à jour...')
+                  : context.trText(widget.buttonLabel),
+            ),
           )
         : OutlinedButton.icon(
             onPressed: _isUpdating ? null : _changeCode,
@@ -121,7 +129,11 @@ class _ChangeAccessCodeCardState extends State<ChangeAccessCodeCard> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.lock_reset_outlined),
-            label: Text(_isUpdating ? 'Mise à jour...' : widget.buttonLabel),
+            label: Text(
+              _isUpdating
+                  ? context.trText('Mise à jour...')
+                  : context.trText(widget.buttonLabel),
+            ),
           );
 
     return Card(
@@ -195,7 +207,7 @@ class _AccessCodeChangeDialogState extends State<_AccessCodeChangeDialog> {
     final userLabel = widget.userLabel.trim();
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
-      title: const Text('Changer le code d’accès'),
+      title: Text(context.trText('Changer le code d’accès')),
       content: ResponsiveDialogContent(
         maxWidth: 520,
         child: Form(
@@ -205,7 +217,13 @@ class _AccessCodeChangeDialogState extends State<_AccessCodeChangeDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (userLabel.isNotEmpty) ...[
-                Text('Utilisateur : $userLabel'),
+                Text(
+                  context.tr(
+                    'common.access_code.user',
+                    fallback: 'Utilisateur : {user}',
+                    values: {'user': userLabel},
+                  ),
+                ),
                 const SizedBox(height: 12),
               ],
               TextFormField(
@@ -213,13 +231,13 @@ class _AccessCodeChangeDialogState extends State<_AccessCodeChangeDialog> {
                 autofocus: shouldAutofocusTextField(context),
                 obscureText: true,
                 keyboardType: safeKeyboardType(context, TextInputType.number),
-                decoration: const InputDecoration(
-                  labelText: 'Code actuel',
-                  prefixIcon: Icon(Icons.lock_outline),
+                decoration: InputDecoration(
+                  labelText: context.trText('Code actuel'),
+                  prefixIcon: const Icon(Icons.lock_outline),
                 ),
                 validator: (value) {
                   if ((value?.trim() ?? '').isEmpty) {
-                    return 'Veuillez saisir le code actuel.';
+                    return context.trText('Veuillez saisir le code actuel.');
                   }
                   return null;
                 },
@@ -229,21 +247,27 @@ class _AccessCodeChangeDialogState extends State<_AccessCodeChangeDialog> {
                 controller: _newCodeController,
                 obscureText: true,
                 keyboardType: safeKeyboardType(context, TextInputType.number),
-                decoration: const InputDecoration(
-                  labelText: 'Nouveau code',
-                  helperText: '4 à 32 caractères.',
-                  prefixIcon: Icon(Icons.password_outlined),
+                decoration: InputDecoration(
+                  labelText: context.trText('Nouveau code'),
+                  helperText: context.trText('4 à 32 caractères.'),
+                  prefixIcon: const Icon(Icons.password_outlined),
                 ),
                 validator: (value) {
                   final code = value?.trim() ?? '';
                   if (code.length < 4) {
-                    return 'Le code doit contenir au moins 4 caractères.';
+                    return context.trText(
+                      'Le code doit contenir au moins 4 caractères.',
+                    );
                   }
                   if (code.length > 32) {
-                    return 'Le code ne doit pas dépasser 32 caractères.';
+                    return context.trText(
+                      'Le code ne doit pas dépasser 32 caractères.',
+                    );
                   }
                   if (code == _currentCodeController.text.trim()) {
-                    return 'Le nouveau code doit être différent du code actuel.';
+                    return context.trText(
+                      'Le nouveau code doit être différent du code actuel.',
+                    );
                   }
                   return null;
                 },
@@ -253,13 +277,15 @@ class _AccessCodeChangeDialogState extends State<_AccessCodeChangeDialog> {
                 controller: _confirmCodeController,
                 obscureText: true,
                 keyboardType: safeKeyboardType(context, TextInputType.number),
-                decoration: const InputDecoration(
-                  labelText: 'Confirmer le nouveau code',
-                  prefixIcon: Icon(Icons.done_all_outlined),
+                decoration: InputDecoration(
+                  labelText: context.trText('Confirmer le nouveau code'),
+                  prefixIcon: const Icon(Icons.done_all_outlined),
                 ),
                 validator: (value) {
                   if ((value?.trim() ?? '') != _newCodeController.text.trim()) {
-                    return 'Les deux saisies ne correspondent pas.';
+                    return context.trText(
+                      'Les deux saisies ne correspondent pas.',
+                    );
                   }
                   return null;
                 },
@@ -272,12 +298,12 @@ class _AccessCodeChangeDialogState extends State<_AccessCodeChangeDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Annuler'),
+          child: Text(context.trText('Annuler')),
         ),
         FilledButton.icon(
           onPressed: _submit,
           icon: const Icon(Icons.lock_reset_outlined),
-          label: const Text('Enregistrer'),
+          label: Text(context.trText('Enregistrer')),
         ),
       ],
     );

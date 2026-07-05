@@ -6,6 +6,7 @@ import '../../domain/models/app_user.dart';
 import '../../domain/models/official_referential.dart';
 import '../../domain/models/sync_configuration.dart';
 import '../../domain/services/access_policy_service.dart';
+import '../../l10n/openirn_localizations.dart';
 import '../common/openirn_app_bar.dart';
 
 class OfficialReferentialScreen extends StatefulWidget {
@@ -122,25 +123,35 @@ class _OfficialReferentialScreenState extends State<OfficialReferentialScreen> {
         return AlertDialog(
           title: Text(
             force
-                ? 'Réinstaller le référentiel officiel ?'
-                : 'Mettre à jour le référentiel officiel ?',
+                ? context.tr('official.update.dialog.title_reinstall')
+                : context.tr('official.update.dialog.title_update'),
           ),
           content: Text(
             remote == null
-                ? 'OpenIRN va interroger le dépôt officiel aDRI, télécharger le dernier fichier détecté, le valider puis l’installer côté serveur.'
+                ? context.tr('official.update.dialog.body_lookup')
                 : force
-                ? 'OpenIRN va réinstaller ${remote.version} depuis le dépôt officiel aDRI. Une nouvelle entrée sera ajoutée à l’historique serveur.'
-                : 'OpenIRN va télécharger ${remote.version} depuis le dépôt officiel aDRI, le valider puis l’installer côté serveur.',
+                ? context.tr(
+                    'official.update.dialog.body_reinstall',
+                    values: {'version': remote.version},
+                  )
+                : context.tr(
+                    'official.update.dialog.body_update',
+                    values: {'version': remote.version},
+                  ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Annuler'),
+              child: Text(context.tr('action.cancel')),
             ),
             FilledButton.icon(
               onPressed: () => Navigator.of(context).pop(true),
               icon: const Icon(Icons.download_outlined),
-              label: Text(force ? 'Réinstaller' : 'Mettre à jour'),
+              label: Text(
+                force
+                    ? context.tr('official.action.reinstall')
+                    : context.tr('official.action.update'),
+              ),
             ),
           ],
         );
@@ -168,7 +179,11 @@ class _OfficialReferentialScreenState extends State<OfficialReferentialScreen> {
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${result.title} — ${result.message}')),
+        SnackBar(
+          content: Text(
+            '${context.trText(result.title)} — ${context.trText(result.message)}',
+          ),
+        ),
       );
 
       setState(() {
@@ -283,9 +298,9 @@ class _StatusCard extends StatelessWidget {
         : Icons.error_outline;
     final statusText = result.isAvailable
         ? result.updateAvailable
-              ? 'Mise à jour disponible'
-              : 'À jour ou vérifié'
-        : 'Vérification impossible';
+              ? context.tr('official.status.update_available')
+              : context.tr('official.status.up_to_date')
+        : context.tr('official.status.unreachable');
 
     return Card(
       child: Padding(
@@ -304,10 +319,10 @@ class _StatusCard extends StatelessWidget {
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: 6),
-                  Text(result.title),
+                  Text(context.trText(result.title)),
                   const SizedBox(height: 4),
                   Text(
-                    result.message,
+                    context.trText(result.message),
                     style: TextStyle(color: colorScheme.onSurfaceVariant),
                   ),
                   const SizedBox(height: 10),
@@ -316,10 +331,21 @@ class _StatusCard extends StatelessWidget {
                     runSpacing: 8,
                     children: [
                       Chip(
-                        label: Text('Espace ${data.configuration.tenantLabel}'),
+                        label: Text(
+                          context.tr(
+                            'official.status.workspace',
+                            values: {
+                              'workspace': data.configuration.tenantLabel,
+                            },
+                          ),
+                        ),
                       ),
                       Chip(
-                        label: Text(data.configuration.authorizationModeLabel),
+                        label: Text(
+                          context.trText(
+                            data.configuration.authorizationModeLabel,
+                          ),
+                        ),
                       ),
                       if (result.statusCode != null)
                         Chip(label: Text('HTTP ${result.statusCode}')),
@@ -355,10 +381,13 @@ class _SummaryCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: Theme.of(context).textTheme.titleLarge),
+            Text(
+              context.trText(title),
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
             const SizedBox(height: 12),
             if (item == null || !item.exists)
-              Text(emptyText)
+              Text(context.trText(emptyText))
             else ...[
               _InfoLine(label: 'Version', value: item.version),
               _InfoLine(label: 'Fichier', value: item.filePath),
@@ -378,7 +407,7 @@ class _SummaryCard extends StatelessWidget {
               if (item.scoringMethodStatus.isNotEmpty)
                 _InfoLine(
                   label: 'Méthode score',
-                  value: _scoringMethodLabel(item),
+                  value: context.trText(_scoringMethodLabel(item)),
                 ),
               if (item.sourceSha256.isNotEmpty)
                 _InfoLine(label: 'SHA-256 source', value: item.sourceSha256),
@@ -416,7 +445,7 @@ class _HistoryCard extends StatelessWidget {
                 const Icon(Icons.history_outlined),
                 const SizedBox(width: 8),
                 Text(
-                  'Historique référentiel officiel',
+                  context.tr('official.history.title'),
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
               ],
@@ -424,19 +453,15 @@ class _HistoryCard extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               result.isAvailable
-                  ? result.message
-                  : '${result.title} — ${result.message}',
+                  ? context.trText(result.message)
+                  : '${context.trText(result.title)} — ${context.trText(result.message)}',
               style: TextStyle(color: colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: 12),
             if (!result.isAvailable)
-              const Text(
-                'L’historique exige une session administrateur côté serveur.',
-              )
+              Text(context.tr('official.history.admin_required'))
             else if (result.history.isEmpty)
-              const Text(
-                'Aucun import n’est encore historisé. Le référentiel actif existant sera repris automatiquement lors du démarrage API.',
-              )
+              Text(context.tr('official.history.empty'))
             else
               for (final item in result.history) ...[
                 _HistoryEntry(summary: item),
@@ -467,48 +492,93 @@ class _HistoryEntry extends StatelessWidget {
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             Text(
-              summary.version.isEmpty ? 'Version inconnue' : summary.version,
+              summary.version.isEmpty
+                  ? context.tr('official.history.unknown_version')
+                  : summary.version,
               style: Theme.of(context).textTheme.titleMedium,
             ),
             if (summary.active)
-              const Chip(
+              Chip(
                 visualDensity: VisualDensity.compact,
-                label: Text('Actif'),
+                label: Text(context.tr('official.history.active')),
               ),
             if (summary.validationStatus.isNotEmpty)
               Chip(
                 visualDensity: VisualDensity.compact,
-                label: Text('Validation ${summary.validationStatus}'),
+                label: Text(
+                  context.tr(
+                    'official.history.validation_status',
+                    values: {'status': summary.validationStatus},
+                  ),
+                ),
               ),
           ],
         ),
         const SizedBox(height: 8),
         if (importedAt != null)
           Text(
-            'Installé le ${_formatDateTime(importedAt)}',
+            context.tr(
+              'official.history.installed_at',
+              values: {'date': _formatDateTime(importedAt)},
+            ),
             style: TextStyle(color: colorScheme.onSurfaceVariant),
           ),
         if (summary.triggeredByUserId.isNotEmpty)
           Text(
-            'Déclenché par ${summary.triggeredByUserId}',
+            context.tr(
+              'official.history.triggered_by',
+              values: {'user': summary.triggeredByUserId},
+            ),
             style: TextStyle(color: colorScheme.onSurfaceVariant),
           ),
         if (summary.filePath.isNotEmpty)
-          SelectableText('Fichier : ${summary.filePath}'),
+          SelectableText(
+            context.tr(
+              'official.history.file',
+              values: {'file': summary.filePath},
+            ),
+          ),
         Wrap(
           spacing: 10,
           runSpacing: 4,
           children: [
             if (summary.shortCommitSha.isNotEmpty)
-              SelectableText('Commit ${summary.shortCommitSha}'),
+              SelectableText(
+                context.tr(
+                  'official.history.commit',
+                  values: {'commit': summary.shortCommitSha},
+                ),
+              ),
             if (summary.shortBlobId.isNotEmpty)
-              SelectableText('Blob ${summary.shortBlobId}'),
+              SelectableText(
+                context.tr(
+                  'official.history.blob',
+                  values: {'blob': summary.shortBlobId},
+                ),
+              ),
             if (summary.scoringMethodStatus.isNotEmpty)
-              SelectableText('Score ${_scoringMethodLabel(summary)}'),
+              SelectableText(
+                context.tr(
+                  'official.history.score',
+                  values: {
+                    'method': context.trText(_scoringMethodLabel(summary)),
+                  },
+                ),
+              ),
             if (summary.shortSourceSha256.isNotEmpty)
-              SelectableText('Source ${summary.shortSourceSha256}'),
+              SelectableText(
+                context.tr(
+                  'official.history.source',
+                  values: {'sha': summary.shortSourceSha256},
+                ),
+              ),
             if (summary.shortCanonicalSha256.isNotEmpty)
-              SelectableText('JSON ${summary.shortCanonicalSha256}'),
+              SelectableText(
+                context.tr(
+                  'official.history.json',
+                  values: {'sha': summary.shortCanonicalSha256},
+                ),
+              ),
           ],
         ),
       ],
@@ -540,15 +610,15 @@ class _ActionsCard extends StatelessWidget {
       OutlinedButton.icon(
         onPressed: working ? null : onRefresh,
         icon: const Icon(Icons.search_outlined),
-        label: const Text('Vérifier'),
+        label: Text(context.tr('screen.official.check')),
       ),
       FilledButton.icon(
         onPressed: working || !enabled ? null : onUpdate,
         icon: const Icon(Icons.download_outlined),
         label: Text(
           updateAvailable || !hasCurrentReferential
-              ? 'Mettre à jour'
-              : 'Réinstaller',
+              ? context.tr('official.action.update')
+              : context.tr('official.action.reinstall'),
         ),
       ),
     ];
@@ -559,11 +629,12 @@ class _ActionsCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Actions', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 8),
-            const Text(
-              'La mise à jour télécharge le fichier officiel depuis GitLab, le convertit en JSON canonique, le valide, l’installe dans la base serveur OpenIRN et conserve une trace dans l’historique.',
+            Text(
+              context.tr('common.actions'),
+              style: Theme.of(context).textTheme.titleLarge,
             ),
+            const SizedBox(height: 8),
+            Text(context.tr('official.actions.description')),
             const SizedBox(height: 14),
             if (isNarrow)
               Column(
@@ -600,7 +671,7 @@ class _InfoLine extends StatelessWidget {
           SizedBox(
             width: 150,
             child: Text(
-              label,
+              context.trText(label),
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
           ),

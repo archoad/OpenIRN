@@ -8,6 +8,7 @@ import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/sync_configuration.dart';
 import '../../domain/services/access_policy_service.dart';
+import '../../l10n/openirn_localizations.dart';
 import '../common/openirn_app_bar.dart';
 import '../common/responsive_dialog.dart';
 
@@ -47,7 +48,9 @@ class _ServerMaintenanceScreenState extends State<ServerMaintenanceScreen> {
     if (!_canManage) {
       setState(() {
         _isLoading = false;
-        _errorMessage = 'Cette page est réservée aux administrateurs.';
+        _errorMessage = OpenIrnLocalizations.instance.tr(
+          'maintenance.error.access_denied',
+        );
       });
       return;
     }
@@ -67,8 +70,9 @@ class _ServerMaintenanceScreenState extends State<ServerMaintenanceScreen> {
         setState(() {
           _configuration = configuration;
           _isLoading = false;
-          _errorMessage =
-              'La synchronisation serveur n’est pas configurée sur ce terminal.';
+          _errorMessage = OpenIrnLocalizations.instance.tr(
+            'security.error.server_not_configured.message',
+          );
         });
         return;
       }
@@ -92,7 +96,10 @@ class _ServerMaintenanceScreenState extends State<ServerMaintenanceScreen> {
       }
       setState(() {
         _isLoading = false;
-        _errorMessage = 'Impossible de charger la maintenance serveur : $error';
+        _errorMessage = OpenIrnLocalizations.instance.tr(
+          'maintenance.error.load_failed',
+          values: {'error': error},
+        );
       });
     }
   }
@@ -107,23 +114,20 @@ class _ServerMaintenanceScreenState extends State<ServerMaintenanceScreen> {
       context: context,
       builder: (context) => AlertDialog(
         insetPadding: responsiveDialogInsetPadding(context),
-        title: const Text('Créer une sauvegarde serveur ?'),
-        content: const ResponsiveDialogContent(
+        title: Text(context.tr('maintenance.backup.create.title')),
+        content: ResponsiveDialogContent(
           maxWidth: 620,
-          child: Text(
-            'OpenIRN va demander au serveur de créer un dump logique MariaDB cohérent. '
-            'Le serveur reste disponible pendant l’opération.',
-          ),
+          child: Text(context.tr('maintenance.backup.create.message')),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Annuler'),
+            child: Text(context.tr('common.cancel')),
           ),
           FilledButton.icon(
             onPressed: () => Navigator.of(context).pop(true),
             icon: const Icon(Icons.backup_outlined),
-            label: const Text('Sauvegarder'),
+            label: Text(context.tr('maintenance.backup.action.create')),
           ),
         ],
       ),
@@ -158,8 +162,13 @@ class _ServerMaintenanceScreenState extends State<ServerMaintenanceScreen> {
             : _MaintenanceStatus.fromJson(maintenance);
         _isBackingUp = false;
         _successMessage = backup == null
-            ? 'Sauvegarde serveur créée.'
-            : 'Sauvegarde créée : ${backup['name'] ?? backup['backupDb'] ?? 'OK'}';
+            ? OpenIrnLocalizations.instance.tr(
+                'maintenance.backup.create.success',
+              )
+            : OpenIrnLocalizations.instance.tr(
+                'maintenance.backup.create.success_named',
+                values: {'name': backup['name'] ?? backup['backupDb'] ?? 'OK'},
+              );
       });
     } catch (error) {
       if (!mounted) {
@@ -167,7 +176,10 @@ class _ServerMaintenanceScreenState extends State<ServerMaintenanceScreen> {
       }
       setState(() {
         _isBackingUp = false;
-        _errorMessage = 'Impossible de créer la sauvegarde : $error';
+        _errorMessage = OpenIrnLocalizations.instance.tr(
+          'maintenance.backup.create.failed',
+          values: {'error': error},
+        );
       });
     }
   }
@@ -182,22 +194,25 @@ class _ServerMaintenanceScreenState extends State<ServerMaintenanceScreen> {
       context: context,
       builder: (context) => AlertDialog(
         insetPadding: responsiveDialogInsetPadding(context),
-        title: const Text('Supprimer cette sauvegarde ?'),
+        title: Text(context.tr('maintenance.backup.delete.title')),
         content: ResponsiveDialogContent(
           maxWidth: 620,
           child: Text(
-            'La sauvegarde suivante sera supprimée définitivement du serveur :\n\n${backup.name}',
+            context.tr(
+              'maintenance.backup.delete.message',
+              values: {'name': backup.name},
+            ),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Annuler'),
+            child: Text(context.tr('common.cancel')),
           ),
           FilledButton.icon(
             onPressed: () => Navigator.of(context).pop(true),
             icon: const Icon(Icons.delete_outline),
-            label: const Text('Supprimer'),
+            label: Text(context.tr('common.action.delete')),
           ),
         ],
       ),
@@ -227,7 +242,10 @@ class _ServerMaintenanceScreenState extends State<ServerMaintenanceScreen> {
             ? _status
             : _MaintenanceStatus.fromJson(maintenance);
         _isDeleting = false;
-        _successMessage = 'Sauvegarde supprimée : ${backup.name}';
+        _successMessage = OpenIrnLocalizations.instance.tr(
+          'maintenance.backup.delete.success',
+          values: {'name': backup.name},
+        );
       });
     } catch (error) {
       if (!mounted) {
@@ -235,7 +253,10 @@ class _ServerMaintenanceScreenState extends State<ServerMaintenanceScreen> {
       }
       setState(() {
         _isDeleting = false;
-        _errorMessage = 'Impossible de supprimer la sauvegarde : $error';
+        _errorMessage = OpenIrnLocalizations.instance.tr(
+          'maintenance.backup.delete.failed',
+          values: {'error': error},
+        );
       });
     }
   }
@@ -319,10 +340,12 @@ class _ServerMaintenanceScreenState extends State<ServerMaintenanceScreen> {
       if (decoded is Map) {
         return Map<String, dynamic>.from(decoded);
       }
-      throw const FormatException('Réponse JSON inattendue.');
+      throw FormatException(
+        OpenIrnLocalizations.instance.tr('maintenance.error.unexpected_json'),
+      );
     } on TimeoutException {
       throw TimeoutException(
-        'Le serveur n’a pas répondu dans le délai attendu.',
+        OpenIrnLocalizations.instance.tr('maintenance.error.timeout'),
       );
     } finally {
       client.close(force: true);
@@ -422,7 +445,7 @@ class _ServerConfigurationCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Configuration',
+              context.tr('maintenance.configuration.title'),
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
@@ -475,7 +498,7 @@ class _DatabaseCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Base MariaDB',
+                    context.tr('maintenance.database.title'),
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
@@ -525,11 +548,20 @@ class _BackupCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Sauvegardes', style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              context.tr('maintenance.backup.title'),
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 8),
             _InfoRow(label: 'Répertoire', value: backup.directory),
             _InfoRow(label: 'Nombre', value: backup.count.toString()),
-            _InfoRow(label: 'Rétention', value: '${backup.keep} sauvegardes'),
+            _InfoRow(
+              label: 'Rétention',
+              value: context.tr(
+                'maintenance.backup.retention_count',
+                values: {'count': backup.keep},
+              ),
+            ),
             _InfoRow(
               label: 'Automatique',
               value: backup.security.autoEnabled ? 'Activée' : 'Désactivée',
@@ -549,8 +581,10 @@ class _BackupCard extends StatelessWidget {
             if (backup.security.unsignedVisibleBackups > 0)
               _InfoRow(
                 label: 'À vérifier',
-                value:
-                    '${backup.security.unsignedVisibleBackups} sauvegarde(s) non signée(s) ou non vérifiées',
+                value: context.tr(
+                  'maintenance.backup.unsigned_count',
+                  values: {'count': backup.security.unsignedVisibleBackups},
+                ),
               ),
             if (latest != null) ...[
               const Divider(height: 24),
@@ -578,9 +612,11 @@ class _BackupCard extends StatelessWidget {
                 onPressed: isBackingUp ? null : onBackup,
                 icon: const Icon(Icons.backup_outlined),
                 label: Text(
-                  isBackingUp
-                      ? 'Sauvegarde en cours…'
-                      : 'Sauvegarder maintenant',
+                  context.tr(
+                    isBackingUp
+                        ? 'maintenance.backup.action.in_progress'
+                        : 'maintenance.backup.action.now',
+                  ),
                 ),
               ),
             ),
@@ -611,12 +647,12 @@ class _BackupListCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Dernières sauvegardes',
+              context.tr('maintenance.backup.latest_title'),
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
             if (backups.isEmpty)
-              const Text('Aucune sauvegarde disponible pour le moment.')
+              Text(context.tr('maintenance.backup.empty'))
             else
               ...backups.map(
                 (backup) => ListTile(
@@ -632,7 +668,7 @@ class _BackupListCard extends StatelessWidget {
                   ),
                   trailing: PopupMenuButton<String>(
                     enabled: !isWorking,
-                    tooltip: 'Actions sauvegarde',
+                    tooltip: context.tr('maintenance.backup.actions.tooltip'),
                     onSelected: (value) {
                       if (value == 'delete') {
                         onDelete(backup);
@@ -649,7 +685,7 @@ class _BackupListCard extends StatelessWidget {
                             ),
                             const SizedBox(width: 10),
                             Text(
-                              'Supprimer',
+                              context.tr('common.action.delete'),
                               style: TextStyle(
                                 color: Theme.of(context).colorScheme.error,
                               ),
@@ -682,12 +718,12 @@ class _BackupAuditCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Journal des sauvegardes',
+              context.tr('maintenance.backup.audit_title'),
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
             if (events.isEmpty)
-              const Text('Aucun événement de sauvegarde enregistré.')
+              Text(context.tr('maintenance.backup.audit_empty'))
             else
               ...events.map(
                 (event) => ListTile(
@@ -742,7 +778,7 @@ class _StatusBanner extends StatelessWidget {
           children: [
             Icon(icon, color: color),
             const SizedBox(width: 8),
-            Expanded(child: Text(text)),
+            Expanded(child: Text(context.trText(text))),
           ],
         ),
       ),
@@ -766,11 +802,11 @@ class _InfoRow extends StatelessWidget {
           SizedBox(
             width: 120,
             child: Text(
-              label,
+              context.trText(label),
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
           ),
-          Expanded(child: Text(value)),
+          Expanded(child: Text(context.trText(value))),
         ],
       ),
     );
@@ -987,42 +1023,52 @@ int _intFromJson(Object? value) {
 String _signatureLabel(String status) {
   switch (status) {
     case 'valid':
-      return 'Signature valide';
+      return OpenIrnLocalizations.instance.text('Signature valide');
     case 'invalid':
-      return 'Signature invalide';
+      return OpenIrnLocalizations.instance.text('Signature invalide');
     case 'unverified_no_secret':
-      return 'Clé absente';
+      return OpenIrnLocalizations.instance.text('Clé absente');
     case 'unsigned':
-      return 'Non signée';
+      return OpenIrnLocalizations.instance.text('Non signée');
     default:
-      return status.isEmpty ? 'Non disponible' : status;
+      return status.isEmpty
+          ? OpenIrnLocalizations.instance.text('Non disponible')
+          : status;
   }
 }
 
 String _backupReasonLabel(String reason) {
   switch (reason) {
     case 'manual':
-      return 'Manuelle';
+      return OpenIrnLocalizations.instance.text('Manuelle');
     case 'scheduled_timer':
-      return 'Automatique planifiée';
+      return OpenIrnLocalizations.instance.text('Automatique planifiée');
     case 'pre_restore_safety':
-      return 'Sécurité avant restauration';
+      return OpenIrnLocalizations.instance.text('Sécurité avant restauration');
     case 'pre_official_referential_update':
-      return 'Avant mise à jour référentiel';
+      return OpenIrnLocalizations.instance.text(
+        'Avant mise à jour référentiel',
+      );
     case 'pre_users_replace':
-      return 'Avant remplacement utilisateurs';
+      return OpenIrnLocalizations.instance.text(
+        'Avant remplacement utilisateurs',
+      );
     case 'pre_user_pin_change':
-      return 'Avant changement PIN';
+      return OpenIrnLocalizations.instance.text('Avant changement PIN');
     case 'pre_self_pin_change':
-      return 'Avant changement de code personnel';
+      return OpenIrnLocalizations.instance.text(
+        'Avant changement de code personnel',
+      );
     case 'pre_campaign_restore':
-      return 'Avant restauration campagne';
+      return OpenIrnLocalizations.instance.text('Avant restauration campagne');
     case 'manual_restore':
-      return 'Restauration manuelle';
+      return OpenIrnLocalizations.instance.text('Restauration manuelle');
     case 'manual_delete':
-      return 'Suppression manuelle';
+      return OpenIrnLocalizations.instance.text('Suppression manuelle');
     default:
-      return reason.isEmpty ? 'Non renseigné' : reason;
+      return reason.isEmpty
+          ? OpenIrnLocalizations.instance.text('Non renseigné')
+          : reason;
   }
 }
 

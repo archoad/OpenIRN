@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../l10n/openirn_localizations.dart';
 import '../common/openirn_app_bar.dart';
 
 class ScoringMethodScreen extends StatelessWidget {
@@ -28,106 +29,187 @@ class ScoringMethodScreen extends StatelessWidget {
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text(
-                              'Maturité IRN d’un système d’information',
+                              context.tr(
+                                'screen.scoring.main_title',
+                                fallback:
+                                    'Maturité IRN d’un système d’information',
+                              ),
                               style: theme.textTheme.headlineSmall,
                             ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 12),
-                      const Text(
-                        'Un SI est évalué comme une composition d’actifs numériques. Chaque actif est noté sur les piliers RES, puis la note du SI est consolidée en tenant compte de la criticité de chaque actif.',
+                      Text(
+                        context.tr(
+                          'screen.scoring.main_intro',
+                          fallback:
+                              'Un SI est évalué comme une composition d’actifs numériques. Chaque actif est noté sur les piliers RES, puis la note du SI est consolidée en tenant compte de la criticité de chaque actif.',
+                        ),
                       ),
                     ],
                   ),
                 ),
               ),
               const SizedBox(height: 12),
-              const _FormulaStepCard(
-                title: '1 · Notation d’un actif',
+              _FormulaStepCard(
+                title: context.tr(
+                  'screen.scoring.step1.title',
+                  fallback: '1 · Notation d’un actif',
+                ),
                 icon: Icons.checklist_rtl_outlined,
                 children: [
                   Text(
-                    'La maturité de chaque actif est évaluée selon la grille IRN :',
+                    context.tr(
+                      'screen.scoring.step1.intro',
+                      fallback:
+                          'La maturité de chaque actif est évaluée selon la grille IRN :',
+                    ),
                   ),
-                  SizedBox(height: 8),
-                  _ScoreScaleWrap(),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
+                  const _ScoreScaleWrap(),
+                  const SizedBox(height: 8),
                   Text(
-                    'N.C. signifie “Non concerné” : le critère est explicitement renseigné et compte dans la complétude, mais il est exclu du score.',
+                    context.tr(
+                      'screen.scoring.step1.nc',
+                      fallback:
+                          'N.C. signifie “Non concerné” : le critère est explicitement renseigné et compte dans la complétude, mais il est exclu du score.',
+                    ),
                   ),
                 ],
               ),
               const SizedBox(height: 12),
-              const _FormulaStepCard(
-                title: '2 · Pré-score E de chaque actif',
+              _FormulaStepCard(
+                title: context.tr(
+                  'screen.scoring.step2.title',
+                  fallback: '2 · Pré-score E de chaque actif',
+                ),
                 icon: Icons.inventory_2_outlined,
                 children: [
                   Text(
-                    'Pour chaque actif, OpenIRN calcule d’abord un score par pilier RES à partir des critères cotés du pilier.',
+                    context.tr(
+                      'screen.scoring.step2.p1',
+                      fallback:
+                          'Pour chaque actif, OpenIRN calcule d’abord un score par pilier RES à partir des critères cotés du pilier.',
+                    ),
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   Text(
-                    'Le pré-score E de l’actif est ensuite la moyenne géométrique des scores de piliers renseignés :',
+                    context.tr(
+                      'screen.scoring.step2.p2',
+                      fallback:
+                          'Le pré-score E de l’actif est ensuite la moyenne géométrique des scores de piliers renseignés :',
+                    ),
                   ),
-                  SizedBox(height: 8),
-                  _FormulaBox('E = EXP( MOYENNE( LN(score pilier RES) ) )'),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
+                  const _FormulaBox(
+                    'E = EXP( MOYENNE( LN(score pilier RES) ) )',
+                  ),
+                  const SizedBox(height: 8),
                   Text(
-                    'La moyenne géométrique pénalise naturellement les maillons faibles : un pilier très bas tire davantage la note de l’actif vers le bas qu’une moyenne arithmétique.',
+                    context.tr(
+                      'screen.scoring.step2.p3',
+                      fallback:
+                          'La moyenne géométrique pénalise naturellement les maillons faibles : un pilier très bas tire davantage la note de l’actif vers le bas qu’une moyenne arithmétique.',
+                    ),
                   ),
                 ],
               ),
               const SizedBox(height: 12),
-              const _FormulaStepCard(
-                title: '3 · Criticité D de l’actif',
+              _FormulaStepCard(
+                title: context.tr(
+                  'screen.scoring.step3.title',
+                  fallback: '3 · Criticité D de l’actif',
+                ),
                 icon: Icons.priority_high_outlined,
                 children: [
                   Text(
-                    'Chaque actif porte une criticité D sur 4 niveaux. Cette criticité représente le poids de l’actif dans la résilience globale du SI.',
+                    context.tr(
+                      'screen.scoring.step3.p1',
+                      fallback:
+                          'Chaque actif porte une criticité D sur 4 niveaux. Cette criticité représente le poids de l’actif dans la résilience globale du SI.',
+                    ),
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
                     children: [
-                      Chip(label: Text('1 — standard')),
-                      Chip(label: Text('2 — modérée')),
-                      Chip(label: Text('3 — élevée')),
-                      Chip(label: Text('4 — critique')),
+                      Chip(
+                        label: Text(
+                          context.tr('criticality.1', fallback: '1 — standard'),
+                        ),
+                      ),
+                      Chip(
+                        label: Text(
+                          context.tr('criticality.2', fallback: '2 — modérée'),
+                        ),
+                      ),
+                      Chip(
+                        label: Text(
+                          context.tr('criticality.3', fallback: '3 — élevée'),
+                        ),
+                      ),
+                      Chip(
+                        label: Text(
+                          context.tr('criticality.4', fallback: '4 — critique'),
+                        ),
+                      ),
                     ],
                   ),
                 ],
               ),
               const SizedBox(height: 12),
-              const _FormulaStepCard(
-                title: '4 · Score de maturité du SI',
+              _FormulaStepCard(
+                title: context.tr(
+                  'screen.scoring.step4.title',
+                  fallback: '4 · Score de maturité du SI',
+                ),
                 icon: Icons.account_tree_outlined,
                 children: [
                   Text(
-                    'La note de maturité du SI est la moyenne géométrique pondérée des pré-scores E des actifs, avec D comme poids :',
+                    context.tr(
+                      'screen.scoring.step4.p1',
+                      fallback:
+                          'La note de maturité du SI est la moyenne géométrique pondérée des pré-scores E des actifs, avec D comme poids :',
+                    ),
                   ),
-                  SizedBox(height: 8),
-                  _FormulaBox(
+                  const SizedBox(height: 8),
+                  const _FormulaBox(
                     'Score SI = EXP( SOMME( D × LN(E) ) ÷ SOMME(D) )',
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   Text(
-                    'Un actif critique mal noté pèse donc beaucoup plus fortement sur la note du SI qu’un actif peu critique. La formule traduit l’idée de chaîne de résilience : le maillon faible doit compter.',
+                    context.tr(
+                      'screen.scoring.step4.p2',
+                      fallback:
+                          'Un actif critique mal noté pèse donc beaucoup plus fortement sur la note du SI qu’un actif peu critique. La formule traduit l’idée de chaîne de résilience : le maillon faible doit compter.',
+                    ),
                   ),
                 ],
               ),
               const SizedBox(height: 12),
-              const _FormulaStepCard(
-                title: '5 · Lecture dans OpenIRN',
+              _FormulaStepCard(
+                title: context.tr(
+                  'screen.scoring.step5.title',
+                  fallback: '5 · Lecture dans OpenIRN',
+                ),
                 icon: Icons.insights_outlined,
                 children: [
                   Text(
-                    'Dans une campagne créée depuis un SI, le cartouche “Score IRN” affiche la maturité consolidée du SI. Les boutons d’actifs permettent de saisir séparément la grille IRN de chaque actif.',
+                    context.tr(
+                      'screen.scoring.step5.p1',
+                      fallback:
+                          'Dans une campagne créée depuis un SI, le cartouche “Score IRN” affiche la maturité consolidée du SI. Les boutons d’actifs permettent de saisir séparément la grille IRN de chaque actif.',
+                    ),
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   Text(
-                    'Les critères non renseignés ne participent pas encore au score. La complétude reste donc indispensable pour interpréter correctement la note.',
+                    context.tr(
+                      'screen.scoring.step5.p2',
+                      fallback:
+                          'Les critères non renseignés ne participent pas encore au score. La complétude reste donc indispensable pour interpréter correctement la note.',
+                    ),
                   ),
                 ],
               ),
@@ -209,15 +291,36 @@ class _ScoreScaleWrap extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Wrap(
+    return Wrap(
       spacing: 8,
       runSpacing: 8,
       children: [
-        Chip(label: Text('N.C. — exclu du score')),
-        Chip(label: Text('Non résilient — 10/100')),
-        Chip(label: Text('Intention — 25/100')),
-        Chip(label: Text('Moyen — 50/100')),
-        Chip(label: Text('Résultat — 95/100')),
+        Chip(
+          label: Text(
+            context.tr('score.nc', fallback: 'N.C. — exclu du score'),
+          ),
+        ),
+        Chip(
+          label: Text(
+            context.tr(
+              'score.non_resilient',
+              fallback: 'Non résilient — 10/100',
+            ),
+          ),
+        ),
+        Chip(
+          label: Text(
+            context.tr('score.intention', fallback: 'Intention — 25/100'),
+          ),
+        ),
+        Chip(
+          label: Text(context.tr('score.medium', fallback: 'Moyen — 50/100')),
+        ),
+        Chip(
+          label: Text(
+            context.tr('score.result', fallback: 'Résultat — 95/100'),
+          ),
+        ),
       ],
     );
   }
