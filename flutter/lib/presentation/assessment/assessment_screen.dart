@@ -2,14 +2,17 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../data/api/openirn_api_client.dart';
 import '../../data/repositories/local_activity_repository.dart';
 import '../../data/repositories/local_assessment_repository.dart';
 import '../../data/repositories/local_criterion_assignment_repository.dart';
 import '../../data/repositories/local_user_repository.dart';
 import '../../data/repositories/local_campaign_repository.dart';
+import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/criterion_assignment.dart';
 import '../../domain/models/irn_assessment.dart';
+import '../../domain/models/irn_asset_inventory.dart';
 import '../../domain/models/local_activity_event.dart';
 import '../../domain/models/irn_referential.dart';
 import '../../domain/models/local_campaign.dart';
@@ -26,6 +29,7 @@ import '../common/responsive_dialog.dart';
 import 'assessment_export_screen.dart';
 import 'assessment_quality_screen.dart';
 import 'assessment_summary_screen.dart';
+import 'scoring_method_screen.dart';
 
 class AssessmentScreen extends StatefulWidget {
   final IrnReferential referential;
@@ -49,6 +53,8 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   final _accessPolicy = const AccessPolicyService();
   final _assessmentRepository = const LocalAssessmentRepository();
   final _campaignRepository = const LocalCampaignRepository();
+  final _configurationRepository = const LocalSyncConfigurationRepository();
+  final _apiClient = const OpenIrnApiClient();
   final _activityRepository = const LocalActivityRepository();
   final _userRepository = const LocalUserRepository();
   final _assignmentRepository = const LocalCriterionAssignmentRepository();
@@ -158,6 +164,12 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
         .length;
   }
 
+  int get _globalJustificationCount {
+    return _criterionAnswers.values
+        .where((answer) => answer.justification.trim().isNotEmpty)
+        .length;
+  }
+
   int _answeredCountForAsset(String assetId) {
     final prefix = 'asset:$assetId:criterion:';
     return _criterionAnswers.entries
@@ -180,6 +192,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     _lastAppliedSyncSerial = _appSyncCoordinator.changeSerial;
     _appSyncCoordinator.addListener(_handleBackgroundSyncUpdate);
     _startAutomaticSynchronization();
+    _refreshAssetScopeFromInventory();
   }
 
   void _setPillarExpanded(String pillarId, bool isExpanded) {
@@ -190,6 +203,77 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
         _expandedPillarIds.remove(pillarId);
       }
     });
+  }
+
+  Future<void> _refreshAssetScopeFromInventory() async {
+    if (!_isAssetScopedCampaign) {
+      return;
+    }
+    final systemId = _campaign.information.informationSystemId.trim();
+    if (systemId.isEmpty) {
+      return;
+    }
+    try {
+      final configuration = await _configurationRepository.loadConfiguration();
+      if (!configuration.isConfigured) {
+        return;
+      }
+      final result = await _apiClient.loadAssetInventory(
+        baseUrl: configuration.apiBaseUrl,
+        tenantId: configuration.tenantId,
+        apiToken: configuration.apiToken,
+      );
+      if (!mounted || !result.isAvailable) {
+        return;
+      }
+      final inventoryAssets = <String, InformationAssetInfo>{
+        for (final asset in result.inventory.assetsForSystem(systemId))
+          asset.id: asset,
+      };
+      if (inventoryAssets.isEmpty) {
+        return;
+      }
+
+      var changed = false;
+      final updatedAssets = _campaign.information.assets
+          .map((asset) {
+            final inventoryAsset = inventoryAssets[asset.id];
+            if (inventoryAsset == null) {
+              return asset;
+            }
+            final inventoryCriticality = inventoryAsset.criticality.trim();
+            final merged = CampaignInformationAsset(
+              id: asset.id,
+              name: inventoryAsset.name.trim().isEmpty
+                  ? asset.name
+                  : inventoryAsset.name.trim(),
+              assetType: inventoryAsset.assetType.trim(),
+              criticality: inventoryCriticality.isEmpty
+                  ? asset.criticality
+                  : inventoryCriticality,
+              description: inventoryAsset.description.trim(),
+            );
+            if (merged.name != asset.name ||
+                merged.assetType != asset.assetType ||
+                merged.criticality != asset.criticality ||
+                merged.description != asset.description) {
+              changed = true;
+            }
+            return merged;
+          })
+          .toList(growable: false);
+
+      if (!changed || !mounted) {
+        return;
+      }
+      setState(() {
+        _campaign = _campaign.copyWith(
+          information: _campaign.information.copyWith(assets: updatedAssets),
+        );
+      });
+    } catch (_) {
+      // L'évaluation reste utilisable avec les métadonnées embarquées dans la campagne.
+    }
   }
 
   @override
@@ -807,7 +891,9 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
           referential: widget.referential,
           campaign: _campaign,
           criterionAnswers: Map<String, CriterionAnswer>.unmodifiable(
-            _activeCriterionAnswers,
+            _isAssetScopedCampaign
+                ? _criterionAnswers
+                : _activeCriterionAnswers,
           ),
         ),
       ),
@@ -825,10 +911,18 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
           referential: widget.referential,
           campaign: _campaign,
           criterionAnswers: Map<String, CriterionAnswer>.unmodifiable(
-            _activeCriterionAnswers,
+            _isAssetScopedCampaign
+                ? _criterionAnswers
+                : _activeCriterionAnswers,
           ),
         ),
       ),
+    );
+  }
+
+  Future<void> _openScoringMethod() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const ScoringMethodScreen()),
     );
   }
 
@@ -885,7 +979,16 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       widget.activeUser,
       _campaign,
     );
-    final summary = _scoringService.computeSummary(widget.referential, answers);
+    final maturitySummary = _isAssetScopedCampaign
+        ? _scoringService.computeSystemMaturity(
+            widget.referential,
+            _campaign,
+            _criterionAnswers,
+          )
+        : null;
+    final summary =
+        maturitySummary?.aggregateSummary ??
+        _scoringService.computeSummary(widget.referential, answers);
     final criteriaByPillar = _catalogService.criteriaByPillar(
       widget.referential,
     );
@@ -921,6 +1024,13 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
             icon: Icons.insights_outlined,
             enabled: !_isLoadingAnswers,
             onSelected: _openSummary,
+          ),
+          OpenIrnAppBarAction(
+            id: 'scoring-method',
+            label: 'Calcul de la note',
+            icon: Icons.functions_outlined,
+            enabled: !_isLoadingAnswers,
+            onSelected: _openScoringMethod,
           ),
           if (canExportCampaign)
             OpenIrnAppBarAction(
@@ -994,7 +1104,10 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
               const SizedBox(height: 12),
               _ScoreCard(
                 summary: summary,
-                justificationCount: _justificationCount,
+                maturitySummary: maturitySummary,
+                justificationCount: _isAssetScopedCampaign
+                    ? _globalJustificationCount
+                    : _justificationCount,
               ),
               const SizedBox(height: 12),
               if (_isAssetScopedCampaign) ...[
@@ -1589,14 +1702,22 @@ class _AssignmentChip extends StatelessWidget {
 
 class _ScoreCard extends StatelessWidget {
   final IrnScoreSummary summary;
+  final IrnSystemMaturitySummary? maturitySummary;
   final int justificationCount;
 
-  const _ScoreCard({required this.summary, required this.justificationCount});
+  const _ScoreCard({
+    required this.summary,
+    required this.maturitySummary,
+    required this.justificationCount,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final score = summary.openIrnRnrScore;
+    final maturity = maturitySummary;
+    final score = maturity?.maturityScore ?? summary.openIrnRnrScore;
+    final formattedScore =
+        maturity?.formattedMaturityScore ?? summary.formattedOpenIrnRnrScore;
 
     return Card(
       child: Padding(
@@ -1612,16 +1733,15 @@ class _ScoreCard extends StatelessWidget {
                     children: [
                       Text('Score IRN', style: theme.textTheme.titleLarge),
                       const SizedBox(height: 4),
-                      const Text(
-                        'Grille IRN : NR=10, Intention=25, Moyen=50, Résultat=95. Les critères N.C. sont exclus du score.',
+                      Text(
+                        maturity == null
+                            ? 'Grille IRN : NR=10, Intention=25, Moyen=50, Résultat=95. Les critères N.C. sont exclus du score.'
+                            : 'Maturité IRN du SI : moyenne géométrique des scores par pilier pour chaque actif, puis moyenne géométrique pondérée par la criticité des actifs.',
                       ),
                     ],
                   ),
                 ),
-                Text(
-                  summary.formattedOpenIrnRnrScore,
-                  style: theme.textTheme.headlineMedium,
-                ),
+                Text(formattedScore, style: theme.textTheme.headlineMedium),
               ],
             ),
             const SizedBox(height: 16),
@@ -1644,6 +1764,18 @@ class _ScoreCard extends StatelessWidget {
                   ),
                 ),
                 Chip(label: Text('Justifications : $justificationCount')),
+                if (maturity != null) ...[
+                  Chip(
+                    label: Text(
+                      'Actifs notés : ${maturity.scoredAssetCount}/${maturity.totalAssetCount}',
+                    ),
+                  ),
+                  Chip(
+                    label: Text(
+                      'Poids criticité : ${maturity.maturityWeightTotal}',
+                    ),
+                  ),
+                ],
                 Chip(
                   label: Text(
                     'Complétude : ${(summary.completionRate * 100).toStringAsFixed(0)} %',
@@ -1801,7 +1933,8 @@ class _AssetProgressButton extends StatelessWidget {
       child: Semantics(
         button: true,
         selected: isSelected,
-        label: '${asset.displayLabel}, $progressLabel critères renseignés',
+        label:
+            '${asset.displayLabel}, ${asset.criticalityLabel}, $progressLabel critères renseignés',
         child: ChoiceChip(
           selected: isSelected,
           onSelected: (_) => onTap(),
@@ -1812,7 +1945,7 @@ class _AssetProgressButton extends StatelessWidget {
             color: isSelected ? colorScheme.onPrimaryContainer : null,
           ),
           label: Text(
-            '${asset.displayLabel} · $progressLabel',
+            '${asset.displayLabel} · ${asset.criticalityShortLabel} · $progressLabel',
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.labelLarge?.copyWith(
               fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,

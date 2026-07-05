@@ -77,12 +77,14 @@ class CampaignInformationAsset {
   final String name;
   final String assetType;
   final String description;
+  final String criticality;
 
   const CampaignInformationAsset({
     required this.id,
     required this.name,
     this.assetType = '',
     this.description = '',
+    this.criticality = '1',
   });
 
   String get displayLabel {
@@ -93,6 +95,32 @@ class CampaignInformationAsset {
     return id.trim().isEmpty ? 'Actif sans nom' : id.trim();
   }
 
+  int get criticalityWeight {
+    final parsed = int.tryParse(criticality.trim());
+    if (parsed == null || parsed < 1 || parsed > 4) {
+      return 1;
+    }
+    return parsed;
+  }
+
+  String get criticalityShortLabel => 'N$criticalityWeight';
+
+  String get criticalityName {
+    switch (criticalityWeight) {
+      case 1:
+        return 'Standard';
+      case 2:
+        return 'Modérée';
+      case 3:
+        return 'Élevée';
+      case 4:
+        return 'Critique';
+    }
+    return 'Standard';
+  }
+
+  String get criticalityLabel => '$criticalityShortLabel — $criticalityName';
+
   factory CampaignInformationAsset.fromJson(Map<String, dynamic> json) {
     return CampaignInformationAsset(
       id:
@@ -102,6 +130,7 @@ class CampaignInformationAsset {
       name: json['name']?.toString().trim() ?? '',
       assetType: json['assetType']?.toString().trim() ?? '',
       description: json['description']?.toString().trim() ?? '',
+      criticality: _normalizeAssetCriticality(json['criticality']),
     );
   }
 
@@ -110,9 +139,19 @@ class CampaignInformationAsset {
       'assetId': id.trim(),
       'name': name.trim(),
       'assetType': assetType.trim(),
+      'criticality': criticalityWeight.toString(),
       'description': description.trim(),
     };
   }
+}
+
+String _normalizeAssetCriticality(Object? value) {
+  final raw = value?.toString().trim() ?? '';
+  final parsed = int.tryParse(raw);
+  if (parsed == null || parsed < 1 || parsed > 4) {
+    return '1';
+  }
+  return parsed.toString();
 }
 
 class CampaignInformation {

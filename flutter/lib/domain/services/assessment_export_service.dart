@@ -49,15 +49,26 @@ class AssessmentExportService {
   }) {
     final exportedAtUtc = (exportedAt ?? DateTime.now()).toUtc();
     final answers = _answersFromCriterionAnswers(criterionAnswers);
-    final globalSummary = scoringService.computeSummary(referential, answers);
-    final pillarSummaries = scoringService.computeSummariesByPillar(
-      referential,
-      answers,
-    );
-    final scopeSummaries = scoringService.computeSummariesByScope(
-      referential,
-      answers,
-    );
+    final maturitySummary = campaign?.information.isAssetScoped == true
+        ? scoringService.computeSystemMaturity(
+            referential,
+            campaign!,
+            criterionAnswers,
+          )
+        : null;
+    final globalSummary =
+        maturitySummary?.aggregateSummary ??
+        scoringService.computeSummary(referential, answers);
+    final pillarSummaries =
+        maturitySummary?.aggregatePillarSummaries ??
+        scoringService.computeSummariesByPillar(referential, answers);
+    final scopeSummaries = maturitySummary == null
+        ? scoringService.computeSummariesByScope(referential, answers)
+        : scoringService.computeAssetScopedSummariesByScope(
+            referential,
+            campaign!,
+            criterionAnswers,
+          );
 
     return <String, dynamic>{
       'schemaVersion': 7,
@@ -96,7 +107,12 @@ class AssessmentExportService {
       },
       'scoring': <String, dynamic>{
         ...referential.scoring.toJson(),
-        'global': _summaryToJson(globalSummary),
+        'global': _summaryToJson(
+          globalSummary,
+          maturityScore: maturitySummary?.maturityScore,
+        ),
+        if (maturitySummary != null)
+          'maturity': _maturityToJson(maturitySummary),
         'byPillar': <Map<String, dynamic>>[
           for (final entry in pillarSummaries.entries)
             <String, dynamic>{
@@ -132,19 +148,11 @@ class AssessmentExportService {
           for (final event in activityEvents) _activityEventToJson(event),
         ],
       },
-      'answers': <Map<String, dynamic>>[
-        for (final criterion in referential.criteria)
-          if (criterion.active)
-            _answerToJson(
-              criterion: criterion,
-              criterionAnswer:
-                  criterionAnswers[criterion.id] ??
-                  CriterionAnswer(
-                    criterionId: criterion.id,
-                    answer: IrnAnswer.notAnswered,
-                  ),
-            ),
-      ],
+      'answers': _answersToJson(
+        referential: referential,
+        campaign: campaign,
+        criterionAnswers: criterionAnswers,
+      ),
     };
   }
 
@@ -157,7 +165,11 @@ class AssessmentExportService {
     };
   }
 
-  Map<String, dynamic> _summaryToJson(IrnScoreSummary summary) {
+  Map<String, dynamic> _summaryToJson(
+    IrnScoreSummary summary, {
+    double? maturityScore,
+  }) {
+    final effectiveScore = maturityScore ?? summary.openIrnScore;
     return <String, dynamic>{
       'totalCriteria': summary.totalCriteria,
       'answeredCriteria': summary.answeredCriteria,
@@ -170,15 +182,39 @@ class AssessmentExportService {
       'scoredCriteria': summary.scoredCriteria,
       'scorePointsTotal': summary.scorePointsTotal,
       'completionRate': _round(summary.completionRate),
-      'openIrnScore': summary.openIrnScore == null
+      'openIrnScore': effectiveScore == null ? null : _round(effectiveScore),
+      'openIrnRnrScore': effectiveScore == null ? null : _round(effectiveScore),
+      'officialScore': effectiveScore == null ? null : _round(effectiveScore),
+      if (maturityScore != null)
+        'assetMaturityWeightedScore': _round(maturityScore),
+    };
+  }
+
+  Map<String, dynamic> _maturityToJson(IrnSystemMaturitySummary maturity) {
+    return <String, dynamic>{
+      'formula': 'EXP(SUM(D*LN(E))/SUM(D))',
+      'score': maturity.maturityScore == null
           ? null
-          : _round(summary.openIrnScore!),
-      'openIrnRnrScore': summary.openIrnRnrScore == null
-          ? null
-          : _round(summary.openIrnRnrScore!),
-      'officialScore': summary.officialScore == null
-          ? null
-          : _round(summary.officialScore!),
+          : _round(maturity.maturityScore!),
+      'scoredAssetCount': maturity.scoredAssetCount,
+      'totalAssetCount': maturity.totalAssetCount,
+      'criticalityWeightTotal': maturity.maturityWeightTotal,
+      'assetScores': <Map<String, dynamic>>[
+        for (final assetScore in maturity.assetScores)
+          <String, dynamic>{
+            'assetId': assetScore.asset.id,
+            'assetName': assetScore.asset.displayLabel,
+            'criticality': assetScore.criticalityWeight,
+            'score': assetScore.maturityScore == null
+                ? null
+                : _round(assetScore.maturityScore!),
+            'scoredPillarCount': assetScore.scoredPillarCount,
+            'totalPillarCount': assetScore.totalPillarCount,
+            'completionRate': _round(
+              assetScore.aggregateSummary.completionRate,
+            ),
+          },
+      ],
     };
   }
 
@@ -220,13 +256,57 @@ class AssessmentExportService {
     };
   }
 
+  List<Map<String, dynamic>> _answersToJson({
+    required IrnReferential referential,
+    required LocalCampaign? campaign,
+    required Map<String, CriterionAnswer> criterionAnswers,
+  }) {
+    final activeCriteria = referential.criteria
+        .where((criterion) => criterion.active)
+        .toList(growable: false);
+    if (campaign?.information.isAssetScoped != true) {
+      return <Map<String, dynamic>>[
+        for (final criterion in activeCriteria)
+          _answerToJson(
+            criterion: criterion,
+            criterionAnswer:
+                criterionAnswers[criterion.id] ??
+                CriterionAnswer(
+                  criterionId: criterion.id,
+                  answer: IrnAnswer.notAnswered,
+                ),
+          ),
+      ];
+    }
+
+    final assets = campaign!.information.assets;
+    return <Map<String, dynamic>>[
+      for (final asset in assets)
+        for (final criterion in activeCriteria)
+          _answerToJson(
+            criterion: criterion,
+            asset: asset,
+            criterionAnswer:
+                criterionAnswers['asset:${asset.id}:criterion:${criterion.id}'] ??
+                CriterionAnswer(
+                  criterionId: 'asset:${asset.id}:criterion:${criterion.id}',
+                  answer: IrnAnswer.notAnswered,
+                ),
+          ),
+    ];
+  }
+
   Map<String, dynamic> _answerToJson({
     required IrnCriterion criterion,
     required CriterionAnswer criterionAnswer,
+    CampaignInformationAsset? asset,
   }) {
     final justification = criterionAnswer.justification.trim();
 
     return <String, dynamic>{
+      if (asset != null) 'assetId': asset.id,
+      if (asset != null) 'assetName': asset.displayLabel,
+      if (asset != null) 'assetCriticality': asset.criticalityWeight,
       'criterionId': criterion.id,
       'criterionCode': criterion.code,
       'sourceCode': criterion.sourceCode,

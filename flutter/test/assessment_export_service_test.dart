@@ -129,8 +129,11 @@ void main() {
       expect(projectDirector['email'], 'alice.martin@example.test');
 
       final scoring = payload['scoring'] as Map<String, dynamic>;
-      expect(scoring['methodStatus'], 'irn_scale_unweighted_v1');
-      expect(scoring['weightedOfficialMethodImplemented'], isFalse);
+      expect(
+        scoring['methodStatus'],
+        'irn_asset_maturity_weighted_geometric_v1',
+      );
+      expect(scoring['weightedOfficialMethodImplemented'], isTrue);
       final global = scoring['global'] as Map<String, dynamic>;
       expect(global['openIrnRnrScore'], 52.5);
       expect(global['officialScore'], 52.5);

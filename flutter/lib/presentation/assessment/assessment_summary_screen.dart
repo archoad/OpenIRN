@@ -46,18 +46,26 @@ class _AssessmentSummaryScreenState extends State<AssessmentSummaryScreen> {
   Widget build(BuildContext context) {
     const scoringService = OfficialRnrScoringService();
     final answers = _answersFromCriterionAnswers(widget.criterionAnswers);
-    final globalSummary = scoringService.computeSummary(
-      widget.referential,
-      answers,
-    );
-    final pillarSummaries = scoringService.computeSummariesByPillar(
-      widget.referential,
-      answers,
-    );
-    final scopeSummaries = scoringService.computeSummariesByScope(
-      widget.referential,
-      answers,
-    );
+    final maturitySummary = widget.campaign.information.isAssetScoped
+        ? scoringService.computeSystemMaturity(
+            widget.referential,
+            widget.campaign,
+            widget.criterionAnswers,
+          )
+        : null;
+    final globalSummary =
+        maturitySummary?.aggregateSummary ??
+        scoringService.computeSummary(widget.referential, answers);
+    final pillarSummaries =
+        maturitySummary?.aggregatePillarSummaries ??
+        scoringService.computeSummariesByPillar(widget.referential, answers);
+    final scopeSummaries = maturitySummary == null
+        ? scoringService.computeSummariesByScope(widget.referential, answers)
+        : scoringService.computeAssetScopedSummariesByScope(
+            widget.referential,
+            widget.campaign,
+            widget.criterionAnswers,
+          );
     final weakestPillars = _rankedPillars(
       pillarSummaries,
       ascending: true,
@@ -82,6 +90,7 @@ class _AssessmentSummaryScreenState extends State<AssessmentSummaryScreen> {
                 isExportingPdf: _exportingPdf,
                 onExportPdfPressed: () => _exportSummaryAsPdf(
                   globalSummary: globalSummary,
+                  maturitySummary: maturitySummary,
                   pillarSummaries: pillarSummaries,
                   scopeSummaries: scopeSummaries,
                   strongestPillars: strongestPillars,
@@ -89,14 +98,21 @@ class _AssessmentSummaryScreenState extends State<AssessmentSummaryScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              _GlobalSummaryCard(summary: globalSummary),
+              _GlobalSummaryCard(
+                summary: globalSummary,
+                maturitySummary: maturitySummary,
+              ),
               const SizedBox(height: 12),
-              _InterpretationCard(summary: globalSummary),
+              _InterpretationCard(
+                summary: globalSummary,
+                maturitySummary: maturitySummary,
+              ),
               const SizedBox(height: 12),
               RepaintBoundary(
                 key: _indicatorBoardKey,
                 child: _IrnIndicatorBoardCard(
                   globalSummary: globalSummary,
+                  maturitySummary: maturitySummary,
                   pillarSummaries: pillarSummaries,
                   isExporting: _exportingIndicatorBoard,
                   onExportPressed: () => _exportCardAsPng(
@@ -190,6 +206,7 @@ class _AssessmentSummaryScreenState extends State<AssessmentSummaryScreen> {
 
   Future<void> _exportSummaryAsPdf({
     required IrnScoreSummary globalSummary,
+    required IrnSystemMaturitySummary? maturitySummary,
     required Map<IrnPillar, IrnScoreSummary> pillarSummaries,
     required Map<CriterionScope, IrnScoreSummary> scopeSummaries,
     required List<MapEntry<IrnPillar, IrnScoreSummary>> strongestPillars,
@@ -203,6 +220,7 @@ class _AssessmentSummaryScreenState extends State<AssessmentSummaryScreen> {
         campaign: widget.campaign,
         referential: widget.referential,
         globalSummary: globalSummary,
+        maturitySummary: maturitySummary,
         pillarSummaries: pillarSummaries,
         scopeSummaries: scopeSummaries,
         strongestPillars: strongestPillars,
@@ -425,13 +443,20 @@ class _CampaignSummaryHeader extends StatelessWidget {
 
 class _GlobalSummaryCard extends StatelessWidget {
   final IrnScoreSummary summary;
+  final IrnSystemMaturitySummary? maturitySummary;
 
-  const _GlobalSummaryCard({required this.summary});
+  const _GlobalSummaryCard({
+    required this.summary,
+    required this.maturitySummary,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final score = summary.openIrnRnrScore;
+    final maturity = maturitySummary;
+    final score = maturity?.maturityScore ?? summary.openIrnRnrScore;
+    final formattedScore =
+        maturity?.formattedMaturityScore ?? summary.formattedOpenIrnRnrScore;
 
     return Card(
       child: Padding(
@@ -447,16 +472,15 @@ class _GlobalSummaryCard extends StatelessWidget {
                     children: [
                       Text('Score IRN', style: theme.textTheme.headlineSmall),
                       const SizedBox(height: 4),
-                      const Text(
-                        'Score non pondéré selon la grille IRN : NR=10, Intention=25, Moyen=50, Résultat=95. Les N.C. sont exclus du score.',
+                      Text(
+                        maturity == null
+                            ? 'Score selon la grille IRN : NR=10, Intention=25, Moyen=50, Résultat=95. Les N.C. sont exclus du score.'
+                            : 'Maturité IRN du SI : moyenne géométrique des scores par pilier pour chaque actif, pondérée par la criticité des actifs.',
                       ),
                     ],
                   ),
                 ),
-                Text(
-                  summary.formattedOpenIrnRnrScore,
-                  style: theme.textTheme.headlineMedium,
-                ),
+                Text(formattedScore, style: theme.textTheme.headlineMedium),
               ],
             ),
             const SizedBox(height: 16),
@@ -478,6 +502,18 @@ class _GlobalSummaryCard extends StatelessWidget {
                     'Non renseignés : ${summary.notAnsweredCriteria}',
                   ),
                 ),
+                if (maturity != null) ...[
+                  Chip(
+                    label: Text(
+                      'Actifs notés : ${maturity.scoredAssetCount}/${maturity.totalAssetCount}',
+                    ),
+                  ),
+                  Chip(
+                    label: Text(
+                      'Poids criticité : ${maturity.maturityWeightTotal}',
+                    ),
+                  ),
+                ],
                 Chip(
                   label: Text(
                     'Complétude : ${(summary.completionRate * 100).toStringAsFixed(0)} %',
@@ -494,13 +530,18 @@ class _GlobalSummaryCard extends StatelessWidget {
 
 class _InterpretationCard extends StatelessWidget {
   final IrnScoreSummary summary;
+  final IrnSystemMaturitySummary? maturitySummary;
 
-  const _InterpretationCard({required this.summary});
+  const _InterpretationCard({
+    required this.summary,
+    required this.maturitySummary,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final score = summary.openIrnRnrScore;
+    final maturity = maturitySummary;
+    final score = maturity?.maturityScore ?? summary.openIrnRnrScore;
     final completion = summary.completionRate;
     final interpretation = _interpret(score: score, completion: completion);
 
@@ -520,8 +561,10 @@ class _InterpretationCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(interpretation),
                   const SizedBox(height: 8),
-                  const Text(
-                    'Cette synthèse reste indicative tant que le périmètre entreprise, les assets, les campagnes et les validations ne sont pas branchés.',
+                  Text(
+                    maturity == null
+                        ? 'Cette synthèse reste indicative tant que la campagne n’est pas complète et validée.'
+                        : 'La note consolide les actifs du SI avec leur criticité. Elle reste à interpréter avec la complétude et les actifs non encore notés.',
                   ),
                 ],
               ),
@@ -551,12 +594,14 @@ class _InterpretationCard extends StatelessWidget {
 
 class _IrnIndicatorBoardCard extends StatelessWidget {
   final IrnScoreSummary globalSummary;
+  final IrnSystemMaturitySummary? maturitySummary;
   final Map<IrnPillar, IrnScoreSummary> pillarSummaries;
   final VoidCallback onExportPressed;
   final bool isExporting;
 
   const _IrnIndicatorBoardCard({
     required this.globalSummary,
+    required this.maturitySummary,
     required this.pillarSummaries,
     required this.onExportPressed,
     required this.isExporting,
@@ -600,7 +645,10 @@ class _IrnIndicatorBoardCard extends StatelessWidget {
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _GlobalIndicatorTile(summary: globalSummary),
+                      _GlobalIndicatorTile(
+                        summary: globalSummary,
+                        maturitySummary: maturitySummary,
+                      ),
                       const SizedBox(height: 12),
                       _PillarIndicatorGrid(entries: pillarEntries),
                     ],
@@ -626,7 +674,10 @@ class _IrnIndicatorBoardCard extends StatelessWidget {
                   children: [
                     SizedBox.square(
                       dimension: boardHeight,
-                      child: _GlobalIndicatorTile(summary: globalSummary),
+                      child: _GlobalIndicatorTile(
+                        summary: globalSummary,
+                        maturitySummary: maturitySummary,
+                      ),
                     ),
                     const SizedBox(width: boardGap),
                     Expanded(
@@ -663,20 +714,26 @@ double _wideIndicatorBoardHeight({
 
 class _GlobalIndicatorTile extends StatelessWidget {
   final IrnScoreSummary summary;
+  final IrnSystemMaturitySummary? maturitySummary;
 
-  const _GlobalIndicatorTile({required this.summary});
+  const _GlobalIndicatorTile({
+    required this.summary,
+    required this.maturitySummary,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final maturity = maturitySummary;
     return AspectRatio(
       aspectRatio: 1,
       child: _IndicatorTile(
-        title: 'Score global',
-        score: summary.openIrnRnrScore,
+        title: maturity == null ? 'Score global' : 'Maturité SI',
+        score: maturity?.maturityScore ?? summary.openIrnRnrScore,
         compactTitle: false,
         icon: Icons.speed_rounded,
-        subtitle:
-            '${summary.answeredCriteria}/${summary.totalCriteria} coté(s) · Complétude ${(summary.completionRate * 100).toStringAsFixed(0)} %',
+        subtitle: maturity == null
+            ? '${summary.answeredCriteria}/${summary.totalCriteria} coté(s) · Complétude ${(summary.completionRate * 100).toStringAsFixed(0)} %'
+            : '${maturity.scoredAssetCount}/${maturity.totalAssetCount} actif(s) noté(s) · Complétude ${(summary.completionRate * 100).toStringAsFixed(0)} %',
       ),
     );
   }

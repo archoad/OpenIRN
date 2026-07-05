@@ -76,7 +76,16 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
         for (final entry in criterionAnswers.entries)
           entry.key: entry.value.answer,
       };
-      final summary = _computeCampaignSummary(campaign, criterionAnswers);
+      final maturitySummary = campaign.information.isAssetScoped
+          ? _scoringService.computeSystemMaturity(
+              widget.referential,
+              campaign,
+              criterionAnswers,
+            )
+          : null;
+      final summary =
+          maturitySummary?.aggregateSummary ??
+          _computeCampaignSummary(campaign, criterionAnswers);
       final qualityReport = _qualityService.buildReport(
         referential: widget.referential,
         criterionAnswers: criterionAnswers,
@@ -88,6 +97,7 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
           criterionAnswers: criterionAnswers,
           answers: answers,
           summary: summary,
+          maturitySummary: maturitySummary,
           qualityReport: qualityReport,
         ),
       );
@@ -251,6 +261,7 @@ class _CampaignWithSummary {
   final Map<String, CriterionAnswer> criterionAnswers;
   final Map<String, IrnAnswer> answers;
   final IrnScoreSummary summary;
+  final IrnSystemMaturitySummary? maturitySummary;
   final AssessmentQualityReport qualityReport;
 
   const _CampaignWithSummary({
@@ -258,6 +269,7 @@ class _CampaignWithSummary {
     required this.criterionAnswers,
     required this.answers,
     required this.summary,
+    required this.maturitySummary,
     required this.qualityReport,
   });
 }
@@ -310,6 +322,12 @@ class _CampaignCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final campaign = entry.campaign;
     final summary = entry.summary;
+    final maturitySummary = entry.maturitySummary;
+    final displayedScore =
+        maturitySummary?.maturityScore ?? summary.openIrnRnrScore;
+    final displayedScoreLabel =
+        maturitySummary?.formattedMaturityScore ??
+        summary.formattedOpenIrnRnrScore;
     final qualityReport = entry.qualityReport;
 
     return Card(
@@ -367,16 +385,14 @@ class _CampaignCard extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  summary.formattedOpenIrnRnrScore,
+                  displayedScoreLabel,
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
               ],
             ),
             const SizedBox(height: 14),
             LinearProgressIndicator(
-              value: summary.openIrnRnrScore == null
-                  ? 0
-                  : summary.openIrnRnrScore! / 100,
+              value: displayedScore == null ? 0 : displayedScore / 100,
             ),
             const SizedBox(height: 14),
             Wrap(
@@ -397,6 +413,18 @@ class _CampaignCard extends StatelessWidget {
                 Chip(label: Text('Intention : ${summary.intentionCriteria}')),
                 Chip(label: Text('Moyen : ${summary.mediumCriteria}')),
                 Chip(label: Text('Résultat : ${summary.resultCriteria}')),
+                if (maturitySummary != null) ...[
+                  Chip(
+                    label: Text(
+                      'Actifs notés : ${maturitySummary.scoredAssetCount}/${maturitySummary.totalAssetCount}',
+                    ),
+                  ),
+                  Chip(
+                    label: Text(
+                      'Poids criticité : ${maturitySummary.maturityWeightTotal}',
+                    ),
+                  ),
+                ],
                 Chip(
                   label: Text(
                     'Complétude : ${(summary.completionRate * 100).toStringAsFixed(0)} %',

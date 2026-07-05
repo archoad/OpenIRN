@@ -613,6 +613,9 @@ class _InfoLine extends StatelessWidget {
 
 String _scoringMethodLabel(OfficialReferentialSummary summary) {
   final status = summary.scoringMethodStatus;
+  if (status == 'irn_asset_maturity_weighted_geometric_v1') {
+    return 'Maturité IRN par actifs';
+  }
   if (status == 'public_rnr_unweighted' ||
       status == 'irn_scale_unweighted_v1') {
     return summary.weightedOfficialMethodImplemented

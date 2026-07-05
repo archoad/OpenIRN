@@ -523,6 +523,7 @@ class _CreateCampaignDialogState extends State<_CreateCampaignDialog> {
                 id: asset.id,
                 name: asset.name,
                 assetType: asset.assetType,
+                criticality: asset.criticality,
                 description: asset.description,
               ),
             )

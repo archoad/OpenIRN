@@ -265,6 +265,7 @@ class _AssetInventoryManagementScreenState
         systemId: form.systemId,
         name: form.name,
         assetType: form.assetType,
+        criticality: form.criticality,
         description: form.description,
       ),
     );
@@ -293,6 +294,7 @@ class _AssetInventoryManagementScreenState
         systemId: form.systemId,
         name: form.name,
         assetType: form.assetType,
+        criticality: form.criticality,
         description: form.description,
       ),
     );
@@ -745,6 +747,20 @@ class _FunctionCard extends StatelessWidget {
   }
 }
 
+String _assetCriticalityLabel(String value) {
+  switch (value.trim()) {
+    case '1':
+      return 'N1 — Standard';
+    case '2':
+      return 'N2 — Modérée';
+    case '3':
+      return 'N3 — Élevée';
+    case '4':
+      return 'N4 — Critique';
+  }
+  return 'Criticité non renseignée';
+}
+
 class _SystemTile extends StatelessWidget {
   final InformationSystemInfo system;
   final List<InformationAssetInfo> assets;
@@ -833,6 +849,7 @@ class _SystemTile extends StatelessWidget {
                 subtitle: Text(
                   [
                     if (asset.assetType.isNotEmpty) asset.assetType,
+                    _assetCriticalityLabel(asset.criticality),
                     if (asset.description.isNotEmpty) asset.description,
                   ].join(' — '),
                 ),
@@ -1171,12 +1188,14 @@ class _AssetFormResult {
   final String systemId;
   final String name;
   final String assetType;
+  final String criticality;
   final String description;
 
   const _AssetFormResult({
     required this.systemId,
     required this.name,
     required this.assetType,
+    required this.criticality,
     required this.description,
   });
 }
@@ -1202,6 +1221,8 @@ class _AssetDialogState extends State<_AssetDialog> {
   late final TextEditingController _typeController;
   late final TextEditingController _descriptionController;
   late String _systemId;
+  late String _criticality;
+
   @override
   void initState() {
     super.initState();
@@ -1209,6 +1230,10 @@ class _AssetDialogState extends State<_AssetDialog> {
     if (_systemId.isEmpty && widget.systems.isNotEmpty) {
       _systemId = widget.systems.first.id;
     }
+    final existingCriticality = widget.asset?.criticality.trim() ?? '';
+    _criticality = <String>{'1', '2', '3', '4'}.contains(existingCriticality)
+        ? existingCriticality
+        : '1';
     _nameController = TextEditingController(text: widget.asset?.name ?? '');
     _typeController = TextEditingController(
       text: widget.asset?.assetType ?? '',
@@ -1235,6 +1260,7 @@ class _AssetDialogState extends State<_AssetDialog> {
         systemId: _systemId,
         name: _nameController.text.trim(),
         assetType: _typeController.text.trim(),
+        criticality: _criticality,
         description: _descriptionController.text.trim(),
       ),
     );
@@ -1293,6 +1319,25 @@ class _AssetDialogState extends State<_AssetDialog> {
                       'Ex. application, base de données, service, infrastructure…',
                   prefixIcon: Icon(Icons.category_outlined),
                 ),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: _criticality,
+                items: const [
+                  DropdownMenuItem(value: '1', child: Text('1 — standard')),
+                  DropdownMenuItem(value: '2', child: Text('2 — modérée')),
+                  DropdownMenuItem(value: '3', child: Text('3 — élevée')),
+                  DropdownMenuItem(value: '4', child: Text('4 — critique')),
+                ],
+                decoration: const InputDecoration(
+                  labelText: 'Criticité de l’actif',
+                  prefixIcon: Icon(Icons.flag_outlined),
+                ),
+                validator: (value) => value == null || value.isEmpty
+                    ? 'La criticité est obligatoire.'
+                    : null,
+                onChanged: (value) =>
+                    setState(() => _criticality = value ?? '1'),
               ),
               const SizedBox(height: 12),
               TextFormField(
