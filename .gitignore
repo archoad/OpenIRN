@@ -45,6 +45,8 @@ coverage/
 
 # Local IRN data
 /branding/
+AGENTS.md
+.agents/
 
 # Release signing material — never commit private signing assets
 /secrets/
