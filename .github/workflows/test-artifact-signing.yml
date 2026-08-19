@@ -7,6 +7,9 @@ permissions:
   id-token: write
   contents: read
 
+env:
+  FLUTTER_PROJECT: flutter
+
 jobs:
   build-and-sign:
     runs-on: windows-2025
@@ -27,21 +30,20 @@ jobs:
       - name: Enable Windows desktop
         run: flutter config --enable-windows-desktop
 
-      - name: Show repository layout
-        shell: powershell
-        run: |
-          Write-Host "Current directory:"
-          Get-Location
-
-          Write-Host "`nFlutter projects found:"
-          Get-ChildItem -Path . -Filter pubspec.yaml -Recurse |
-            Select-Object FullName
-
       - name: Dependencies
+        working-directory: ${{ env.FLUTTER_PROJECT }}
         run: flutter pub get
 
       - name: Build Windows
+        working-directory: ${{ env.FLUTTER_PROJECT }}
         run: flutter build windows --release
+
+      - name: Show Windows build
+        shell: powershell
+        run: |
+          Get-ChildItem `
+            "${{ github.workspace }}\flutter\build\windows\x64\runner\Release" `
+            | Format-Table Name, Length
 
       - name: Azure login
         uses: azure/login@v3
@@ -56,13 +58,10 @@ jobs:
           endpoint: https://neu.codesigning.azure.net/
           signing-account-name: openirnsign
           certificate-profile-name: openirn-public
-
-          files: ${{ github.workspace }}\build\windows\x64\runner\Release\openirn.exe
-
+          files: ${{ github.workspace }}\flutter\build\windows\x64\runner\Release\openirn.exe
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
-
           exclude-environment-credential: true
           exclude-workload-identity-credential: true
           exclude-managed-identity-credential: true
@@ -77,7 +76,7 @@ jobs:
       - name: Verify signature
         shell: powershell
         run: |
-          $file = "${{ github.workspace }}\build\windows\x64\runner\Release\openirn.exe"
+          $file = "${{ github.workspace }}\flutter\build\windows\x64\runner\Release\openirn.exe"
 
           $sig = Get-AuthenticodeSignature $file
 
@@ -93,4 +92,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: openirn-signed-test
-          path: build/windows/x64/runner/Release/openirn.exe
+          path: flutter/build/windows/x64/runner/Release/openirn.exe
