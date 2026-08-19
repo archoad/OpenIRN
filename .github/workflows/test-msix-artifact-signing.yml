@@ -1,0 +1,261 @@
+name: Test OpenIRN MSIX Artifact Signing
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  FLUTTER_PROJECT: flutter
+  PUBLISHER_SUBJECT: "CN=Archoad, O=Archoad, L=Noyen-sur-Sarthe, S=Sarthe, C=FR"
+  MSIX_IDENTITY_NAME: "Archoad.OpenIRN"
+  MSIX_OUTPUT_DIR: "flutter\\build\\windows\\msix"
+  MSIX_FILE: "OpenIRN.msix"
+
+jobs:
+  build-package-and-sign:
+    runs-on: windows-2025
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter version
+        run: flutter --version
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Dependencies
+        working-directory: ${{ env.FLUTTER_PROJECT }}
+        run: flutter pub get
+
+      - name: Build Windows
+        working-directory: ${{ env.FLUTTER_PROJECT }}
+        run: flutter build windows --release
+
+      - name: Show Windows build
+        shell: powershell
+        run: |
+          Get-ChildItem `
+            "${{ github.workspace }}\flutter\build\windows\x64\runner\Release" `
+            | Format-Table Name, Length
+
+      - name: Azure login
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign OpenIRN executable
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: https://neu.codesigning.azure.net/
+          signing-account-name: openirnsign
+          certificate-profile-name: openirn-public
+          files: ${{ github.workspace }}\flutter\build\windows\x64\runner\Release\OpenIRN.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+
+      - name: Verify executable signature
+        shell: powershell
+        run: |
+          $file = "${{ github.workspace }}\flutter\build\windows\x64\runner\Release\OpenIRN.exe"
+          $sig = Get-AuthenticodeSignature $file
+
+          Write-Host "Status  :" $sig.Status
+          Write-Host "Subject :" $sig.SignerCertificate.Subject
+          Write-Host "Issuer  :" $sig.SignerCertificate.Issuer
+
+          if ($sig.Status -ne "Valid") {
+            throw "OpenIRN.exe signature is not valid"
+          }
+
+          if ($sig.SignerCertificate.Subject -ne $env:PUBLISHER_SUBJECT) {
+            throw "Unexpected signer subject: $($sig.SignerCertificate.Subject)"
+          }
+
+      - name: Determine MSIX version
+        working-directory: ${{ env.FLUTTER_PROJECT }}
+        shell: powershell
+        run: |
+          $versionLine = Get-Content pubspec.yaml |
+            Where-Object { $_ -match '^\s*version:\s*([0-9]+)\.([0-9]+)\.([0-9]+)(?:\+([0-9]+))?\s*$' } |
+            Select-Object -First 1
+
+          if (-not $versionLine) {
+            throw "Unable to find a Flutter version in pubspec.yaml"
+          }
+
+          $null = $versionLine -match '^\s*version:\s*([0-9]+)\.([0-9]+)\.([0-9]+)(?:\+([0-9]+))?\s*$'
+          $major = [int]$Matches[1]
+          $minor = [int]$Matches[2]
+          $patch = [int]$Matches[3]
+          $build = if ($Matches[4]) { [int]$Matches[4] } else { 0 }
+
+          foreach ($part in @($major, $minor, $patch, $build)) {
+            if ($part -lt 0 -or $part -gt 65535) {
+              throw "MSIX version component out of range (0..65535): $part"
+            }
+          }
+
+          $msixVersion = "$major.$minor.$patch.$build"
+          Write-Host "MSIX version: $msixVersion"
+          "MSIX_VERSION=$msixVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Create unsigned MSIX
+        working-directory: ${{ env.FLUTTER_PROJECT }}
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path "build\windows\msix" | Out-Null
+
+          dart run msix:create `
+            --build-windows false `
+            --sign-msix false `
+            --install-certificate false `
+            --architecture x64 `
+            --display-name "OpenIRN" `
+            --publisher-display-name "Archoad" `
+            --identity-name "$env:MSIX_IDENTITY_NAME" `
+            --publisher "$env:PUBLISHER_SUBJECT" `
+            --version "$env:MSIX_VERSION" `
+            --output-path "build\windows\msix" `
+            --output-name "OpenIRN"
+
+          $msix = "build\windows\msix\OpenIRN.msix"
+          if (-not (Test-Path $msix)) {
+            Write-Host "Generated files:"
+            Get-ChildItem "build\windows\msix" -Recurse | Format-Table FullName, Length
+            throw "Expected MSIX not found: $msix"
+          }
+
+          Get-Item $msix | Format-List FullName, Length, LastWriteTime
+
+      - name: Inspect MSIX manifest before signing
+        shell: powershell
+        run: |
+          $msix = "${{ github.workspace }}\flutter\build\windows\msix\OpenIRN.msix"
+          $unpack = Join-Path $env:RUNNER_TEMP "openirn-msix-unpacked"
+
+          if (Test-Path $unpack) {
+            Remove-Item $unpack -Recurse -Force
+          }
+
+          $makeAppx = Get-ChildItem `
+            "${env:ProgramFiles(x86)}\Windows Kits\10\bin" `
+            -Recurse `
+            -Filter makeappx.exe `
+            -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\x64\\makeappx\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+
+          if (-not $makeAppx) {
+            throw "makeappx.exe not found on runner"
+          }
+
+          Write-Host "MakeAppx: $($makeAppx.FullName)"
+          & $makeAppx.FullName unpack /p $msix /d $unpack /o
+          if ($LASTEXITCODE -ne 0) {
+            throw "MakeAppx unpack failed with exit code $LASTEXITCODE"
+          }
+
+          [xml]$manifest = Get-Content (Join-Path $unpack "AppxManifest.xml")
+          $identity = $manifest.Package.Identity
+
+          Write-Host "Identity Name :" $identity.Name
+          Write-Host "Publisher     :" $identity.Publisher
+          Write-Host "Version       :" $identity.Version
+          Write-Host "Architecture  :" $identity.ProcessorArchitecture
+
+          if ($identity.Name -ne $env:MSIX_IDENTITY_NAME) {
+            throw "Unexpected MSIX identity name: $($identity.Name)"
+          }
+
+          if ($identity.Publisher -ne $env:PUBLISHER_SUBJECT) {
+            throw "MSIX Publisher does not match Artifact Signing certificate subject"
+          }
+
+          if ($identity.Version -ne $env:MSIX_VERSION) {
+            throw "Unexpected MSIX version: $($identity.Version)"
+          }
+
+      - name: Sign OpenIRN MSIX
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: https://neu.codesigning.azure.net/
+          signing-account-name: openirnsign
+          certificate-profile-name: openirn-public
+          files: ${{ github.workspace }}\flutter\build\windows\msix\OpenIRN.msix
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+
+      - name: Verify MSIX signature
+        shell: powershell
+        run: |
+          $msix = "${{ github.workspace }}\flutter\build\windows\msix\OpenIRN.msix"
+
+          $signTool = Get-ChildItem `
+            "${env:ProgramFiles(x86)}\Windows Kits\10\bin" `
+            -Recurse `
+            -Filter signtool.exe `
+            -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+
+          if (-not $signTool) {
+            throw "signtool.exe not found on runner"
+          }
+
+          Write-Host "SignTool: $($signTool.FullName)"
+          & $signTool.FullName verify /pa /v $msix
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "MSIX signature verification failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Show final package
+        shell: powershell
+        run: |
+          Get-Item `
+            "${{ github.workspace }}\flutter\build\windows\msix\OpenIRN.msix" `
+            | Format-List FullName, Length, LastWriteTime
+
+      - name: Upload signed MSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenIRN-MSIX-signed
+          path: flutter/build/windows/msix/OpenIRN.msix
+          if-no-files-found: error
