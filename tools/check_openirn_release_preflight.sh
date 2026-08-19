@@ -36,7 +36,7 @@ Usage: tools/check_openirn_release_preflight.sh [options]
 
 Options:
   --tag vX.Y.Z          Vérifie que le tag correspond à la version Flutter publique.
-  --require-secrets    Échoue si les secrets Android/Windows sont absents localement ou dans GitHub.
+  --require-secrets    Échoue si les secrets Android/Azure sont absents localement ou dans GitHub.
   --with-apple         Vérifie aussi les prérequis macOS/iOS Apple, optionnels pour l'instant.
   --strict             Transforme certains avertissements en erreurs.
   -h, --help           Affiche cette aide.
@@ -193,7 +193,12 @@ require_grep "tags:[[:space:]]*$" .github/workflows/release.yml 'déclenchement 
 require_grep "'v\*'|\"v\*\"" .github/workflows/release.yml 'tags v* déclenchent la release'
 require_grep 'prerelease' .github/workflows/release.yml 'option prerelease présente'
 require_grep 'ANDROID_KEYSTORE_BASE64' .github/workflows/release.yml 'signature Android configurée'
-require_grep 'WINDOWS_CERTIFICATE_BASE64' .github/workflows/release.yml 'signature Windows configurée'
+require_grep 'azure/artifact-signing-action@v2' .github/workflows/release.yml 'signature Windows Azure Artifact Signing configurée'
+require_grep 'id-token:[[:space:]]*write' .github/workflows/release.yml 'permission OIDC GitHub configurée'
+require_grep 'environment:[[:space:]]*artifact-signing' .github/workflows/release.yml 'environnement GitHub de signature configuré'
+require_grep 'openirnsign' .github/workflows/release.yml 'compte Artifact Signing configuré'
+require_grep 'openirn-public' .github/workflows/release.yml 'profil Public Trust configuré'
+forbidden_grep 'WINDOWS_CERTIFICATE_BASE64|WINDOWS_CERTIFICATE_PASSWORD|openirn-windows-codesign\.pfx' .github/workflows/release.yml 'ancienne chaîne Windows PFX'
 forbidden_grep 'MACOS_CERTIFICATE_BASE64|notarytool|flutter build macos' .github/workflows/release.yml 'release macOS Apple dans le profil courant'
 forbidden_grep 'IOS_CERTIFICATE_BASE64|IOS_PROVISIONING_PROFILE_BASE64|flutter build ipa' .github/workflows/release.yml 'release iOS Apple dans le profil courant'
 require_grep 'gh release create|gh release upload|softprops/action-gh-release' .github/workflows/release.yml 'publication GitHub Release configurée'
@@ -211,6 +216,8 @@ printf '\n== Windows ==\n'
 require_dir flutter/windows 'projet Windows Flutter'
 require_grep 'signtool' .github/workflows/release.yml 'signature Windows par signtool présente'
 require_grep 'openirn-windows-signed.zip' .github/workflows/release.yml 'artefact Windows signé configuré'
+require_grep 'openirn-windows-x64\.msix' .github/workflows/release.yml 'artefact MSIX signé configuré'
+require_grep 'msix:create' .github/workflows/release.yml 'construction MSIX configurée'
 
 printf '\n== Apple optionnel ==\n'
 if [[ "$WITH_APPLE" == true ]]; then
@@ -235,8 +242,9 @@ for secret in \
   ANDROID_KEYSTORE_PASSWORD \
   ANDROID_KEY_PASSWORD \
   ANDROID_KEY_ALIAS \
-  WINDOWS_CERTIFICATE_BASE64 \
-  WINDOWS_CERTIFICATE_PASSWORD; do
+  AZURE_CLIENT_ID \
+  AZURE_TENANT_ID \
+  AZURE_SUBSCRIPTION_ID; do
   check_secret "$secret" true
 done
 

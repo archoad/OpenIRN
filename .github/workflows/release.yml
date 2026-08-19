@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Tag de release à publier, par exemple v0.6.1'
+        description: 'Tag de release à publier, par exemple v1.3.0'
         required: true
         type: string
       prerelease:
@@ -17,7 +17,7 @@ on:
         type: boolean
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-signed-${{ github.ref }}-${{ github.event.inputs.tag_name }}
@@ -28,14 +28,21 @@ env:
   APP_NAME: openirn
   APP_DISPLAY_NAME: OpenIRN
   APP_BUNDLE_ID: io.github.archoad.openirn
+  PUBLISHER_SUBJECT: 'CN=Archoad, O=Archoad, L=Noyen-sur-Sarthe, S=Sarthe, C=FR'
+  MSIX_IDENTITY_NAME: Archoad.OpenIRN
+  ARTIFACT_SIGNING_ENDPOINT: https://neu.codesigning.azure.net/
+  ARTIFACT_SIGNING_ACCOUNT: openirnsign
+  ARTIFACT_SIGNING_PROFILE: openirn-public
 
 jobs:
   validate:
     name: Qualité et contrôles publication
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout release ref
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name || github.ref }}
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -46,6 +53,23 @@ jobs:
       - name: Install dependencies
         working-directory: flutter
         run: flutter pub get
+
+      - name: Check release tag and Flutter version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG_NAME="${{ github.event.inputs.tag_name }}"
+          else
+            TAG_NAME="${GITHUB_REF_NAME}"
+          fi
+          PUB_VERSION="$(awk '/^version:/ {print $2; exit}' flutter/pubspec.yaml)"
+          PUB_VERSION="${PUB_VERSION%%+*}"
+          if [[ "${TAG_NAME#v}" != "$PUB_VERSION" ]]; then
+            echo "Tag ${TAG_NAME} incohérent avec flutter/pubspec.yaml (${PUB_VERSION})" >&2
+            exit 1
+          fi
+          echo "Release ${TAG_NAME} cohérente avec la version Flutter ${PUB_VERSION}"
 
       - name: Check formatting
         working-directory: flutter
@@ -74,8 +98,10 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout release ref
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name || github.ref }}
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -139,12 +165,18 @@ jobs:
           if-no-files-found: error
 
   windows:
-    name: Windows signé
+    name: Windows signé Artifact Signing
     needs: validate
-    runs-on: windows-latest
+    runs-on: windows-2025
+    environment: artifact-signing
+    permissions:
+      contents: read
+      id-token: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout release ref
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name || github.ref }}
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -152,88 +184,214 @@ jobs:
           channel: ${{ env.FLUTTER_CHANNEL }}
           cache: true
 
+      - name: Flutter version
+        run: flutter --version
+
       - name: Install dependencies
         working-directory: flutter
         run: flutter pub get
 
       - name: Enable Windows desktop
-        working-directory: flutter
         run: flutter config --enable-windows-desktop
 
       - name: Build Windows app
         working-directory: flutter
         run: flutter build windows --release
 
-      - name: Import and validate Windows signing certificate
+      - name: Azure login with GitHub OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign OpenIRN executable
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ env.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ env.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ env.ARTIFACT_SIGNING_PROFILE }}
+          files: ${{ github.workspace }}\flutter\build\windows\x64\runner\Release\OpenIRN.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+
+      - name: Verify executable signature
         shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)) { throw "Secret GitHub manquant : WINDOWS_CERTIFICATE_BASE64" }
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) { throw "Secret GitHub manquant : WINDOWS_CERTIFICATE_PASSWORD" }
-
-          $windowsCertificatePassword = $env:WINDOWS_CERTIFICATE_PASSWORD.Trim()
-          $certificatePath = Join-Path $PWD "openirn-windows-codesign.pfx"
-          $certificateBytes = [System.Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64)
-          [System.IO.File]::WriteAllBytes($certificatePath, $certificateBytes)
-          if (-not (Test-Path $certificatePath)) { throw "Certificat Windows non créé" }
-
-          try {
-            $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
-              $certificatePath,
-              $windowsCertificatePassword,
-              [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
-            )
-          } catch {
-            throw "Le certificat Windows PFX ne peut pas être ouvert avec WINDOWS_CERTIFICATE_PASSWORD. Vérifiez que le secret correspond exactement au mot de passe utilisé lors de l'export du fichier .pfx. Détail : $($_.Exception.Message)"
+          $file = "${{ github.workspace }}\flutter\build\windows\x64\runner\Release\OpenIRN.exe"
+          $sig = Get-AuthenticodeSignature $file
+          Write-Host "Status  :" $sig.Status
+          Write-Host "Subject :" $sig.SignerCertificate.Subject
+          Write-Host "Issuer  :" $sig.SignerCertificate.Issuer
+          if ($sig.Status -ne "Valid") {
+            throw "OpenIRN.exe signature is not valid"
+          }
+          if ($sig.SignerCertificate.Subject -ne $env:PUBLISHER_SUBJECT) {
+            throw "Unexpected signer subject: $($sig.SignerCertificate.Subject)"
           }
 
-          if (-not $certificate.HasPrivateKey) {
-            throw "Le certificat Windows PFX ne contient pas de clé privée. Exportez de nouveau le certificat en incluant la clé privée."
-          }
-
-          $ekuNames = @($certificate.EnhancedKeyUsageList | ForEach-Object { $_.FriendlyName }) -join ", "
-          Write-Host "Certificat Windows chargé : $($certificate.Subject)"
-          Write-Host "Empreinte Windows : $($certificate.Thumbprint)"
-          if ($ekuNames) { Write-Host "Usages du certificat : $ekuNames" }
-
-      - name: Sign Windows binaries
+      - name: Determine MSIX version
+        working-directory: flutter
         shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
-          $signtool = (Get-Command signtool.exe -ErrorAction SilentlyContinue).Source
-          if (-not $signtool) {
-            $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
-              Sort-Object FullName -Descending |
-              Select-Object -First 1 -ExpandProperty FullName
+          $versionLine = Get-Content pubspec.yaml |
+            Where-Object { $_ -match '^\s*version:\s*([0-9]+)\.([0-9]+)\.([0-9]+)(?:\+([0-9]+))?\s*$' } |
+            Select-Object -First 1
+          if (-not $versionLine) {
+            throw "Unable to find a Flutter version in pubspec.yaml"
           }
-          if (-not $signtool) { throw "signtool.exe introuvable sur le runner Windows" }
+          $null = $versionLine -match '^\s*version:\s*([0-9]+)\.([0-9]+)\.([0-9]+)(?:\+([0-9]+))?\s*$'
+          $major = [int]$Matches[1]
+          $minor = [int]$Matches[2]
+          $patch = [int]$Matches[3]
+          $build = if ($Matches[4]) { [int]$Matches[4] } else { 0 }
+          foreach ($part in @($major, $minor, $patch, $build)) {
+            if ($part -lt 0 -or $part -gt 65535) {
+              throw "MSIX version component out of range (0..65535): $part"
+            }
+          }
+          $msixVersion = "$major.$minor.$patch.$build"
+          Write-Host "MSIX version: $msixVersion"
+          "MSIX_VERSION=$msixVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-          $files = Get-ChildItem flutter\build\windows\x64\runner\Release -Recurse -Include *.exe,*.dll |
-            Where-Object { $_.FullName -notmatch "\\data\\flutter_assets\\" }
-          if ($files.Count -eq 0) { throw "Aucun binaire Windows à signer" }
+      - name: Create unsigned MSIX
+        working-directory: flutter
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "build\windows\msix" | Out-Null
+          dart run msix:create `
+            --build-windows false `
+            --sign-msix false `
+            --install-certificate false `
+            --architecture x64 `
+            --display-name "OpenIRN" `
+            --publisher-display-name "Archoad" `
+            --identity-name "$env:MSIX_IDENTITY_NAME" `
+            --publisher "$env:PUBLISHER_SUBJECT" `
+            --version "$env:MSIX_VERSION" `
+            --output-path "build\windows\msix" `
+            --output-name "OpenIRN"
+          $msix = "build\windows\msix\OpenIRN.msix"
+          if (-not (Test-Path $msix)) {
+            Get-ChildItem "build\windows\msix" -Recurse | Format-Table FullName, Length
+            throw "Expected MSIX not found: $msix"
+          }
+          Get-Item $msix | Format-List FullName, Length, LastWriteTime
 
-          $windowsCertificatePassword = $env:WINDOWS_CERTIFICATE_PASSWORD.Trim()
-          if ([string]::IsNullOrWhiteSpace($windowsCertificatePassword)) { throw "Secret GitHub manquant : WINDOWS_CERTIFICATE_PASSWORD" }
-
-          foreach ($file in $files) {
-            & $signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f openirn-windows-codesign.pfx /p "$windowsCertificatePassword" "$($file.FullName)"
-            if ($LASTEXITCODE -ne 0) { throw "Échec de signature : $($file.FullName)" }
+      - name: Inspect MSIX manifest before signing
+        shell: pwsh
+        run: |
+          $msix = "${{ github.workspace }}\flutter\build\windows\msix\OpenIRN.msix"
+          $unpack = Join-Path $env:RUNNER_TEMP "openirn-msix-unpacked"
+          if (Test-Path $unpack) {
+            Remove-Item $unpack -Recurse -Force
+          }
+          $makeAppx = Get-ChildItem `
+            "${env:ProgramFiles(x86)}\Windows Kits\10\bin" `
+            -Recurse `
+            -Filter makeappx.exe `
+            -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\x64\\makeappx\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $makeAppx) {
+            throw "makeappx.exe not found on runner"
+          }
+          Write-Host "MakeAppx: $($makeAppx.FullName)"
+          & $makeAppx.FullName unpack /p $msix /d $unpack /o
+          if ($LASTEXITCODE -ne 0) {
+            throw "MakeAppx unpack failed with exit code $LASTEXITCODE"
+          }
+          [xml]$manifest = Get-Content (Join-Path $unpack "AppxManifest.xml")
+          $identity = $manifest.Package.Identity
+          Write-Host "Identity Name :" $identity.Name
+          Write-Host "Publisher     :" $identity.Publisher
+          Write-Host "Version       :" $identity.Version
+          Write-Host "Architecture  :" $identity.ProcessorArchitecture
+          if ($identity.Name -ne $env:MSIX_IDENTITY_NAME) {
+            throw "Unexpected MSIX identity name: $($identity.Name)"
+          }
+          if ($identity.Publisher -ne $env:PUBLISHER_SUBJECT) {
+            throw "MSIX Publisher does not match Artifact Signing certificate subject"
+          }
+          if ($identity.Version -ne $env:MSIX_VERSION) {
+            throw "Unexpected MSIX version: $($identity.Version)"
           }
 
-      - name: Package Windows app
+      - name: Sign OpenIRN MSIX
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ env.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ env.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ env.ARTIFACT_SIGNING_PROFILE }}
+          files: ${{ github.workspace }}\flutter\build\windows\msix\OpenIRN.msix
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+
+      - name: Verify MSIX signature
+        shell: pwsh
+        run: |
+          $msix = "${{ github.workspace }}\flutter\build\windows\msix\OpenIRN.msix"
+          $signTool = Get-ChildItem `
+            "${env:ProgramFiles(x86)}\Windows Kits\10\bin" `
+            -Recurse `
+            -Filter signtool.exe `
+            -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $signTool) {
+            throw "signtool.exe not found on runner"
+          }
+          Write-Host "SignTool: $($signTool.FullName)"
+          & $signTool.FullName verify /pa /v $msix
+          if ($LASTEXITCODE -ne 0) {
+            throw "MSIX signature verification failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Prepare Windows release artifacts
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force release_artifacts | Out-Null
-          Compress-Archive -Path flutter\build\windows\x64\runner\Release\* -DestinationPath release_artifacts\openirn-windows-signed.zip -Force
+          Compress-Archive `
+            -Path flutter\build\windows\x64\runner\Release\* `
+            -DestinationPath release_artifacts\openirn-windows-signed.zip `
+            -Force
+          Copy-Item `
+            flutter\build\windows\msix\OpenIRN.msix `
+            release_artifacts\openirn-windows-x64.msix `
+            -Force
+          Get-ChildItem release_artifacts | Format-Table Name, Length
 
-      - name: Upload Windows artifact
+      - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: openirn-windows-signed
-          path: release_artifacts/openirn-windows-signed.zip
+          path: |
+            release_artifacts/openirn-windows-signed.zip
+            release_artifacts/openirn-windows-x64.msix
           if-no-files-found: error
 
   publish:
@@ -243,9 +401,13 @@ jobs:
       - android
       - windows
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout release ref
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name || github.ref }}
 
       - name: Resolve release metadata
         id: metadata
@@ -289,12 +451,13 @@ jobs:
 
           - `openirn-android.apk` : APK Android signé.
           - `openirn-android.aab` : Android App Bundle signé pour Google Play.
-          - `openirn-windows-signed.zip` : application Windows dont les binaires ont été signés.
+          - `openirn-windows-signed.zip` : distribution Windows portable avec `OpenIRN.exe` signé.
+          - `openirn-windows-x64.msix` : package MSIX x64 signé et horodaté.
           - `SHA256SUMS.txt` : empreintes SHA-256 des artefacts.
 
-          ## Note Windows
+          ## Signature Windows
 
-          Le certificat Windows actuellement utilisé peut être auto-signé pour valider la chaîne technique. Pour une distribution publique, il faudra passer à un certificat de signature de code OV/EV ou à un service de signature reconnu.
+          Les artefacts Windows sont signés avec Azure Artifact Signing, profil Public Trust `openirn-public`, au nom de `Archoad`. Les signatures utilisent SHA-256 et le service d'horodatage Microsoft.
 
           ## macOS et iOS
 
@@ -302,7 +465,7 @@ jobs:
 
           ## Sécurité
 
-          Les clés privées et certificats ne sont pas stockés dans le dépôt. Ils sont fournis au workflow via les secrets GitHub Actions du dépôt.
+          La clé privée de signature Windows n'est ni exportée ni stockée dans GitHub. GitHub Actions s'authentifie auprès de Microsoft Entra par OIDC avec un jeton de courte durée. Les secrets GitHub Android restent utilisés pour la signature Android.
           EOF_NOTES
 
       - name: Create or update GitHub release

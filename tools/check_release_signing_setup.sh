@@ -4,11 +4,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
-echo "[OpenIRN 149/150] Vérification de la configuration de release signée Android / Windows"
+echo "[OpenIRN] Vérification de la configuration de release signée Android / Windows Artifact Signing"
 
 required_files=(
   ".github/workflows/release.yml"
   "flutter/android/app/build.gradle.kts"
+  "flutter/pubspec.yaml"
   "docs/149_releases_signees.md"
 )
 
@@ -20,28 +21,53 @@ for file in "${required_files[@]}"; do
   echo "[OK] $file"
 done
 
+require_pattern() {
+  local pattern="$1"
+  local label="$2"
+  if ! grep -Eq "$pattern" .github/workflows/release.yml; then
+    echo "[ERREUR] ${label}" >&2
+    exit 1
+  fi
+  echo "[OK] ${label}"
+}
+
 if ! grep -q "ANDROID_KEYSTORE_BASE64" .github/workflows/release.yml; then
   echo "[ERREUR] secrets Android non référencés dans release.yml" >&2
   exit 1
 fi
-if ! grep -q "WINDOWS_CERTIFICATE_BASE64" .github/workflows/release.yml; then
-  echo "[ERREUR] secrets Windows non référencés dans release.yml" >&2
+
+echo "[OK] signature Android configurée"
+
+require_pattern 'id-token:[[:space:]]*write' 'permission OIDC id-token: write présente'
+require_pattern 'environment:[[:space:]]*artifact-signing' 'environnement GitHub artifact-signing configuré'
+require_pattern 'azure/login@v3' 'authentification Azure OIDC configurée'
+require_pattern 'AZURE_CLIENT_ID' 'secret AZURE_CLIENT_ID référencé'
+require_pattern 'AZURE_TENANT_ID' 'secret AZURE_TENANT_ID référencé'
+require_pattern 'AZURE_SUBSCRIPTION_ID' 'secret AZURE_SUBSCRIPTION_ID référencé'
+require_pattern 'azure/artifact-signing-action@v2' 'Azure Artifact Signing v2 configuré'
+require_pattern 'openirnsign' 'compte Artifact Signing openirnsign configuré'
+require_pattern 'openirn-public' 'profil Artifact Signing openirn-public configuré'
+require_pattern 'msix:create' 'construction MSIX configurée'
+require_pattern 'openirn-windows-x64\.msix' 'artefact MSIX de release configuré'
+require_pattern 'signtool' 'vérification MSIX par SignTool configurée'
+
+if grep -Eq 'WINDOWS_CERTIFICATE_BASE64|WINDOWS_CERTIFICATE_PASSWORD|openirn-windows-codesign\.pfx' .github/workflows/release.yml; then
+  echo "[ERREUR] ancienne chaîne Windows PFX encore référencée dans release.yml" >&2
   exit 1
 fi
-if grep -q "MACOS_CERTIFICATE_BASE64" .github/workflows/release.yml; then
-  echo "[AVERTISSEMENT] le workflow release.yml référence encore la signature macOS alors que le profil actif est Android / Windows" >&2
-fi
-if grep -q "IOS_PROVISIONING_PROFILE_BASE64" .github/workflows/release.yml; then
-  echo "[AVERTISSEMENT] le workflow release.yml référence encore la signature iOS alors que le profil actif est Android / Windows" >&2
-fi
+
+echo "[OK] aucune dépendance à un PFX Windows exporté"
+
 if ! grep -q "keystoreProperties" flutter/android/app/build.gradle.kts; then
   echo "[ERREUR] signature Android release non configurée dans Gradle" >&2
   exit 1
 fi
-if ! grep -q "signtool" .github/workflows/release.yml; then
-  echo "[ERREUR] signature Windows par signtool absente" >&2
+
+if ! grep -Eq '^[[:space:]]*msix:[[:space:]]*\^?[0-9]' flutter/pubspec.yaml; then
+  echo "[ERREUR] dépendance Dart msix absente de flutter/pubspec.yaml" >&2
   exit 1
 fi
 
-echo "[OK] configuration de release signée Android / Windows présente"
-echo "[NOTE] macOS et iOS sont volontairement hors périmètre tant qu'aucun compte Apple Developer payant n'est disponible."
+echo "[OK] dépendance MSIX présente"
+echo "[OK] configuration de release signée Android / Windows Artifact Signing présente"
+echo "[NOTE] macOS et iOS restent volontairement hors périmètre du profil courant."
