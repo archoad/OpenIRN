@@ -27,6 +27,16 @@ jobs:
       - name: Enable Windows desktop
         run: flutter config --enable-windows-desktop
 
+      - name: Show repository layout
+        shell: powershell
+        run: |
+          Write-Host "Current directory:"
+          Get-Location
+
+          Write-Host "`nFlutter projects found:"
+          Get-ChildItem -Path . -Filter pubspec.yaml -Recurse |
+            Select-Object FullName
+
       - name: Dependencies
         run: flutter pub get
 
