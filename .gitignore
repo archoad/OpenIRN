@@ -58,6 +58,7 @@ flutter/android/app/*.keystore
 *.p12
 *.p8
 *.pfx
+*.key
 *.mobileprovision
 *.cer
 *.csr
