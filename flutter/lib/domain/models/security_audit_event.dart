@@ -91,6 +91,18 @@ class SecurityAuditEvent {
         return 'Échec d’authentification';
       case 'auth.rate_limited':
         return 'Limitation anti-bruteforce';
+      case 'user.initial_pin_invalidated':
+        return 'Code initial prévisible invalidé';
+      case 'user.pin_change_required':
+        return 'Changement de code requis';
+      case 'user.pin_changed_on_first_login':
+        return 'Code personnel défini à la première connexion';
+      case 'user.pin_change_failed':
+        return 'Échec du changement de code';
+      case 'user.pin_changed':
+        return 'Code personnel modifié';
+      case 'user.pin_reset_by_administrator':
+        return 'Code temporaire attribué par un administrateur';
     }
     return eventType.isEmpty ? 'Événement sécurité' : eventType;
   }

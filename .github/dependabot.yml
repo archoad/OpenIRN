@@ -15,3 +15,11 @@ updates:
     labels:
       - "dependencies"
       - "flutter"
+
+  - package-ecosystem: "pip"
+    directory: "/server/openirn-api"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "python"

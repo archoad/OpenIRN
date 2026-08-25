@@ -5,6 +5,7 @@ import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/sync_configuration.dart';
 import '../../domain/services/app_sync_coordinator.dart';
+import '../../domain/services/pin_policy.dart';
 import '../../l10n/openirn_localizations.dart';
 import '../common/openirn_app_bar.dart';
 import '../common/responsive_autofocus.dart';
@@ -513,12 +514,17 @@ class _UserListScreenState extends State<UserListScreen> {
                   final serverAvailable = state?.serverAvailable ?? false;
                   return _UserCard(
                     user: user,
-                    centralPinsAvailable: serverAvailable,
+                    centralPinsAvailable:
+                        serverAvailable && _isSolutionAdministrator,
                     showTenant: _isSolutionAdministrator,
                     onEdit: serverAvailable && !_working
                         ? () => _editUser(user)
                         : null,
-                    onChangePin: state == null || !serverAvailable || _working
+                    onChangePin:
+                        state == null ||
+                            !serverAvailable ||
+                            !_isSolutionAdministrator ||
+                            _working
                         ? null
                         : () => _changeUserPin(user, state),
                     onDelete: !serverAvailable || _working
@@ -1044,6 +1050,9 @@ class _UserPinDialogState extends State<_UserPinDialog> {
                     }
                     if (pin.length > 32) {
                       return context.tr('users.pin.too_long');
+                    }
+                    if (isPredictableOpenIrnPin(pin)) {
+                      return context.tr('users.pin.too_predictable');
                     }
                     return null;
                   },

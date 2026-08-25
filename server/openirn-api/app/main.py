@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import re
@@ -14,15 +15,31 @@ import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from io import BytesIO
-from typing import Any, Iterator
+from typing import Any, Awaitable, Callable, Iterator
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+
+if __package__:
+    from .database_contract import (
+        REQUIRED_MIGRATIONS,
+        REQUIRED_TABLES,
+        RUNTIME_FORBIDDEN_PRIVILEGES,
+        RUNTIME_REQUIRED_PRIVILEGES,
+    )
+else:
+    from database_contract import (
+        REQUIRED_MIGRATIONS,
+        REQUIRED_TABLES,
+        RUNTIME_FORBIDDEN_PRIVILEGES,
+        RUNTIME_REQUIRED_PRIVILEGES,
+    )
 
 APP_VERSION = "0.10.0"
 DATA_DIR = Path(os.environ.get("OPENIRN_API_DATA_DIR", "/var/lib/openirn-api"))
@@ -61,14 +78,64 @@ SESSION_TTL_MINUTES = int(os.environ.get("OPENIRN_SESSION_TTL_MINUTES", "480"))
 SESSION_IDLE_TIMEOUT_MINUTES = int(os.environ.get("OPENIRN_SESSION_IDLE_TIMEOUT_MINUTES", "30"))
 LEGACY_GLOBAL_BEARER_ENABLED = os.environ.get("OPENIRN_LEGACY_GLOBAL_BEARER_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
 
+
+def _positive_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name, str(default)).strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} doit être un entier strictement positif") from exc
+    if value <= 0:
+        raise RuntimeError(f"{name} doit être un entier strictement positif")
+    return value
+
+
+MAX_REQUEST_BODY_BYTES = _positive_int_env("OPENIRN_MAX_REQUEST_BODY_BYTES", 1024 * 1024)
+MAX_SYNC_PUSH_BODY_BYTES = _positive_int_env("OPENIRN_MAX_SYNC_PUSH_BODY_BYTES", 16 * 1024 * 1024)
+MAX_INVENTORY_XLSX_BODY_BYTES = _positive_int_env("OPENIRN_MAX_INVENTORY_XLSX_BODY_BYTES", 5 * 1024 * 1024)
+MAX_INVENTORY_XLSX_UNCOMPRESSED_BYTES = _positive_int_env(
+    "OPENIRN_MAX_INVENTORY_XLSX_UNCOMPRESSED_BYTES", 64 * 1024 * 1024
+)
+MAX_INVENTORY_XLSX_ENTRIES = _positive_int_env("OPENIRN_MAX_INVENTORY_XLSX_ENTRIES", 512)
+SYNC_MAX_CAMPAIGNS = _positive_int_env("OPENIRN_SYNC_MAX_CAMPAIGNS", 500)
+SYNC_MAX_USERS = _positive_int_env("OPENIRN_SYNC_MAX_USERS", 2000)
+ENROLLMENT_RATE_WINDOW_MINUTES = _positive_int_env("OPENIRN_ENROLLMENT_RATE_WINDOW_MINUTES", 15)
+ENROLLMENT_REQUEST_MAX_BY_IP = _positive_int_env("OPENIRN_ENROLLMENT_REQUEST_MAX_BY_IP", 5)
+ENROLLMENT_REQUEST_MAX_BY_TENANT = _positive_int_env("OPENIRN_ENROLLMENT_REQUEST_MAX_BY_TENANT", 25)
+ENROLLMENT_CONSUME_MAX_BY_IP = _positive_int_env("OPENIRN_ENROLLMENT_CONSUME_MAX_BY_IP", 10)
+ENROLLMENT_CONSUME_MAX_BY_TENANT = _positive_int_env("OPENIRN_ENROLLMENT_CONSUME_MAX_BY_TENANT", 50)
+ENROLLMENT_REQUEST_MAX_PENDING = _positive_int_env("OPENIRN_ENROLLMENT_REQUEST_MAX_PENDING", 50)
+ENROLLMENT_REQUEST_TTL_HOURS = _positive_int_env("OPENIRN_ENROLLMENT_REQUEST_TTL_HOURS", 24)
+ENROLLMENT_RATE_LIMIT_RETENTION_DAYS = _positive_int_env("OPENIRN_ENROLLMENT_RATE_LIMIT_RETENTION_DAYS", 7)
+ENROLLMENT_CODE_SECRET_ENV = "OPENIRN_ENROLLMENT_CODE_SECRET"
+
+
+def _parse_trusted_proxy_networks(raw: str) -> tuple[Any, ...]:
+    networks: list[Any] = []
+    for entry in str(raw or "").split(","):
+        value = entry.strip()
+        if not value:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(value, strict=False))
+        except ValueError as exc:
+            raise RuntimeError(
+                f"OPENIRN_TRUSTED_PROXY_CIDRS contient un réseau invalide: {value}"
+            ) from exc
+    return tuple(networks)
+
+
+TRUSTED_PROXY_NETWORKS = _parse_trusted_proxy_networks(
+    os.environ.get("OPENIRN_TRUSTED_PROXY_CIDRS", "")
+)
+
 # Unified API authorization policy.
 #
 # The device id is deliberately public: it identifies an enrolled terminal but
-# does not prove an authenticated user session. Read-only connectivity and
-# synchronization checks may use an active terminal id. Every write or
-# administration operation must use a short-lived server session with the
-# appropriate user role. The historical global bearer is disabled by default
-# and never grants write or administration rights.
+# never proves access. Tenant reads require the terminal secret or an active
+# user session. Every write or administration operation requires a short-lived
+# server session with the appropriate role. The historical global bearer is
+# disabled by default and never grants tenant access.
 API_ROLE_ADMIN = {"administrator"}
 API_ROLE_CAMPAIGN_MANAGER = {"administrator", "campaign_manager"}
 API_ROLE_WRITE = {"administrator", "campaign_manager", "evaluator", "reviewer"}
@@ -94,10 +161,11 @@ def _load_pymysql() -> Any:
     return pymysql
 
 
-def _parse_mysql_url() -> dict[str, Any]:
-    if not MYSQL_URL:
+def _parse_mysql_url(mysql_url: str | None = None) -> dict[str, Any]:
+    effective_url = MYSQL_URL if mysql_url is None else str(mysql_url or "").strip()
+    if not effective_url:
         raise RuntimeError("OPENIRN_API_MYSQL_URL est requis pour démarrer OpenIRN")
-    parsed = urllib.parse.urlparse(MYSQL_URL)
+    parsed = urllib.parse.urlparse(effective_url)
     if parsed.scheme not in {"mysql", "mysql+pymysql", "mariadb", "mariadb+pymysql"}:
         raise RuntimeError("OPENIRN_API_MYSQL_URL doit utiliser mysql+pymysql:// ou mariadb+pymysql://")
     database = parsed.path.lstrip("/")
@@ -171,15 +239,19 @@ class _MySQLCursorResult:
     def __iter__(self):
         return iter(self.fetchall())
 
+    @property
+    def rowcount(self) -> int:
+        return int(self._cursor.rowcount or 0)
+
 
 class DbError(RuntimeError):
     pass
 
 
 class _MySQLConnection:
-    def __init__(self):
+    def __init__(self, mysql_url: str | None = None):
         pymysql = _load_pymysql()
-        config = _parse_mysql_url()
+        config = _parse_mysql_url(mysql_url)
         try:
             self._con = pymysql.connect(
                 host=config["host"],
@@ -297,11 +369,114 @@ def _translate_mysql_sql(sql: str) -> str:
     return translated.replace("?", "%s")
 
 
+class _RequestBodyTooLarge(Exception):
+    pass
+
+
+def _request_body_limit(path: str) -> int:
+    if path == "/sync/push":
+        return MAX_SYNC_PUSH_BODY_BYTES
+    if path == "/inventory/import.xlsx":
+        return MAX_INVENTORY_XLSX_BODY_BYTES
+    return MAX_REQUEST_BODY_BYTES
+
+
+async def _send_asgi_error(
+    send: Callable[[dict[str, Any]], Awaitable[None]],
+    status_code: int,
+    detail: str,
+) -> None:
+    body = json.dumps({"detail": detail}, ensure_ascii=False).encode("utf-8")
+    await send(
+        {
+            "type": "http.response.start",
+            "status": status_code,
+            # A reverse proxy may still be forwarding the rejected request
+            # body. Keep the upstream connection open so it can finish cleanly.
+            "headers": [
+                (b"content-type", b"application/json; charset=utf-8"),
+                (b"content-length", str(len(body)).encode("ascii")),
+            ],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
+
+
+class RequestBodyLimitMiddleware:
+    """Reject oversized fixed-length and streamed request bodies before parsing."""
+
+    def __init__(self, application: Callable[..., Awaitable[None]]) -> None:
+        self.application = application
+
+    async def __call__(
+        self,
+        scope: dict[str, Any],
+        receive: Callable[[], Awaitable[dict[str, Any]]],
+        send: Callable[[dict[str, Any]], Awaitable[None]],
+    ) -> None:
+        if scope.get("type") != "http" or str(scope.get("method") or "").upper() not in {
+            "POST",
+            "PUT",
+            "PATCH",
+        }:
+            await self.application(scope, receive, send)
+            return
+
+        limit = _request_body_limit(str(scope.get("path") or ""))
+        content_lengths = [
+            value.decode("latin-1").strip()
+            for key, value in scope.get("headers", [])
+            if key.lower() == b"content-length"
+        ]
+        has_transfer_encoding = any(
+            key.lower() == b"transfer-encoding" for key, _ in scope.get("headers", [])
+        )
+        if len(content_lengths) > 1:
+            await _send_asgi_error(send, 400, "En-têtes Content-Length multiples")
+            return
+        if content_lengths and has_transfer_encoding:
+            await _send_asgi_error(
+                send,
+                400,
+                "Content-Length et Transfer-Encoding ne peuvent pas être combinés",
+            )
+            return
+        if content_lengths:
+            try:
+                content_length = int(content_lengths[0])
+            except ValueError:
+                await _send_asgi_error(send, 400, "En-tête Content-Length invalide")
+                return
+            if content_length < 0:
+                await _send_asgi_error(send, 400, "En-tête Content-Length invalide")
+                return
+            if content_length > limit:
+                await _send_asgi_error(send, 413, f"Corps de requête limité à {limit} octets")
+                return
+
+        received = 0
+
+        async def limited_receive() -> dict[str, Any]:
+            nonlocal received
+            message = await receive()
+            if message.get("type") == "http.request":
+                received += len(message.get("body", b""))
+                if received > limit:
+                    raise _RequestBodyTooLarge
+            return message
+
+        try:
+            await self.application(scope, limited_receive, send)
+        except _RequestBodyTooLarge:
+            await _send_asgi_error(send, 413, f"Corps de requête limité à {limit} octets")
+
+
 app = FastAPI(
     title="OpenIRN API",
     version=APP_VERSION,
 )
 
+app.add_middleware(RequestBodyLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -466,28 +641,35 @@ def _enrollment_code_hash_with_pepper(tenant_id: str, code: str, pepper: str) ->
     ).hexdigest()
 
 
+def _enrollment_code_secret() -> str:
+    secret = os.environ.get(ENROLLMENT_CODE_SECRET_ENV, "").strip()
+    if len(secret) < 32:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"{ENROLLMENT_CODE_SECRET_ENV} doit contenir au moins 32 caractères "
+                "avant de créer ou consommer un code d’appairage"
+            ),
+        )
+    return secret
+
+
 def _enrollment_code_hash(tenant_id: str, code: str) -> str:
-    # New enrollment codes no longer depend on OPENIRN_API_TOKEN. This keeps
-    # terminal pairing independent from the deprecated global bearer.
     return _enrollment_code_hash_with_pepper(
         tenant_id,
         code,
-        "openirn-device-enrollment-v2",
-    )
-
-
-def _bootstrap_enrollment_code_hash(tenant_id: str, code: str) -> str:
-    return _enrollment_code_hash_with_pepper(
-        tenant_id,
-        code,
-        "openirn-device-enrollment-bootstrap-v1",
+        _enrollment_code_secret(),
     )
 
 
 def _enrollment_code_hash_candidates(tenant_id: str, code: str) -> list[str]:
+    # The public historical peppers are verification-only during the short
+    # lifetime of codes issued before this migration. New codes always use the
+    # deployment secret and never OPENIRN_API_TOKEN.
     hashes = [
         _enrollment_code_hash(tenant_id, code),
-        _bootstrap_enrollment_code_hash(tenant_id, code),
+        _enrollment_code_hash_with_pepper(tenant_id, code, "openirn-device-enrollment-v2"),
+        _enrollment_code_hash_with_pepper(tenant_id, code, "openirn-device-enrollment-bootstrap-v1"),
         _enrollment_code_hash_with_pepper(tenant_id, code, "openirn-device-enrollment"),
     ]
     legacy_api_token = _raw_configured_api_token()
@@ -508,9 +690,9 @@ def _format_enrollment_code(value: str) -> str:
 
 
 def _new_enrollment_code() -> str:
-    # Crockford-like alphabet without easily confused characters. 10 chars ≈ 50 bits.
+    # Crockford-like alphabet without easily confused characters. 14 chars ≈ 70 bits.
     alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
-    return "".join(secrets.choice(alphabet) for _ in range(10))
+    return "".join(secrets.choice(alphabet) for _ in range(14))
 
 
 def _new_device_token() -> str:
@@ -765,17 +947,45 @@ def _require_write_authorization(request: Request, tenant_id: str) -> dict[str, 
 
 def _require_device_or_authorized_read(request: Request, tenant_id: str) -> dict[str, Any] | None:
     context = _request_auth_context(request)
-    if context is not None:
-        auth_mode = str(context.get("authMode") or "")
-        if auth_mode == "legacy_global_bearer":
-            return context
-        if not tenant_id or str(context.get("tenantId") or "") == tenant_id:
-            return context
-        if _is_administrator_context(context):
-            return context
-        raise HTTPException(status_code=403, detail="L’autorisation ne correspond pas à l’espace de travail demandé")
-    _require_active_device(request, tenant_id)
-    return None
+    if context is None:
+        raise _authorization_unavailable_exception()
+    auth_mode = str(context.get("authMode") or "")
+    if auth_mode == "legacy_global_bearer":
+        raise HTTPException(
+            status_code=403,
+            detail="Le bearer global legacy ne donne plus accès aux données OpenIRN",
+        )
+    if not tenant_id or str(context.get("tenantId") or "") == tenant_id:
+        return context
+    if _is_administrator_context(context):
+        return context
+    raise HTTPException(status_code=403, detail="L’autorisation ne correspond pas à l’espace de travail demandé")
+
+
+def _require_device_token_authorization(
+    request: Request,
+    tenant_id: str,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    context = _request_auth_context(request)
+    if context is None or str(context.get("authMode") or "") != "legacy_device_token":
+        raise HTTPException(
+            status_code=403,
+            detail="Le jeton secret de ce terminal est absent, invalide ou révoqué",
+        )
+    if str(context.get("tenantId") or "") != tenant_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Le terminal n’est pas autorisé dans cet espace de travail",
+        )
+    requested_device_id = _request_device_id(request, payload)
+    authorized_device_id = str(context.get("deviceId") or "").strip()
+    if requested_device_id and requested_device_id != authorized_device_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Le jeton terminal ne correspond pas à l’identifiant présenté",
+        )
+    return context
 
 
 def _request_device_id(request: Request, payload: dict[str, Any] | None = None) -> str:
@@ -789,15 +999,50 @@ def _request_device_id(request: Request, payload: dict[str, Any] | None = None) 
     return ""
 
 
+def _canonical_ip(value: Any) -> str:
+    raw = str(value or "").strip()
+    if raw.startswith("[") and raw.endswith("]"):
+        raw = raw[1:-1]
+    try:
+        parsed = ipaddress.ip_address(raw)
+    except ValueError:
+        return ""
+    if isinstance(parsed, ipaddress.IPv6Address) and parsed.ipv4_mapped is not None:
+        return str(parsed.ipv4_mapped)
+    return str(parsed)
+
+
+def _ip_is_trusted_proxy(value: str) -> bool:
+    canonical = _canonical_ip(value)
+    if not canonical:
+        return False
+    parsed = ipaddress.ip_address(canonical)
+    return any(parsed.version == network.version and parsed in network for network in TRUSTED_PROXY_NETWORKS)
+
+
 def _request_client_ip(request: Request) -> str:
-    forwarded_for = request.headers.get("x-forwarded-for", "").strip()
-    if forwarded_for:
-        return forwarded_for.split(",", 1)[0].strip()[:80]
-    real_ip = request.headers.get("x-real-ip", "").strip()
+    peer_ip = _canonical_ip(request.client.host if request.client else "")
+    if not peer_ip:
+        return "unknown"
+    if not _ip_is_trusted_proxy(peer_ip):
+        return peer_ip[:80]
+
+    forwarded_chain = [
+        candidate
+        for raw_candidate in request.headers.get("x-forwarded-for", "").split(",")
+        if (candidate := _canonical_ip(raw_candidate))
+    ]
+    for candidate in reversed(forwarded_chain):
+        if not _ip_is_trusted_proxy(candidate):
+            return candidate[:80]
+    if forwarded_chain:
+        return forwarded_chain[0][:80]
+
+    real_ip = _canonical_ip(request.headers.get("x-real-ip", ""))
     if real_ip:
         return real_ip[:80]
-    if request.client and request.client.host:
-        return request.client.host[:80]
+    if peer_ip:
+        return peer_ip[:80]
     return "unknown"
 
 
@@ -910,6 +1155,98 @@ def _enforce_auth_rate_limit(
             )
 
 
+def _rate_limit_window(now: datetime) -> tuple[str, int]:
+    window_seconds = max(60, ENROLLMENT_RATE_WINDOW_MINUTES * 60)
+    timestamp = int(now.timestamp())
+    started_timestamp = timestamp - (timestamp % window_seconds)
+    started_at = datetime.fromtimestamp(started_timestamp, timezone.utc)
+    retry_after = max(1, started_timestamp + window_seconds - timestamp)
+    return started_at.isoformat(), retry_after
+
+
+def _enforce_enrollment_rate_limit(
+    con: Any,
+    tenant_id: str,
+    *,
+    operation: str,
+    ip_address: str,
+    max_by_ip: int,
+    max_by_tenant: int,
+) -> None:
+    now = _utc_now()
+    window_started_at, retry_after = _rate_limit_window(now)
+    retention_start = now - timedelta(days=ENROLLMENT_RATE_LIMIT_RETENTION_DAYS)
+    con.execute(
+        "DELETE FROM api_rate_limit_buckets WHERE updated_at < ?",
+        (retention_start.isoformat(),),
+    )
+    checks = [
+        (f"enrollment.{operation}.tenant", tenant_id, max_by_tenant, "espace de travail"),
+        (f"enrollment.{operation}.ip", ip_address, max_by_ip, "adresse réseau"),
+    ]
+    for scope, subject, limit, label in checks:
+        subject_hash = _secret_hash(f"{scope}:{subject}")
+        con.execute(
+            """
+            INSERT INTO api_rate_limit_buckets(
+                tenant_id, scope, subject_hash, window_started_at, request_count, updated_at
+            ) VALUES (?, ?, ?, ?, 1, ?)
+            ON CONFLICT(tenant_id, scope, subject_hash, window_started_at)
+            DO UPDATE SET request_count = request_count + 1, updated_at = excluded.updated_at
+            """,
+            (tenant_id, scope, subject_hash, window_started_at, now.isoformat()),
+        )
+        row = con.execute(
+            """
+            SELECT request_count
+            FROM api_rate_limit_buckets
+            WHERE tenant_id = ? AND scope = ? AND subject_hash = ? AND window_started_at = ?
+            """,
+            (tenant_id, scope, subject_hash, window_started_at),
+        ).fetchone()
+        count = int(row["request_count"] if row is not None else 0)
+        if count <= limit:
+            continue
+        if count == limit + 1:
+            _record_device_audit(
+                con,
+                tenant_id,
+                "enrollment.rate_limited",
+                payload={
+                    "operation": operation,
+                    "scope": scope,
+                    "ipAddress": ip_address,
+                    "windowMinutes": ENROLLMENT_RATE_WINDOW_MINUTES,
+                    "limit": limit,
+                },
+            )
+        con.commit()
+        raise HTTPException(
+            status_code=429,
+            detail=f"Trop de tentatives d’enrôlement pour cette {label}. Réessayez plus tard.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
+def _expire_stale_enrollment_requests(con: Any, tenant_id: str) -> int:
+    expires_before = (_utc_now() - timedelta(hours=ENROLLMENT_REQUEST_TTL_HOURS)).isoformat()
+    now = _utc_now().isoformat()
+    result = con.execute(
+        """
+        UPDATE device_enrollment_requests
+        SET status = 'expired', decided_at = ?, decision_note = ?
+        WHERE tenant_id = ? AND status = 'pending' AND requested_at < ?
+        """,
+        (
+            now,
+            f"Expiration automatique après {ENROLLMENT_REQUEST_TTL_HOURS} heures",
+            tenant_id,
+            expires_before,
+        ),
+    )
+    return int(result.rowcount or 0)
+
+
 def _require_active_device(
     request: Request,
     tenant_id: str,
@@ -995,10 +1332,9 @@ def _require_api_token(request: Request) -> None:
 def _require_sync_read_access(request: Request, tenant_id: str) -> None:
     """Authorize read-only synchronization endpoints.
 
-    Read-only endpoints accept a session token, a legacy device token, an
-    enrolled active terminal id in X-OpenIRN-Device-Id, or, only when explicitly
-    re-enabled server-side, the deprecated global bearer. A terminal id is not a
-    secret and never grants write or administration rights.
+    Read-only endpoints accept a tenant-bound user session or device bearer.
+    The public terminal id and the deprecated global bearer never grant access
+    to tenant data.
     """
     _require_device_or_authorized_read(request, tenant_id)
 
@@ -1013,18 +1349,20 @@ def _pin_hash(pin: str, salt: str, iterations: int = PIN_ITERATIONS) -> str:
 
 
 @contextmanager
-def _db() -> Iterator[Any]:
-    con = _MySQLConnection()
+def _db(mysql_url: str | None = None) -> Iterator[Any]:
+    con = _MySQLConnection(mysql_url)
     try:
         yield con
     finally:
         con.close()
 
 
-def _apply_schema() -> None:
+def _apply_schema(migration_mysql_url: str) -> None:
+    if not str(migration_mysql_url or "").strip():
+        raise RuntimeError("OPENIRN_MIGRATION_MYSQL_URL est requis pour appliquer les migrations")
     if not MARIADB_SCHEMA_PATH.exists():
         raise RuntimeError(f"OpenIRN MariaDB schema not found: {MARIADB_SCHEMA_PATH}")
-    with _db() as con:
+    with _db(migration_mysql_url) as con:
         con.executescript(MARIADB_SCHEMA_PATH.read_text(encoding="utf-8"))
         if MARIADB_SCHEMA_COMPAT_PATH.exists():
             con.executescript(MARIADB_SCHEMA_COMPAT_PATH.read_text(encoding="utf-8"))
@@ -1033,6 +1371,8 @@ def _apply_schema() -> None:
         _delete_legacy_revoked_authorized_devices(con)
         _migrate_authorized_device_identity_schema(con)
         _migrate_terminal_identity_schema(con)
+        _invalidate_legacy_default_pins(con)
+        _record_migration(con, 170, "enrollment_anti_abuse_rate_limit_buckets")
         _ensure_tenant(con, DEFAULT_TENANT_ID)
         _backfill_default_tenant_display_name(con)
         _sync_solution_administrators_to_all_tenants(con)
@@ -1040,9 +1380,75 @@ def _apply_schema() -> None:
         con.commit()
 
 
+def _privileges_from_grants(grants: list[str]) -> set[str]:
+    privileges: set[str] = set()
+    for raw_grant in grants:
+        grant = str(raw_grant or "").strip().upper()
+        if " WITH GRANT OPTION" in grant:
+            privileges.add("GRANT OPTION")
+        if not grant.startswith("GRANT ") or " ON " not in grant:
+            continue
+        clause = grant[len("GRANT ") : grant.index(" ON ")]
+        privileges.update(item.strip() for item in clause.split(",") if item.strip())
+    return privileges
+
+
+def _verify_runtime_schema() -> dict[str, Any]:
+    with _db() as con:
+        table_rows = con.execute(
+            """
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'
+            """
+        ).fetchall()
+        tables = {str(row["table_name"]) for row in table_rows}
+        missing_tables = sorted(set(REQUIRED_TABLES) - tables)
+        if missing_tables:
+            raise RuntimeError(
+                "Schéma MariaDB incomplet; exécutez tools/migrate_mariadb.py avec le compte de migration. "
+                f"Tables absentes: {', '.join(missing_tables)}"
+            )
+
+        migration_rows = con.execute(
+            "SELECT version, name FROM schema_migrations ORDER BY version"
+        ).fetchall()
+        migrations = {int(row["version"]): str(row["name"] or "") for row in migration_rows}
+        missing_migrations = sorted(set(REQUIRED_MIGRATIONS) - set(migrations))
+        if missing_migrations:
+            raise RuntimeError(
+                "Migrations MariaDB incomplètes; exécutez tools/migrate_mariadb.py avec le compte de migration. "
+                f"Versions absentes: {', '.join(str(version) for version in missing_migrations)}"
+            )
+
+        grant_rows = con.execute("SHOW GRANTS FOR CURRENT_USER()").fetchall()
+        grants = [str(row[0]) for row in grant_rows]
+        privileges = _privileges_from_grants(grants)
+        forbidden = sorted(privileges & (set(RUNTIME_FORBIDDEN_PRIVILEGES) | {"GRANT OPTION"}))
+        missing_privileges = sorted(set(RUNTIME_REQUIRED_PRIVILEGES) - privileges)
+        if forbidden:
+            raise RuntimeError(
+                "Le compte runtime MariaDB possède encore des privilèges DDL interdits: "
+                f"{', '.join(forbidden)}"
+            )
+        if missing_privileges:
+            raise RuntimeError(
+                "Le compte runtime MariaDB ne possède pas tous les privilèges DML requis: "
+                f"{', '.join(missing_privileges)}"
+            )
+
+        principal_row = con.execute("SELECT CURRENT_USER() AS principal").fetchone()
+        return {
+            "principal": str(principal_row["principal"] if principal_row else ""),
+            "tables": len(tables),
+            "migrations": migrations,
+            "privileges": sorted(privileges),
+        }
+
+
 @app.on_event("startup")
 def _startup() -> None:
-    _apply_schema()
+    _verify_runtime_schema()
 
 
 
@@ -1094,6 +1500,56 @@ def _record_migration(con: Any, version: int, name: str) -> None:
         "INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (?, ?)",
         (version, name),
     )
+
+
+def _invalidate_legacy_default_pins(con: Any) -> None:
+    """Disable predictable bootstrap PINs without storing a replacement."""
+    if _migration_applied(con, 169):
+        return
+    if not _table_exists(con, "user_credentials"):
+        _record_migration(con, 169, "invalidate_legacy_default_pins")
+        return
+
+    rows = con.execute(
+        """
+        SELECT tenant_id, user_id, salt, pin_hash, iterations
+        FROM user_credentials
+        WHERE requires_change = 1
+        """
+    ).fetchall()
+    for row in rows:
+        salt = str(row["salt"] or "")
+        iterations = int(row["iterations"] or PIN_ITERATIONS)
+        expected_hash = str(row["pin_hash"] or "")
+        if not salt or not expected_hash:
+            continue
+        default_hash = _pin_hash(PIN_DEFAULT, salt, iterations)
+        if not hmac.compare_digest(default_hash, expected_hash):
+            continue
+        replacement_salt = uuid.uuid4().hex
+        unavailable_secret = secrets.token_urlsafe(48)
+        con.execute(
+            """
+            UPDATE user_credentials
+            SET salt = ?, pin_hash = ?, iterations = ?, updated_at = ?
+            WHERE tenant_id = ? AND user_id = ?
+            """,
+            (
+                replacement_salt,
+                _pin_hash(unavailable_secret, replacement_salt, PIN_ITERATIONS),
+                PIN_ITERATIONS,
+                _utc_now().isoformat(),
+                row["tenant_id"],
+                row["user_id"],
+            ),
+        )
+        _record_device_audit(
+            con,
+            str(row["tenant_id"] or ""),
+            "user.initial_pin_invalidated",
+            payload={"userId": row["user_id"], "reason": "predictable_default_pin"},
+        )
+    _record_migration(con, 169, "invalidate_legacy_default_pins")
 
 
 def _alias_target(con: Any, entity_type: str, old_id: str, scope_id: str = "") -> str:
@@ -1279,6 +1735,7 @@ def _migrate_existing_entity_ids_to_uuid(con: Any) -> None:
         "device_enrollment_codes",
         "api_sessions",
         "auth_attempts",
+        "api_rate_limit_buckets",
         "device_audit_log",
         "official_referentials",
         "official_referential_history",
@@ -1675,7 +2132,6 @@ def _user_display_name_from_parts(first_name: Any, last_name: Any, email: Any, f
     return fallback
 
 def _list_tenants(con: Any) -> list[dict[str, Any]]:
-    _ensure_tenant(con, DEFAULT_TENANT_ID)
     rows = con.execute(
         """
         SELECT id, created_at, updated_at, display_name, description, permanent
@@ -1684,6 +2140,17 @@ def _list_tenants(con: Any) -> list[dict[str, Any]]:
         """,
     ).fetchall()
     return [_tenant_payload_from_row(con, row) for row in rows]
+
+
+def _public_tenant_discovery_payload(item: dict[str, Any]) -> dict[str, Any]:
+    """Return only the fields needed before a user session exists."""
+    return {
+        "tenantId": item.get("tenantId"),
+        "id": item.get("id") or item.get("tenantId"),
+        "displayName": item.get("displayName") or "Espace de travail",
+        "permanent": bool(item.get("permanent")),
+        "isDefault": bool(item.get("isDefault")),
+    }
 
 
 def _safe_tenant_id_for_creation(value: Any) -> str:
@@ -2124,6 +2591,10 @@ def _record_device_audit(
     )
 
 
+class _ExistingDeviceAuthorization(HTTPException):
+    pass
+
+
 def _create_device(
     con: Any,
     tenant_id: str,
@@ -2136,6 +2607,29 @@ def _create_device(
 ) -> tuple[dict[str, Any], str]:
     requested_device_id = _normalize_device_id(device_id)
     effective_device_id = requested_device_id or f"device_{uuid.uuid4().hex}"
+    existing = con.execute(
+        """
+        SELECT 1
+        FROM authorized_devices
+        WHERE tenant_id = ? AND device_id = ?
+        """,
+        (tenant_id, effective_device_id),
+    ).fetchone()
+    if existing is not None:
+        _record_device_audit(
+            con,
+            tenant_id,
+            "enrollment.reenrollment_blocked",
+            device_id=effective_device_id,
+            payload={"enrollmentId": enrollment_id or "", "reason": "authorization_already_exists"},
+        )
+        raise _ExistingDeviceAuthorization(
+            status_code=409,
+            detail=(
+                "Ce terminal possède déjà une autorisation dans cet espace. "
+                "Révoquez-la explicitement avant un nouvel enrôlement."
+            ),
+        )
     terminal_identity, terminal_already_known = _ensure_terminal_identity(
         con,
         device_id=effective_device_id,
@@ -2146,55 +2640,26 @@ def _create_device(
     now = _utc_now().isoformat()
     canonical_name = str(terminal_identity.get("name") or "").strip()[:120] or "Terminal OpenIRN"
     canonical_platform = str(terminal_identity.get("platform") or platform or "").strip()[:80]
-    existing = con.execute(
+    con.execute(
         """
-        SELECT 1
-        FROM authorized_devices
-        WHERE tenant_id = ? AND device_id = ?
+        INSERT INTO authorized_devices(
+            tenant_id, device_id, name, platform, token_hash, status,
+            created_at, last_seen_at, revoked_at, invited_by_user_id, enrollment_id
+        ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, NULL, ?, ?)
         """,
-        (tenant_id, effective_device_id),
-    ).fetchone()
-    if existing is None:
-        con.execute(
-            """
-            INSERT INTO authorized_devices(
-                tenant_id, device_id, name, platform, token_hash, status,
-                created_at, last_seen_at, revoked_at, invited_by_user_id, enrollment_id
-            ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, NULL, ?, ?)
-            """,
-            (
-                tenant_id,
-                effective_device_id,
-                canonical_name,
-                canonical_platform,
-                _secret_hash(token),
-                now,
-                now,
-                str(invited_by_user_id or "").strip(),
-                str(enrollment_id or "").strip(),
-            ),
-        )
-        event_type = "device.created"
-    else:
-        con.execute(
-            """
-            UPDATE authorized_devices
-            SET name = ?, platform = ?, token_hash = ?, status = 'active',
-                last_seen_at = ?, revoked_at = NULL, invited_by_user_id = ?, enrollment_id = ?
-            WHERE tenant_id = ? AND device_id = ?
-            """,
-            (
-                canonical_name,
-                canonical_platform,
-                _secret_hash(token),
-                now,
-                str(invited_by_user_id or "").strip(),
-                str(enrollment_id or "").strip(),
-                tenant_id,
-                effective_device_id,
-            ),
-        )
-        event_type = "device.reenrolled"
+        (
+            tenant_id,
+            effective_device_id,
+            canonical_name,
+            canonical_platform,
+            _secret_hash(token),
+            now,
+            now,
+            str(invited_by_user_id or "").strip(),
+            str(enrollment_id or "").strip(),
+        ),
+    )
+    event_type = "device.created"
     _touch_terminal(con, effective_device_id, now)
     _record_device_audit(
         con,
@@ -3458,6 +3923,7 @@ def _ensure_user_credentials(con: Any, tenant_id: str, users: list[dict[str, Any
         if exists:
             continue
         salt = uuid.uuid4().hex
+        unavailable_secret = secrets.token_urlsafe(48)
         con.execute(
             """
             INSERT INTO user_credentials(
@@ -3465,7 +3931,14 @@ def _ensure_user_credentials(con: Any, tenant_id: str, users: list[dict[str, Any
                 requires_change, updated_at
             ) VALUES (?, ?, 'pbkdf2_sha256', ?, ?, ?, 1, ?)
             """,
-            (tenant_id, user_id, PIN_ITERATIONS, salt, _pin_hash(PIN_DEFAULT, salt, PIN_ITERATIONS), _utc_now().isoformat()),
+            (
+                tenant_id,
+                user_id,
+                PIN_ITERATIONS,
+                salt,
+                _pin_hash(unavailable_secret, salt, PIN_ITERATIONS),
+                _utc_now().isoformat(),
+            ),
         )
 
 
@@ -3490,10 +3963,40 @@ def _merge_central_users(con: Any, tenant_id: str, raw_users: Any) -> int:
     return changed
 
 
-def _set_user_pin(con: Any, tenant_id: str, user_id: str, pin: str, *, requires_change: bool) -> None:
+def _validate_new_pin(pin: str, *, current_pin: str = "") -> str:
     cleaned_pin = str(pin or "").strip()
     if len(cleaned_pin) < 4 or len(cleaned_pin) > 32:
         raise HTTPException(status_code=400, detail="Le code personnel doit contenir entre 4 et 32 caractères")
+    if current_pin and hmac.compare_digest(cleaned_pin, str(current_pin).strip()):
+        raise HTTPException(status_code=400, detail="Le nouveau code doit être différent du code actuel")
+
+    lowered = cleaned_pin.lower()
+    weak_values = {
+        str(PIN_DEFAULT or "").strip().lower(),
+        "0000",
+        "1111",
+        "1234",
+        "4321",
+        "0123",
+        "2580",
+        "password",
+        "motdepasse",
+    }
+    repeated = len(set(cleaned_pin)) == 1
+    sequential = cleaned_pin.isdigit() and (
+        cleaned_pin in "01234567890123456789"
+        or cleaned_pin in "98765432109876543210"
+    )
+    if lowered in weak_values or repeated or sequential:
+        raise HTTPException(
+            status_code=400,
+            detail="Ce code personnel est trop prévisible. Choisissez un code non trivial.",
+        )
+    return cleaned_pin
+
+
+def _set_user_pin(con: Any, tenant_id: str, user_id: str, pin: str, *, requires_change: bool) -> None:
+    cleaned_pin = _validate_new_pin(pin)
 
     user_exists = con.execute(
         "SELECT 1 FROM users WHERE tenant_id = ? AND user_id = ?",
@@ -3529,13 +4032,21 @@ def _set_user_pin(con: Any, tenant_id: str, user_id: str, pin: str, *, requires_
     )
 
 
-def _verify_user_pin(con: Any, tenant_id: str, user_id: str, pin: str) -> tuple[bool, bool]:
+def _verify_user_pin(
+    con: Any,
+    tenant_id: str,
+    user_id: str,
+    pin: str,
+    *,
+    for_update: bool = False,
+) -> tuple[bool, bool]:
+    lock_clause = " FOR UPDATE" if for_update else ""
     credential = con.execute(
         """
         SELECT salt, pin_hash, iterations, requires_change
         FROM user_credentials
         WHERE tenant_id = ? AND user_id = ?
-        """,
+        """ + lock_clause,
         (tenant_id, user_id),
     ).fetchone()
     if credential is None:
@@ -3546,7 +4057,7 @@ def _verify_user_pin(con: Any, tenant_id: str, user_id: str, pin: str) -> tuple[
             SELECT salt, pin_hash, iterations, requires_change
             FROM user_credentials
             WHERE tenant_id = ? AND user_id = ?
-            """,
+            """ + lock_clause,
             (tenant_id, user_id),
         ).fetchone()
     if credential is None:
@@ -3623,6 +4134,67 @@ def _extract_campaigns(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return found
 
 
+def _campaign_expected_revision(raw_campaign: dict[str, Any], campaign_id: str) -> int:
+    value = raw_campaign.get("expectedServerRevision")
+    if value is None:
+        raise HTTPException(
+            status_code=428,
+            detail={
+                "code": "campaign_revision_required",
+                "campaignId": campaign_id,
+            },
+        )
+    if isinstance(value, bool):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_campaign_revision",
+                "campaignId": campaign_id,
+            },
+        )
+    try:
+        revision = int(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_campaign_revision",
+                "campaignId": campaign_id,
+            },
+        ) from exc
+    if revision < 0:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_campaign_revision",
+                "campaignId": campaign_id,
+            },
+        )
+    return revision
+
+
+def _campaign_payload_for_storage(raw_campaign: dict[str, Any]) -> dict[str, Any]:
+    stored = dict(raw_campaign)
+    stored.pop("expectedServerRevision", None)
+    return stored
+
+
+def _raise_campaign_revision_conflict(
+    campaign_id: str,
+    expected_revision: int,
+    current_revision: int,
+) -> None:
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "campaign_revision_conflict",
+            "campaignId": campaign_id,
+            "expectedRevision": expected_revision,
+            "currentRevision": current_revision,
+        },
+    )
+
+
 def _record_campaign_revisions(
     con: Any,
     tenant_id: str,
@@ -3633,49 +4205,41 @@ def _record_campaign_revisions(
 ) -> dict[str, int]:
     campaigns = _extract_campaigns(payload)
     revision_count = 0
-    conflict_count = 0
     skipped_without_id = 0
-    deleted_count = 0
-    received_campaign_ids: set[str] = set()
 
     for raw_campaign in campaigns:
         original_cid = _campaign_id(raw_campaign)
         if not original_cid:
             skipped_without_id += 1
             continue
+        expected_revision = _campaign_expected_revision(raw_campaign, original_cid)
+        stored_campaign = _campaign_payload_for_storage(raw_campaign)
         cid = _campaign_id_for_save(con, tenant_id, original_cid)
         if cid != original_cid:
-            raw_campaign = _rewrite_json_ids(raw_campaign, {original_cid: cid})
-        received_campaign_ids.add(cid)
+            stored_campaign = _rewrite_json_ids(stored_campaign, {original_cid: cid})
 
-        campaign_payload_sha256 = _json_sha256(raw_campaign)
-        updated_at = _campaign_updated_at(raw_campaign, payload, received_at)
+        campaign_payload_sha256 = _json_sha256(stored_campaign)
+        updated_at = _campaign_updated_at(stored_campaign, payload, received_at)
         existing = con.execute(
             """
             SELECT server_revision, payload_sha256, device_id, received_at
             FROM campaign_states
             WHERE tenant_id = ? AND campaign_id = ?
+            FOR UPDATE
             """,
             (tenant_id, cid),
         ).fetchone()
 
-        if existing and str(existing["payload_sha256"]) == campaign_payload_sha256:
+        current_revision = int(existing["server_revision"] or 0) if existing else 0
+        if expected_revision != current_revision:
+            if existing and str(existing["payload_sha256"] or "") == campaign_payload_sha256:
+                continue
+            _raise_campaign_revision_conflict(cid, expected_revision, current_revision)
+
+        if existing and str(existing["payload_sha256"] or "") == campaign_payload_sha256:
             continue
 
-        next_revision = 1
-        conflict_detected = 0
-        conflict_reason = None
-        if existing:
-            next_revision = int(existing["server_revision"] or 0) + 1
-            if str(existing["device_id"] or "") != device_id:
-                conflict_detected = 1
-                conflict_reason = "last_write_wins_over_previous_device_revision"
-            elif _parse_datetime(existing["received_at"]) > _parse_datetime(received_at):
-                conflict_detected = 1
-                conflict_reason = "older_received_at_after_newer_state"
-
-        if conflict_detected:
-            conflict_count += 1
+        next_revision = current_revision + 1
 
         con.execute(
             """
@@ -3683,7 +4247,7 @@ def _record_campaign_revisions(
                 tenant_id, campaign_id, server_revision, server_sync_id,
                 device_id, updated_at, received_at, payload_sha256,
                 payload_json, conflict_policy, conflict_detected, conflict_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'last_write_wins', ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'optimistic_concurrency', 0, NULL)
             ON CONFLICT(tenant_id, campaign_id, server_revision) DO NOTHING
             """,
             (
@@ -3695,9 +4259,7 @@ def _record_campaign_revisions(
                 updated_at,
                 received_at,
                 campaign_payload_sha256,
-                _canonical_json(raw_campaign),
-                conflict_detected,
-                conflict_reason,
+                _canonical_json(stored_campaign),
             ),
         )
 
@@ -3707,7 +4269,7 @@ def _record_campaign_revisions(
                 tenant_id, campaign_id, server_revision, server_sync_id,
                 device_id, updated_at, received_at, payload_sha256,
                 payload_json, conflict_policy
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'last_write_wins')
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'optimistic_concurrency')
             ON CONFLICT(tenant_id, campaign_id) DO UPDATE SET
                 server_revision = excluded.server_revision,
                 server_sync_id = excluded.server_sync_id,
@@ -3727,7 +4289,7 @@ def _record_campaign_revisions(
                 updated_at,
                 received_at,
                 campaign_payload_sha256,
-                _canonical_json(raw_campaign),
+                _canonical_json(stored_campaign),
             ),
         )
 
@@ -3748,62 +4310,19 @@ def _record_campaign_revisions(
                     {
                         "campaignId": cid,
                         "serverRevision": next_revision,
-                        "conflictDetected": conflict_detected == 1,
-                        "conflictReason": conflict_reason,
+                        "conflictDetected": False,
+                        "conflictReason": None,
                     }
                 ),
             ),
         )
         revision_count += 1
 
-    # OpenIRN clients publish the complete campaign set for a tenant.
-    # A campaign absent from a new snapshot is therefore considered deleted.
-    current_rows = con.execute(
-        "SELECT campaign_id FROM campaign_states WHERE tenant_id = ?",
-        (tenant_id,),
-    ).fetchall()
-    deleted_campaign_ids = [
-        str(row["campaign_id"] or "")
-        for row in current_rows
-        if str(row["campaign_id"] or "") and str(row["campaign_id"] or "") not in received_campaign_ids
-    ]
-
-    for deleted_campaign_id in deleted_campaign_ids:
-        con.execute(
-            "DELETE FROM campaign_states WHERE tenant_id = ? AND campaign_id = ?",
-            (tenant_id, deleted_campaign_id),
-        )
-        con.execute(
-            "DELETE FROM campaign_revisions WHERE tenant_id = ? AND campaign_id = ?",
-            (tenant_id, deleted_campaign_id),
-        )
-        con.execute(
-            "DELETE FROM sync_events WHERE tenant_id = ? AND campaign_id = ?",
-            (tenant_id, deleted_campaign_id),
-        )
-        con.execute(
-            """
-            INSERT INTO sync_events(
-                tenant_id, event_type, server_sync_id, campaign_id,
-                device_id, created_at, payload_json
-            ) VALUES (?, 'campaign_deleted_by_snapshot_absence', ?, ?, ?, ?, ?)
-            """,
-            (
-                tenant_id,
-                server_sync_id,
-                deleted_campaign_id,
-                device_id,
-                _utc_now().isoformat(),
-                _canonical_json({"campaignId": deleted_campaign_id}),
-            ),
-        )
-        deleted_count += 1
-
     return {
         "campaignCount": len(campaigns),
         "revisionCount": revision_count,
-        "conflictCount": conflict_count,
-        "deletedCount": deleted_count,
+        "conflictCount": 0,
+        "deletedCount": 0,
         "skippedWithoutId": skipped_without_id,
     }
 
@@ -3840,10 +4359,10 @@ def _campaign_title_from_payload(payload: Any, fallback: str) -> str:
     return fallback
 
 
-def _public_campaign_state_from_row(row: Any) -> dict[str, Any]:
+def _public_campaign_state_from_row(row: Any, *, include_payload: bool = False) -> dict[str, Any]:
     payload = _parse_json(row["payload_json"], {})
     campaign_id = str(row["campaign_id"] or "")
-    return {
+    public = {
         "tenantId": row["tenant_id"],
         "tenantDisplayName": str(_row_value(row, "tenant_display_name", "") or "").strip() or "Espace de travail",
         "campaignId": campaign_id,
@@ -3856,6 +4375,9 @@ def _public_campaign_state_from_row(row: Any) -> dict[str, Any]:
         "payloadSha256": row["payload_sha256"],
         "conflictPolicy": row["conflict_policy"],
     }
+    if include_payload:
+        public["payload"] = payload if isinstance(payload, dict) else None
+    return public
 
 
 def _public_campaign_revision_from_row(row: Any, *, include_payload: bool = False) -> dict[str, Any]:
@@ -3891,26 +4413,21 @@ def _file_sha256(path: Path) -> str:
 
 def _table_counts(con: Any) -> dict[str, int | None]:
     counts: dict[str, int | None] = {}
-    for table in [
-        "tenants",
-        "users",
-        "sync_snapshots",
-        "campaign_states",
-        "campaign_revisions",
-        "critical_functions",
-        "information_systems",
-        "information_assets",
-        "authorized_devices",
-        "device_enrollment_requests",
-        "device_enrollment_codes",
-        "device_audit_log",
-        "official_referentials",
-        "official_referential_history",
-        "sync_events",
-        "backup_audit_log",
-    ]:
+    rows = con.execute(
+        """
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'
+        ORDER BY table_name
+        """
+    ).fetchall()
+    tables = [str(row["table_name"]) for row in rows]
+    for table in tables:
         try:
-            counts[table] = int(con.execute(f"select count(*) from {table}").fetchone()[0])
+            escaped_table = table.replace("`", "``")
+            counts[table] = int(
+                con.execute(f"SELECT COUNT(*) FROM `{escaped_table}`").fetchone()[0]
+            )
         except DbError:
             counts[table] = None
     return counts
@@ -4077,6 +4594,11 @@ def _create_mariadb_backup(
     reason: str = "manual",
     automatic: bool = False,
 ) -> dict[str, Any]:
+    if len(_backup_signing_secret()) < 32:
+        raise HTTPException(
+            status_code=503,
+            detail="OPENIRN_API_BACKUP_SIGNATURE_SECRET doit contenir au moins 32 caractères",
+        )
     config = _parse_mysql_url()
     dump_binary = _mariadb_dump_binary()
     if not dump_binary:
@@ -4110,6 +4632,7 @@ def _create_mariadb_backup(
         "--quick",
         "--skip-comments",
         "--hex-blob",
+        "--no-tablespaces",
         config["database"],
     ]
     try:
@@ -4133,17 +4656,26 @@ def _create_mariadb_backup(
 
     with _db() as con:
         counts = _table_counts(con)
+        migration_rows = con.execute(
+            "SELECT version, name FROM schema_migrations ORDER BY version"
+        ).fetchall()
+        schema_migrations = {
+            str(int(row["version"])): str(row["name"] or "")
+            for row in migration_rows
+        }
         con.commit()
 
     metadata = {
         "type": "openirn.mariadbDumpBackup",
-        "formatVersion": 1,
+        "formatVersion": 2,
         "backend": "mariadb",
+        "databaseScope": "all_tenants",
         "createdAt": _utc_now().isoformat(),
         "sourceDb": _mariadb_target_label(),
+        "sourceDatabase": config["database"],
         "backupDb": str(backup_path),
         "backupName": backup_path.name,
-        "tenantId": tenant_id,
+        "requestedTenantId": tenant_id,
         "reason": reason,
         "automatic": automatic,
         "triggeredByUserId": triggered_by_user_id or "",
@@ -4152,16 +4684,12 @@ def _create_mariadb_backup(
         "integrityCheck": "logical_dump_created",
         "retentionKeep": BACKUP_KEEP,
         "counts": counts,
+        "schemaMigrations": schema_migrations,
     }
     signature = _backup_metadata_signature(metadata)
-    if signature:
-        metadata["signatureAlgorithm"] = "hmac-sha256-canonical-json-v1"
-        metadata["signature"] = signature
-        metadata["signatureStatus"] = "valid"
-    else:
-        metadata["signatureAlgorithm"] = ""
-        metadata["signature"] = ""
-        metadata["signatureStatus"] = "unsigned"
+    metadata["signatureAlgorithm"] = "hmac-sha256-canonical-json-v1"
+    metadata["signature"] = signature
+    metadata["signatureStatus"] = "valid"
 
     meta_path = backup_path.with_suffix(backup_path.suffix + ".json")
     _write_private_text(meta_path, _pretty_json(metadata) + "\n")
@@ -4399,28 +4927,30 @@ def tenants(
     tenantId: str = Query(default=DEFAULT_TENANT_ID, min_length=1, max_length=80),
 ) -> dict[str, Any]:
     requester_tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
-    # Tenant discovery is intentionally public: the Flutter client must be able
-    # to start without a selected tenant or session, then let the user choose
-    # the workspace before checking terminal enrollment.
-    with _db() as con:
-        _ensure_tenant(con, requester_tenant_id)
-        _sync_solution_administrators_to_all_tenants(con)
-        items = _list_tenants(con)
-        con.commit()
+    # Tenant discovery remains public so the Flutter client can select a
+    # workspace before authentication. This read must never provision a tenant
+    # or replicate administrator accounts.
     solution_administrator = _request_has_solution_admin_authorization(request)
-    return {
+    with _db() as con:
+        items = _list_tenants(con)
+    visible_items = items if solution_administrator else [
+        _public_tenant_discovery_payload(item) for item in items
+    ]
+    response = {
         "status": "ok",
         "type": "openirn.tenants",
         "application": "OpenIRN API",
         "version": APP_VERSION,
         "tenantId": requester_tenant_id,
         "defaultTenantId": DEFAULT_TENANT_ID,
-        "solutionAdminTenantId": SOLUTION_ADMIN_TENANT_ID,
         "solutionAdministrator": solution_administrator,
-        "tenantCount": len(items),
-        "tenants": items,
+        "tenantCount": len(visible_items),
+        "tenants": visible_items,
         "serverTime": _utc_now().isoformat(),
     }
+    if solution_administrator:
+        response["solutionAdminTenantId"] = SOLUTION_ADMIN_TENANT_ID
+    return response
 
 
 @app.post("/tenants")
@@ -4734,11 +5264,61 @@ async def devices_enrollment_request(request: Request) -> dict[str, Any]:
     requester_note = str(payload.get("note") or payload.get("requesterNote") or "").strip()[:500]
     request_id = f"enrollment_request_{uuid.uuid4().hex}"
     now = _utc_now().isoformat()
+    client_ip = _request_client_ip(request)
 
     with _db() as con:
         tenant_exists = con.execute("SELECT 1 FROM tenants WHERE id = ?", (tenant_id,)).fetchone()
         if tenant_exists is None:
             raise HTTPException(status_code=404, detail="Espace de travail introuvable")
+        expired_count = _expire_stale_enrollment_requests(con, tenant_id)
+        _enforce_enrollment_rate_limit(
+            con,
+            tenant_id,
+            operation="request",
+            ip_address=client_ip,
+            max_by_ip=ENROLLMENT_REQUEST_MAX_BY_IP,
+            max_by_tenant=ENROLLMENT_REQUEST_MAX_BY_TENANT,
+        )
+        pending_row = con.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM device_enrollment_requests
+            WHERE tenant_id = ? AND status = 'pending'
+            """,
+            (tenant_id,),
+        ).fetchone()
+        pending_count = int(pending_row["total"] if pending_row is not None else 0)
+        if pending_count >= ENROLLMENT_REQUEST_MAX_PENDING:
+            recent_capacity_audit = con.execute(
+                """
+                SELECT 1
+                FROM device_audit_log
+                WHERE tenant_id = ? AND event_type = 'enrollment_request.capacity_limited'
+                  AND created_at >= ?
+                LIMIT 1
+                """,
+                (
+                    tenant_id,
+                    (_utc_now() - timedelta(minutes=ENROLLMENT_RATE_WINDOW_MINUTES)).isoformat(),
+                ),
+            ).fetchone()
+            if recent_capacity_audit is None:
+                _record_device_audit(
+                    con,
+                    tenant_id,
+                    "enrollment_request.capacity_limited",
+                    payload={
+                        "ipAddress": client_ip,
+                        "pendingCount": pending_count,
+                        "limit": ENROLLMENT_REQUEST_MAX_PENDING,
+                    },
+                )
+            con.commit()
+            raise HTTPException(
+                status_code=429,
+                detail="Trop de demandes d’enrôlement sont déjà en attente dans cet espace.",
+                headers={"Retry-After": str(ENROLLMENT_RATE_WINDOW_MINUTES * 60)},
+            )
         known_terminal = _terminal_identity(con, requested_device_id) if requested_device_id else None
         if known_terminal is not None:
             device_name = str(known_terminal.get("name") or "").strip()[:120] or device_name
@@ -4758,7 +5338,7 @@ async def devices_enrollment_request(request: Request) -> dict[str, Any]:
                 device_name,
                 platform,
                 requester_note,
-                _request_client_ip(request),
+                client_ip,
                 now,
             ),
         )
@@ -4772,6 +5352,7 @@ async def devices_enrollment_request(request: Request) -> dict[str, Any]:
                 "deviceName": device_name,
                 "platform": platform,
                 "knownTerminal": known_terminal is not None,
+                "expiredStaleRequestCount": expired_count,
             },
         )
         con.commit()
@@ -5058,43 +5639,62 @@ async def devices_enrollment_consume(request: Request) -> dict[str, Any]:
 
     tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
     code = _normalize_enrollment_code(payload.get("code"))
-    if len(code) < 8:
-        raise HTTPException(status_code=400, detail="Invalid enrollment code")
-
     device_name = str(payload.get("deviceName") or "").strip()[:120] or "Terminal OpenIRN"
     platform = str(payload.get("platform") or "").strip()[:80]
     requested_device_id = _normalize_device_id(payload.get("deviceId"))
     now = _utc_now()
+    client_ip = _request_client_ip(request)
     code_hashes = _enrollment_code_hash_candidates(tenant_id, code)
     placeholders = ", ".join("?" for _ in code_hashes)
 
     with _db() as con:
-        _ensure_tenant(con, tenant_id)
+        tenant_exists = con.execute("SELECT 1 FROM tenants WHERE id = ?", (tenant_id,)).fetchone()
+        if tenant_exists is None:
+            raise HTTPException(status_code=404, detail="Espace de travail introuvable")
+        _enforce_enrollment_rate_limit(
+            con,
+            tenant_id,
+            operation="consume",
+            ip_address=client_ip,
+            max_by_ip=ENROLLMENT_CONSUME_MAX_BY_IP,
+            max_by_tenant=ENROLLMENT_CONSUME_MAX_BY_TENANT,
+        )
+        if len(code) < 8:
+            con.commit()
+            raise HTTPException(status_code=400, detail="Invalid enrollment code")
         enrollment = con.execute(
             f"""
             SELECT tenant_id, enrollment_id, created_by_user_id, label,
                    expires_at, consumed_at, consumed_by_device_id, created_at
             FROM device_enrollment_codes
             WHERE tenant_id = ? AND code_hash IN ({placeholders})
+            FOR UPDATE
             """,
             (tenant_id, *code_hashes),
         ).fetchone()
         if enrollment is None:
+            con.commit()
             raise HTTPException(status_code=404, detail="Unknown enrollment code")
         if enrollment["consumed_at"]:
+            con.commit()
             raise HTTPException(status_code=409, detail="Enrollment code has already been consumed")
         if _parse_datetime(enrollment["expires_at"]) < now:
+            con.commit()
             raise HTTPException(status_code=410, detail="Enrollment code has expired")
 
-        device, token = _create_device(
-            con,
-            tenant_id,
-            name=device_name,
-            platform=platform,
-            invited_by_user_id=str(enrollment["created_by_user_id"] or ""),
-            enrollment_id=str(enrollment["enrollment_id"] or ""),
-            device_id=requested_device_id,
-        )
+        try:
+            device, token = _create_device(
+                con,
+                tenant_id,
+                name=device_name,
+                platform=platform,
+                invited_by_user_id=str(enrollment["created_by_user_id"] or ""),
+                enrollment_id=str(enrollment["enrollment_id"] or ""),
+                device_id=requested_device_id,
+            )
+        except _ExistingDeviceAuthorization:
+            con.commit()
+            raise
         con.execute(
             """
             UPDATE device_enrollment_codes
@@ -5129,7 +5729,7 @@ async def devices_enrollment_consume(request: Request) -> dict[str, Any]:
         "status": "ok",
         "type": "openirn.deviceEnrollmentConsumed",
         "tenantId": tenant_id,
-        "apiToken": "",
+        "apiToken": token,
         "device": device,
         "serverTime": _utc_now().isoformat(),
     }
@@ -5498,6 +6098,17 @@ async def sync_push(request: Request) -> dict[str, Any]:
     _require_write_authorization(request, tenant_id)
     device_id = _safe_segment(sync_context.get("deviceId"), "unknown-device")
     campaigns = _extract_campaigns(payload)
+    raw_users = payload.get("users")
+    if len(campaigns) > SYNC_MAX_CAMPAIGNS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Une synchronisation est limitée à {SYNC_MAX_CAMPAIGNS} campagnes",
+        )
+    if isinstance(raw_users, list) and len(raw_users) > SYNC_MAX_USERS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Une synchronisation est limitée à {SYNC_MAX_USERS} utilisateurs",
+        )
 
     received_at = _utc_now().isoformat()
     server_sync_id = f"sync_{_utc_now().strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:12]}"
@@ -5574,7 +6185,7 @@ async def sync_push(request: Request) -> dict[str, Any]:
         "campaignRevisionCount": revision_stats["revisionCount"],
         "conflictCount": revision_stats["conflictCount"],
         "deletedCount": revision_stats.get("deletedCount", 0),
-        "conflictPolicy": "last_write_wins",
+        "conflictPolicy": "optimistic_concurrency",
     }
 
 
@@ -5591,7 +6202,9 @@ async def auth_verify(request: Request) -> dict[str, Any]:
     tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
     user_id = str(payload.get("userId") or "").strip()
     pin = str(payload.get("pin") or "")
-    device_id = _require_active_device(request, tenant_id, payload)
+    new_pin = str(payload.get("newPin") or "").strip()
+    device_context = _require_device_token_authorization(request, tenant_id, payload)
+    device_id = str(device_context.get("deviceId") or "").strip()
     ip_address = _request_client_ip(request)
     if not user_id:
         raise HTTPException(status_code=400, detail="Missing userId")
@@ -5649,7 +6262,13 @@ async def auth_verify(request: Request) -> dict[str, Any]:
             )
             con.commit()
             raise HTTPException(status_code=403, detail="Inactive user")
-        accepted, requires_change = _verify_user_pin(con, tenant_id, user_id, pin)
+        accepted, requires_change = _verify_user_pin(
+            con,
+            tenant_id,
+            user_id,
+            pin,
+            for_update=True,
+        )
         if not accepted:
             _record_auth_attempt(
                 con,
@@ -5669,6 +6288,37 @@ async def auth_verify(request: Request) -> dict[str, Any]:
             )
             con.commit()
             raise HTTPException(status_code=403, detail="Invalid user code")
+        if requires_change and not new_pin:
+            _record_device_audit(
+                con,
+                tenant_id,
+                "user.pin_change_required",
+                device_id=device_id,
+                payload={"userId": user_id, "ipAddress": ip_address},
+            )
+            con.commit()
+            raise HTTPException(
+                status_code=428,
+                detail={
+                    "code": "pin_change_required",
+                    "message": "Le code temporaire doit être remplacé avant l’ouverture de la session.",
+                },
+            )
+        if requires_change:
+            replacement_pin = _validate_new_pin(new_pin, current_pin=pin)
+            _set_user_pin(con, tenant_id, user_id, replacement_pin, requires_change=False)
+            _record_device_audit(
+                con,
+                tenant_id,
+                "user.pin_changed_on_first_login",
+                device_id=device_id,
+                payload={"userId": user_id, "ipAddress": ip_address},
+            )
+        elif new_pin:
+            raise HTTPException(
+                status_code=400,
+                detail="Le changement initial de code n’est pas requis pour cet utilisateur",
+            )
         session_id, session_token, expires_at = _create_api_session(
             con,
             tenant_id,
@@ -5701,7 +6351,7 @@ async def auth_verify(request: Request) -> dict[str, Any]:
         "tenantId": tenant_id,
         "serverTime": _utc_now().isoformat(),
         "userId": user_id,
-        "mustChangePin": requires_change,
+        "mustChangePin": False,
         "user": user,
         "sessionId": session_id,
         "apiToken": session_token,
@@ -5751,8 +6401,7 @@ async def auth_change_pin(request: Request) -> dict[str, Any]:
     new_pin = str(payload.get("newPin") or payload.get("pin") or "").strip()
     if not current_pin.strip():
         raise HTTPException(status_code=400, detail="Code actuel manquant")
-    if len(new_pin) < 4 or len(new_pin) > 32:
-        raise HTTPException(status_code=400, detail="Le nouveau code doit contenir entre 4 et 32 caractères")
+    _validate_new_pin(new_pin, current_pin=current_pin)
 
     ip_address = _request_client_ip(request)
     with _db() as con:
@@ -5768,7 +6417,13 @@ async def auth_change_pin(request: Request) -> dict[str, Any]:
         user = next((candidate for candidate in users if candidate.get("id") == user_id), None)
         if user is None or user.get("active") is not True:
             raise HTTPException(status_code=403, detail="Utilisateur inactif ou introuvable")
-        accepted, _requires_change = _verify_user_pin(con, tenant_id, user_id, current_pin)
+        accepted, _requires_change = _verify_user_pin(
+            con,
+            tenant_id,
+            user_id,
+            current_pin,
+            for_update=True,
+        )
         if not accepted:
             _record_auth_attempt(
                 con,
@@ -6274,7 +6929,38 @@ def _inventory_payload(con: Any, tenant_id: str) -> dict[str, Any]:
 
 
 INVENTORY_EXCEL_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-INVENTORY_EXCEL_MAX_BYTES = 5 * 1024 * 1024
+INVENTORY_EXCEL_MAX_BYTES = MAX_INVENTORY_XLSX_BODY_BYTES
+
+
+def _validate_inventory_xlsx_archive(raw: bytes) -> None:
+    try:
+        with zipfile.ZipFile(BytesIO(raw)) as archive:
+            entries = archive.infolist()
+            if len(entries) > MAX_INVENTORY_XLSX_ENTRIES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Archive Excel limitée à {MAX_INVENTORY_XLSX_ENTRIES} entrées",
+                )
+            uncompressed_size = 0
+            for entry in entries:
+                if entry.flag_bits & 0x1:
+                    raise HTTPException(status_code=400, detail="Les archives Excel chiffrées ne sont pas acceptées")
+                path = entry.filename.replace("\\", "/")
+                if path.startswith("/") or ".." in path.split("/"):
+                    raise HTTPException(status_code=400, detail="Chemin interdit dans l’archive Excel")
+                uncompressed_size += max(0, int(entry.file_size))
+                if uncompressed_size > MAX_INVENTORY_XLSX_UNCOMPRESSED_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=(
+                            "Contenu Excel décompressé limité à "
+                            f"{MAX_INVENTORY_XLSX_UNCOMPRESSED_BYTES} octets"
+                        ),
+                    )
+    except HTTPException:
+        raise
+    except (zipfile.BadZipFile, OSError) as exc:
+        raise HTTPException(status_code=400, detail="Fichier Excel invalide") from exc
 
 
 def _load_openpyxl() -> Any:
@@ -6472,14 +7158,18 @@ def _inventory_import_from_excel_bytes(con: Any, tenant_id: str, system_id: str,
         raise HTTPException(status_code=400, detail="Fichier Excel vide")
     if len(raw) > INVENTORY_EXCEL_MAX_BYTES:
         raise HTTPException(status_code=413, detail="Fichier Excel trop volumineux pour l'import des actifs")
+    _validate_inventory_xlsx_archive(raw)
     openpyxl = _load_openpyxl()
     try:
-        workbook = openpyxl.load_workbook(BytesIO(raw), data_only=True)
+        workbook = openpyxl.load_workbook(BytesIO(raw), data_only=True, read_only=True)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Fichier Excel illisible: {exc}") from exc
 
     _require_information_system(con, tenant_id, system_id)
-    rows = _excel_rows(_excel_sheet(workbook, ["Actifs SI", "Actifs", "Assets"]))
+    try:
+        rows = _excel_rows(_excel_sheet(workbook, ["Actifs SI", "Actifs", "Assets"]))
+    finally:
+        workbook.close()
     if not rows:
         raise HTTPException(status_code=400, detail="La feuille Actifs SI ne contient aucune ligne importable")
 
@@ -6605,7 +7295,7 @@ async def asset_inventory_import_excel(
     system_id = _normalize_uuid(systemId)
     if not system_id:
         raise HTTPException(status_code=400, detail="Le paramètre systemId est obligatoire pour l'import Excel des actifs")
-    auth_context = _require_campaign_manager_authorization(request, tenant_id)
+    auth_context = _require_admin_authorization(request, tenant_id)
     raw = await request.body()
     with _db() as con:
         with con:
@@ -6976,6 +7666,11 @@ async def users_replace(request: Request) -> dict[str, Any]:
     raw_users = payload.get("users")
     if not isinstance(raw_users, list):
         raise HTTPException(status_code=400, detail="Missing users array")
+    if len(raw_users) > SYNC_MAX_USERS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Un remplacement est limité à {SYNC_MAX_USERS} utilisateurs",
+        )
 
     users_to_save = [user for raw_user in raw_users if (user := _sanitize_user(raw_user))]
     if _role_normalize(auth_context.get("userRole")) != "administrator" and any(
@@ -7035,21 +7730,12 @@ async def users_pin(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Payload must be a JSON object")
 
     tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
-    auth_context = _require_campaign_manager_authorization(request, tenant_id)
+    auth_context = _require_admin_authorization(request, tenant_id)
     triggered_by_user_id = str(auth_context.get("userId") or "").strip()
     user_id = str(payload.get("userId") or "").strip()
     pin = str(payload.get("pin") or payload.get("newPin") or "").strip()
     if not user_id:
         raise HTTPException(status_code=400, detail="Missing userId")
-
-    if _role_normalize(auth_context.get("userRole")) != "administrator":
-        with _db() as con:
-            target = con.execute(
-                "SELECT role FROM users WHERE tenant_id = ? AND user_id = ?",
-                (tenant_id, user_id),
-            ).fetchone()
-            if target is not None and _role_normalize(target["role"]) == "administrator":
-                raise HTTPException(status_code=403, detail="Un Pilote IRN ne peut pas modifier le code d’un Administrateur")
 
     protective_backup = _create_protective_backup(
         tenant_id,
@@ -7061,7 +7747,27 @@ async def users_pin(request: Request) -> dict[str, Any]:
     with _db() as con:
         with con:
             _ensure_tenant(con, tenant_id)
-            _set_user_pin(con, tenant_id, user_id, pin, requires_change=False)
+            _set_user_pin(con, tenant_id, user_id, pin, requires_change=True)
+            con.execute(
+                """
+                UPDATE api_sessions
+                SET revoked_at = ?
+                WHERE tenant_id = ? AND user_id = ? AND revoked_at IS NULL
+                """,
+                (_utc_now().isoformat(), tenant_id, user_id),
+            )
+            _record_device_audit(
+                con,
+                tenant_id,
+                "user.pin_reset_by_administrator",
+                device_id=str(auth_context.get("deviceId") or ""),
+                payload={
+                    "userId": user_id,
+                    "actorUserId": triggered_by_user_id,
+                    "sessionsRevoked": True,
+                    "requiresChange": True,
+                },
+            )
 
     return {
         "status": "accepted",
@@ -7071,6 +7777,7 @@ async def users_pin(request: Request) -> dict[str, Any]:
         "tenantId": tenant_id,
         "serverTime": _utc_now().isoformat(),
         "userId": user_id,
+        "requiresChange": True,
         "protectiveBackup": protective_backup,
     }
 
@@ -7124,7 +7831,7 @@ def sync_status(request: Request, tenantId: str = Query(default="default", min_l
         "campaignCount": campaign_count,
         "currentCampaignCount": current_campaign_count,
         "conflictCount": conflict_count,
-        "conflictPolicy": "last_write_wins",
+        "conflictPolicy": "optimistic_concurrency",
         "latestSnapshot": _snapshot_summary_from_row(latest_row),
     }
 
@@ -7175,6 +7882,7 @@ def campaigns(
     request: Request,
     tenantId: str = Query(default="default", min_length=1, max_length=80),
     limit: int = Query(default=100, ge=1, le=500),
+    includePayload: bool = Query(default=False),
 ) -> dict[str, Any]:
     tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
     _require_sync_read_access(request, tenant_id)
@@ -7205,7 +7913,10 @@ def campaigns(
             ).fetchone()[0]
         )
 
-    items = [_public_campaign_state_from_row(row) for row in rows]
+    items = [
+        _public_campaign_state_from_row(row, include_payload=includePayload)
+        for row in rows
+    ]
     return {
         "status": "ok",
         "type": "openirn.campaignStates",
@@ -7218,6 +7929,159 @@ def campaigns(
         "revisionCount": revision_count,
         "conflictCount": conflict_count,
         "campaigns": items,
+    }
+
+
+@app.delete("/campaigns/{campaign_id}")
+def campaign_delete(
+    campaign_id: str,
+    request: Request,
+    tenantId: str = Query(default="default", min_length=1, max_length=80),
+    expectedRevision: int = Query(ge=1),
+) -> dict[str, Any]:
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
+    auth_context = _require_campaign_manager_authorization(request, tenant_id)
+    requested_campaign_id = str(campaign_id or "").strip()
+    if not requested_campaign_id:
+        raise HTTPException(status_code=400, detail="Missing campaignId")
+
+    deleted_at = _utc_now().isoformat()
+    server_sync_id = f"delete_{_utc_now().strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:12]}"
+    device_id = str(auth_context.get("deviceId") or "server-delete").strip()[:160]
+    actor_user_id = str(auth_context.get("userId") or "").strip()[:160]
+
+    with _db() as con:
+        with con:
+            row = con.execute(
+                """
+                SELECT campaign_id, server_revision, payload_json
+                FROM campaign_states
+                WHERE tenant_id = ? AND campaign_id = ?
+                FOR UPDATE
+                """,
+                (tenant_id, requested_campaign_id),
+            ).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Unknown campaign")
+
+            current_revision = int(row["server_revision"] or 0)
+            if expectedRevision != current_revision:
+                _raise_campaign_revision_conflict(
+                    requested_campaign_id,
+                    expectedRevision,
+                    current_revision,
+                )
+
+            deleted_payload = _parse_json(row["payload_json"], {})
+            con.execute(
+                "DELETE FROM campaign_states WHERE tenant_id = ? AND campaign_id = ?",
+                (tenant_id, requested_campaign_id),
+            )
+
+            current_rows = con.execute(
+                """
+                SELECT payload_json
+                FROM campaign_states
+                WHERE tenant_id = ?
+                ORDER BY campaign_id ASC
+                """,
+                (tenant_id,),
+            ).fetchall()
+            current_campaigns = [
+                parsed
+                for current_row in current_rows
+                if isinstance((parsed := _parse_json(current_row["payload_json"], {})), dict)
+            ]
+            snapshot_payload = {
+                "schemaVersion": 1,
+                "type": "openirn.syncPush",
+                "application": "OpenIRN API",
+                "generatedAt": deleted_at,
+                "sync": {
+                    "mode": "explicit_campaign_delete",
+                    "tenantId": tenant_id,
+                    "deviceId": device_id,
+                },
+                "users": [],
+                "campaigns": current_campaigns,
+                "summary": {"campaignCount": len(current_campaigns)},
+                "deletion": {
+                    "campaignId": requested_campaign_id,
+                    "serverRevision": current_revision,
+                    "actorUserId": actor_user_id or None,
+                },
+            }
+            payload_sha256 = _json_sha256(snapshot_payload)
+            envelope = {
+                "serverSyncId": server_sync_id,
+                "receivedAt": deleted_at,
+                "tenantId": tenant_id,
+                "deviceId": device_id,
+                "payloadSha256": payload_sha256,
+                "payload": snapshot_payload,
+            }
+            con.execute(
+                """
+                INSERT INTO sync_snapshots(
+                    tenant_id, server_sync_id, device_id, received_at,
+                    payload_sha256, campaign_count, payload_json, envelope_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    tenant_id,
+                    server_sync_id,
+                    device_id,
+                    deleted_at,
+                    payload_sha256,
+                    len(current_campaigns),
+                    _canonical_json(snapshot_payload),
+                    _canonical_json(envelope),
+                ),
+            )
+            audit_payload = {
+                "campaignId": requested_campaign_id,
+                "campaignName": _campaign_title_from_payload(deleted_payload, requested_campaign_id),
+                "deletedRevision": current_revision,
+                "actorUserId": actor_user_id or None,
+                "revisionHistoryPreserved": True,
+            }
+            con.execute(
+                """
+                INSERT INTO sync_events(
+                    tenant_id, event_type, server_sync_id, campaign_id,
+                    device_id, created_at, payload_json
+                ) VALUES (?, 'campaign_deleted_explicitly', ?, ?, ?, ?, ?)
+                """,
+                (
+                    tenant_id,
+                    server_sync_id,
+                    requested_campaign_id,
+                    device_id,
+                    deleted_at,
+                    _canonical_json(audit_payload),
+                ),
+            )
+            _record_device_audit(
+                con,
+                tenant_id,
+                "campaign.deleted",
+                device_id=device_id,
+                payload=audit_payload,
+            )
+
+    return {
+        "status": "deleted",
+        "type": "openirn.campaignDeleted",
+        "application": "OpenIRN API",
+        "version": APP_VERSION,
+        "storage": "mariadb",
+        "tenantId": tenant_id,
+        "serverTime": deleted_at,
+        "serverSyncId": server_sync_id,
+        "campaignId": requested_campaign_id,
+        "deletedRevision": current_revision,
+        "currentCampaignCount": len(current_campaigns),
+        "revisionHistoryPreserved": True,
     }
 
 

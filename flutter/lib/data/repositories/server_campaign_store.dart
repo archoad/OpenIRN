@@ -9,12 +9,14 @@ import 'local_sync_configuration_repository.dart';
 
 class ServerCampaignBundle {
   final LocalCampaign campaign;
+  final int serverRevision;
   final Map<String, CriterionAnswer> criterionAnswers;
   final List<CriterionAssignment> assignments;
   final List<LocalActivityEvent> activityEvents;
 
   const ServerCampaignBundle({
     required this.campaign,
+    this.serverRevision = 0,
     this.criterionAnswers = const <String, CriterionAnswer>{},
     this.assignments = const <CriterionAssignment>[],
     this.activityEvents = const <LocalActivityEvent>[],
@@ -22,12 +24,14 @@ class ServerCampaignBundle {
 
   ServerCampaignBundle copyWith({
     LocalCampaign? campaign,
+    int? serverRevision,
     Map<String, CriterionAnswer>? criterionAnswers,
     List<CriterionAssignment>? assignments,
     List<LocalActivityEvent>? activityEvents,
   }) {
     return ServerCampaignBundle(
       campaign: campaign ?? this.campaign,
+      serverRevision: serverRevision ?? this.serverRevision,
       criterionAnswers: criterionAnswers ?? this.criterionAnswers,
       assignments: assignments ?? this.assignments,
       activityEvents: activityEvents ?? this.activityEvents,
@@ -35,10 +39,22 @@ class ServerCampaignBundle {
   }
 }
 
+enum ServerCampaignStoreErrorCode {
+  unknown,
+  loadFailed,
+  writeFailed,
+  revisionConflict,
+  deleteFailed,
+}
+
 class ServerCampaignStoreException implements Exception {
   final String message;
+  final ServerCampaignStoreErrorCode code;
 
-  const ServerCampaignStoreException(this.message);
+  const ServerCampaignStoreException(
+    this.message, {
+    this.code = ServerCampaignStoreErrorCode.unknown,
+  });
 
   @override
   String toString() => message;
@@ -61,37 +77,22 @@ class ServerCampaignStore {
       return const <ServerCampaignBundle>[];
     }
 
-    final pull = await apiClient.pullSnapshots(
+    final result = await apiClient.loadCampaignStates(
       baseUrl: configuration.apiBaseUrl,
       tenantId: configuration.tenantId,
       apiToken: configuration.apiToken,
-      limit: 1,
     );
 
-    if (pull.status == OpenIrnApiPullStatus.empty) {
-      return const <ServerCampaignBundle>[];
-    }
-    if (pull.status != OpenIrnApiPullStatus.available ||
-        pull.snapshots.isEmpty) {
-      throw ServerCampaignStoreException('${pull.title} — ${pull.message}');
-    }
-
-    final payload = pull.snapshots.first.payload;
-    if (payload == null || payload.isEmpty) {
-      return const <ServerCampaignBundle>[];
-    }
-
-    final rawCampaigns = payload['campaigns'];
-    if (rawCampaigns is! List) {
-      return const <ServerCampaignBundle>[];
+    if (!result.isAvailable) {
+      throw ServerCampaignStoreException(
+        result.errorDetail.isEmpty ? result.status.name : result.errorDetail,
+        code: ServerCampaignStoreErrorCode.loadFailed,
+      );
     }
 
     final bundles = <ServerCampaignBundle>[];
-    for (final rawCampaign in rawCampaigns) {
-      if (rawCampaign is! Map) {
-        continue;
-      }
-      final campaignItem = _asMap(rawCampaign);
+    for (final state in result.campaigns) {
+      final campaignItem = state.payload ?? const <String, dynamic>{};
       final campaignPayload = _asMap(campaignItem['campaign']);
       if (campaignPayload.isEmpty) {
         continue;
@@ -109,6 +110,7 @@ class ServerCampaignStore {
       bundles.add(
         ServerCampaignBundle(
           campaign: campaign,
+          serverRevision: state.serverRevision,
           criterionAnswers: _parseCriterionAnswers(campaignItem['answers']),
           assignments: _parseAssignments(
             campaignItem['assignments'],
@@ -166,7 +168,51 @@ class ServerCampaignStore {
     );
 
     if (!push.isAccepted) {
-      throw ServerCampaignStoreException('${push.title} — ${push.message}');
+      throw ServerCampaignStoreException(
+        '${push.title} — ${push.message}',
+        code: push.statusCode == 409
+            ? ServerCampaignStoreErrorCode.revisionConflict
+            : ServerCampaignStoreErrorCode.writeFailed,
+      );
+    }
+  }
+
+  Future<void> deleteBundle({
+    required String referentialId,
+    required String campaignId,
+  }) async {
+    final configuration = await configurationRepository.loadConfiguration();
+    if (!configuration.isConfigured) {
+      throw const ServerCampaignStoreException(
+        'campaign_delete_not_configured',
+        code: ServerCampaignStoreErrorCode.deleteFailed,
+      );
+    }
+
+    final bundle = await loadBundle(
+      referentialId: referentialId,
+      campaignId: campaignId,
+    );
+    if (bundle == null) {
+      return;
+    }
+
+    final result = await apiClient.deleteCampaign(
+      baseUrl: configuration.apiBaseUrl,
+      tenantId: configuration.tenantId,
+      campaignId: campaignId,
+      expectedRevision: bundle.serverRevision,
+      apiToken: configuration.apiToken,
+    );
+    if (!result.isDeleted) {
+      throw ServerCampaignStoreException(
+        result.errorDetail.isEmpty ? result.status.name : result.errorDetail,
+        code:
+            result.statusCode == 409 ||
+                result.errorCode == 'campaign_revision_conflict'
+            ? ServerCampaignStoreErrorCode.revisionConflict
+            : ServerCampaignStoreErrorCode.deleteFailed,
+      );
     }
   }
 
@@ -247,6 +293,7 @@ class ServerCampaignStore {
 
   Map<String, dynamic> _bundleToJson(ServerCampaignBundle bundle) {
     return <String, dynamic>{
+      'expectedServerRevision': bundle.serverRevision,
       'campaign': bundle.campaign.toJson(),
       'answers': bundle.criterionAnswers.values
           .where(

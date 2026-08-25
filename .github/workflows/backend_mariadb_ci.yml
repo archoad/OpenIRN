@@ -1,0 +1,92 @@
+name: Backend MariaDB CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+permissions:
+  contents: read
+
+jobs:
+  backend-mariadb:
+    name: Test backend with MariaDB and least privilege
+    runs-on: ubuntu-latest
+
+    services:
+      mariadb:
+        image: mariadb:11.8.6
+        env:
+          MARIADB_ROOT_PASSWORD: ci-root-password
+          MARIADB_ROOT_HOST: "%"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    env:
+      OPENIRN_API_MYSQL_URL: mysql+pymysql://openirn_runtime:ci-runtime-password@127.0.0.1:3306/openirn_ci?charset=utf8mb4
+      OPENIRN_MIGRATION_MYSQL_URL: mysql+pymysql://openirn_migration:ci-migration-password@127.0.0.1:3306/openirn_ci?charset=utf8mb4
+      OPENIRN_TEST_MYSQL_URL: mysql+pymysql://openirn_runtime:ci-runtime-password@127.0.0.1:3306/openirn_ci?charset=utf8mb4
+      OPENIRN_API_BACKUP_SIGNATURE_SECRET: ci-backup-signature-secret-0123456789abcdef
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: server/openirn-api/requirements-mariadb.txt
+
+      - name: Install locked dependencies and MariaDB client
+        run: |
+          python -m pip install --requirement server/openirn-api/requirements-mariadb.txt
+          sudo apt-get update
+          sudo apt-get install --yes mariadb-client
+
+      - name: Bootstrap separate migration and runtime accounts
+        run: |
+          docker exec -i "${{ job.services.mariadb.id }}" \
+            mariadb --user=root --password=ci-root-password <<'SQL'
+          CREATE DATABASE openirn_ci CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+          CREATE USER 'openirn_runtime'@'%' IDENTIFIED BY 'ci-runtime-password';
+          CREATE USER 'openirn_migration'@'%' IDENTIFIED BY 'ci-migration-password';
+          GRANT SELECT, INSERT, UPDATE, DELETE ON openirn_ci.* TO 'openirn_runtime'@'%';
+          GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES
+            ON openirn_ci.* TO 'openirn_migration'@'%';
+          FLUSH PRIVILEGES;
+          SQL
+
+      - name: Apply migrations twice and verify idempotence
+        run: |
+          python server/openirn-api/tools/migrate_mariadb.py
+          python server/openirn-api/tools/migrate_mariadb.py
+
+      - name: Compile and run backend tests against MariaDB
+        run: |
+          python -m compileall -q server/openirn-api/app server/openirn-api/tools server/openirn-api/tests
+          python -m unittest discover -s server/openirn-api/tests -p 'test_*.py' -v
+
+      - name: Create a signed backup and restore it into an empty drill database
+        run: |
+          backup_dir="$RUNNER_TEMP/openirn-backups"
+          mkdir -p "$backup_dir"
+          python server/openirn-api/tools/backup_mariadb.py \
+            --backup-dir "$backup_dir" --keep 2 --manual --reason ci_restore_drill
+          backup_file="$(find "$backup_dir" -maxdepth 1 -name 'openirn-*.mariadb.sql' -type f -print -quit)"
+          docker exec -i "${{ job.services.mariadb.id }}" \
+            mariadb --user=root --password=ci-root-password \
+            --execute="CREATE DATABASE openirn_restore_ci CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+          export OPENIRN_RESTORE_MYSQL_URL="mysql+pymysql://root:ci-root-password@127.0.0.1:3306/openirn_restore_ci?charset=utf8mb4"
+          python server/openirn-api/tools/restore_mariadb.py \
+            --backup "$backup_file" \
+            --restore \
+            --confirm-target openirn_restore_ci \
+            --report "$RUNNER_TEMP/openirn-restore-report.json"

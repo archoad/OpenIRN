@@ -101,7 +101,11 @@ class SyncConfiguration {
   }
 
   bool get isConfigured =>
-      enabled && hasApiBaseUrl && hasTenantId && hasDeviceId;
+      enabled &&
+      hasApiBaseUrl &&
+      hasTenantId &&
+      hasDeviceId &&
+      (usesDeviceToken || usesSessionToken);
 
   String get maskedApiToken {
     final token = apiToken.trim();

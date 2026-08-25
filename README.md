@@ -4,7 +4,7 @@
 
 La solution combine une application OpenIRN multi-plateforme et une API serveur FastAPI/MariaDB afin de piloter des campagnes IRN, gérer plusieurs espaces de travail, enrôler des terminaux, centraliser le référentiel officiel et conserver un historique auditable des évaluations.
 
-> État fonctionnel : publication 1.3.0.
+> État fonctionnel : publication 1.3.1.
 >
 > OpenIRN est un outil applicatif indépendant. Le référentiel IRN officiel reste publié par l’aDRI / Digital Resilience Initiative, sous sa propre licence et ses propres conditions d’utilisation.
 

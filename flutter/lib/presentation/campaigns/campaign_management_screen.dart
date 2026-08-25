@@ -2,12 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../data/api/openirn_api_client.dart';
 import '../../data/repositories/local_activity_repository.dart';
-import '../../data/repositories/local_assessment_repository.dart';
 import '../../data/repositories/local_campaign_repository.dart';
-import '../../data/repositories/local_criterion_assignment_repository.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
+import '../../data/repositories/server_campaign_store.dart';
 import '../../domain/models/app_user.dart';
-import '../../domain/models/criterion_assignment.dart';
 import '../../domain/models/irn_asset_inventory.dart';
 import '../../domain/models/irn_referential.dart';
 import '../../domain/models/local_activity_event.dart';
@@ -36,8 +34,6 @@ class CampaignManagementScreen extends StatefulWidget {
 
 class _CampaignManagementScreenState extends State<CampaignManagementScreen> {
   final _campaignRepository = const LocalCampaignRepository();
-  final _assessmentRepository = const LocalAssessmentRepository();
-  final _assignmentRepository = const LocalCriterionAssignmentRepository();
   final _activityRepository = const LocalActivityRepository();
   final _syncAutomationService = const SyncAutomationService();
   final _configurationRepository = const LocalSyncConfigurationRepository();
@@ -175,19 +171,6 @@ class _CampaignManagementScreenState extends State<CampaignManagementScreen> {
     });
 
     try {
-      await _assessmentRepository.clearAnswers(
-        referentialId: widget.referential.id,
-        campaignId: campaign.id,
-      );
-      await _assignmentRepository.saveAssignments(
-        referentialId: widget.referential.id,
-        campaignId: campaign.id,
-        assignments: const <CriterionAssignment>[],
-      );
-      await _activityRepository.clearEvents(
-        referentialId: widget.referential.id,
-        campaignId: campaign.id,
-      );
       await _campaignRepository.deleteCampaign(
         referentialId: widget.referential.id,
         campaignId: campaign.id,
@@ -205,6 +188,24 @@ class _CampaignManagementScreenState extends State<CampaignManagementScreen> {
         );
       }
       await _refresh();
+    } on ServerCampaignStoreException catch (error) {
+      if (mounted) {
+        final message = switch (error.code) {
+          ServerCampaignStoreErrorCode.revisionConflict => context.tr(
+            'screen.campaign.manage.delete.revision_conflict',
+            fallback:
+                'La campagne a été modifiée sur un autre terminal. Recharge la liste avant de confirmer à nouveau sa suppression.',
+          ),
+          _ => context.tr(
+            'screen.campaign.manage.delete.failed',
+            fallback:
+                'La suppression de la campagne a été refusée par le serveur.',
+          ),
+        };
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(message)));
+      }
     } finally {
       if (mounted) {
         setState(() {

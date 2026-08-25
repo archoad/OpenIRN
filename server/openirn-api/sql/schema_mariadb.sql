@@ -241,6 +241,18 @@ CREATE TABLE IF NOT EXISTS auth_attempts (
     CONSTRAINT fk_auth_attempts_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS api_rate_limit_buckets (
+    tenant_id VARCHAR(80) NOT NULL,
+    scope VARCHAR(80) NOT NULL,
+    subject_hash VARCHAR(64) NOT NULL,
+    window_started_at VARCHAR(40) NOT NULL,
+    request_count INT UNSIGNED NOT NULL DEFAULT 0,
+    updated_at VARCHAR(40) NOT NULL,
+    PRIMARY KEY (tenant_id, scope, subject_hash, window_started_at),
+    KEY idx_api_rate_limit_buckets_updated (updated_at),
+    CONSTRAINT fk_api_rate_limit_buckets_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS device_audit_log (
     id BIGINT NOT NULL AUTO_INCREMENT,
     tenant_id VARCHAR(80) NOT NULL,

@@ -53,7 +53,7 @@ void main() {
           enabled: true,
           apiBaseUrl: 'https://openirn.example/api',
           tenantId: 'tenant-1',
-          apiToken: 'test-token-with-more-than-16-chars',
+          apiToken: 'odt_test-token-with-more-than-16-chars',
         ),
         activeUser: user,
         users: <AppUser>[user],

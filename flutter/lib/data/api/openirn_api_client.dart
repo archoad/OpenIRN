@@ -107,6 +107,75 @@ class OpenIrnApiPullSnapshot {
   }
 }
 
+enum OpenIrnApiCampaignStatesStatus { available, rejected, unreachable }
+
+class OpenIrnApiCampaignState {
+  final String campaignId;
+  final int serverRevision;
+  final Map<String, dynamic>? payload;
+
+  const OpenIrnApiCampaignState({
+    required this.campaignId,
+    required this.serverRevision,
+    required this.payload,
+  });
+
+  factory OpenIrnApiCampaignState.fromJson(Map<String, dynamic> json) {
+    return OpenIrnApiCampaignState(
+      campaignId: json['campaignId']?.toString() ?? '',
+      serverRevision: _jsonInt(json['serverRevision']),
+      payload: OpenIrnApiPullSnapshot._jsonObject(json['payload']),
+    );
+  }
+
+  static int _jsonInt(Object? value) {
+    if (value is num) {
+      return value.toInt();
+    }
+    return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+}
+
+class OpenIrnApiCampaignStatesResult {
+  final OpenIrnApiCampaignStatesStatus status;
+  final int? statusCode;
+  final List<OpenIrnApiCampaignState> campaigns;
+  final String errorCode;
+  final String errorDetail;
+
+  const OpenIrnApiCampaignStatesResult({
+    required this.status,
+    required this.statusCode,
+    required this.campaigns,
+    this.errorCode = '',
+    this.errorDetail = '',
+  });
+
+  bool get isAvailable => status == OpenIrnApiCampaignStatesStatus.available;
+}
+
+enum OpenIrnApiCampaignDeleteStatus { deleted, rejected, unreachable }
+
+class OpenIrnApiCampaignDeleteResult {
+  final OpenIrnApiCampaignDeleteStatus status;
+  final int? statusCode;
+  final String campaignId;
+  final int deletedRevision;
+  final String errorCode;
+  final String errorDetail;
+
+  const OpenIrnApiCampaignDeleteResult({
+    required this.status,
+    required this.statusCode,
+    required this.campaignId,
+    required this.deletedRevision,
+    this.errorCode = '',
+    this.errorDetail = '',
+  });
+
+  bool get isDeleted => status == OpenIrnApiCampaignDeleteStatus.deleted;
+}
+
 enum OpenIrnApiStatusState { available, rejected, unreachable }
 
 class OpenIrnApiStatusSnapshot {
@@ -1518,6 +1587,122 @@ class OpenIrnApiClient {
     }
   }
 
+  Future<OpenIrnApiCampaignStatesResult> loadCampaignStates({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final uri = Uri.parse('$normalizedBaseUrl/campaigns').replace(
+      queryParameters: <String, String>{
+        'tenantId': safeTenantId,
+        'limit': '500',
+        'includePayload': 'true',
+      },
+    );
+
+    try {
+      final response = await _get(uri, bearerToken: apiToken);
+      final decodedBody = _decodeJsonObject(response.body);
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final rawCampaigns = decodedBody?['campaigns'];
+        final campaigns = rawCampaigns is List
+            ? rawCampaigns
+                  .whereType<Map>()
+                  .map(
+                    (item) => OpenIrnApiCampaignState.fromJson(
+                      Map<String, dynamic>.from(item),
+                    ),
+                  )
+                  .where(
+                    (campaign) =>
+                        campaign.campaignId.trim().isNotEmpty &&
+                        campaign.serverRevision > 0 &&
+                        campaign.payload != null,
+                  )
+                  .toList(growable: false)
+            : const <OpenIrnApiCampaignState>[];
+        return OpenIrnApiCampaignStatesResult(
+          status: OpenIrnApiCampaignStatesStatus.available,
+          statusCode: response.statusCode,
+          campaigns: campaigns,
+        );
+      }
+      return OpenIrnApiCampaignStatesResult(
+        status: OpenIrnApiCampaignStatesStatus.rejected,
+        statusCode: response.statusCode,
+        campaigns: const <OpenIrnApiCampaignState>[],
+        errorCode: _apiErrorCode(decodedBody),
+        errorDetail: _apiErrorDetail(decodedBody),
+      );
+    } catch (error) {
+      return OpenIrnApiCampaignStatesResult(
+        status: OpenIrnApiCampaignStatesStatus.unreachable,
+        statusCode: null,
+        campaigns: const <OpenIrnApiCampaignState>[],
+        errorDetail: error.toString(),
+      );
+    }
+  }
+
+  Future<OpenIrnApiCampaignDeleteResult> deleteCampaign({
+    String? baseUrl,
+    required String tenantId,
+    required String campaignId,
+    required int expectedRevision,
+    String apiToken = '',
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final encodedCampaignId = Uri.encodeComponent(campaignId.trim());
+    final uri = Uri.parse('$normalizedBaseUrl/campaigns/$encodedCampaignId')
+        .replace(
+          queryParameters: <String, String>{
+            'tenantId': safeTenantId,
+            'expectedRevision': expectedRevision.toString(),
+          },
+        );
+
+    try {
+      final response = await _delete(uri, bearerToken: apiToken);
+      final decodedBody = _decodeJsonObject(response.body);
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return OpenIrnApiCampaignDeleteResult(
+          status: OpenIrnApiCampaignDeleteStatus.deleted,
+          statusCode: response.statusCode,
+          campaignId:
+              decodedBody?['campaignId']?.toString() ?? campaignId.trim(),
+          deletedRevision: _intFromJson(decodedBody?['deletedRevision']),
+        );
+      }
+      return OpenIrnApiCampaignDeleteResult(
+        status: OpenIrnApiCampaignDeleteStatus.rejected,
+        statusCode: response.statusCode,
+        campaignId: campaignId.trim(),
+        deletedRevision: 0,
+        errorCode: _apiErrorCode(decodedBody),
+        errorDetail: _apiErrorDetail(decodedBody),
+      );
+    } catch (error) {
+      return OpenIrnApiCampaignDeleteResult(
+        status: OpenIrnApiCampaignDeleteStatus.unreachable,
+        statusCode: null,
+        campaignId: campaignId.trim(),
+        deletedRevision: 0,
+        errorDetail: error.toString(),
+      );
+    }
+  }
+
   Future<OpenIrnApiUsersResult> loadUsers({
     String? baseUrl,
     required String tenantId,
@@ -1786,6 +1971,7 @@ class OpenIrnApiClient {
     required String tenantId,
     required String userId,
     required String pin,
+    String newPin = '',
     String apiToken = '',
   }) async {
     final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
@@ -1803,6 +1989,7 @@ class OpenIrnApiClient {
         'deviceId': AppSessionManager.instance.deviceId,
         'userId': safeUserId,
         'pin': pin,
+        if (newPin.trim().isNotEmpty) 'newPin': newPin.trim(),
       }, bearerToken: apiToken);
       final decodedBody = _decodeJsonObject(response.body);
 
@@ -1849,14 +2036,37 @@ class OpenIrnApiClient {
         );
       }
 
-      if (<int>{401, 403, 404}.contains(response.statusCode)) {
+      final rawDetail = decodedBody?['detail'];
+      final detail = rawDetail is Map
+          ? Map<String, dynamic>.from(rawDetail)
+          : const <String, dynamic>{};
+      final requiresPinChange =
+          response.statusCode == 428 &&
+          detail['code']?.toString() == 'pin_change_required';
+      if (requiresPinChange) {
+        return OpenIrnApiAuthResult(
+          status: OpenIrnApiAuthStatus.rejected,
+          url: authUri.toString(),
+          statusCode: response.statusCode,
+          title: 'Changement de code requis',
+          message:
+              detail['message']?.toString() ??
+              'Le code temporaire doit être remplacé avant l’ouverture de la session.',
+          tenantId: safeTenantId,
+          userId: safeUserId,
+          mustChangePin: true,
+          responseBody: decodedBody,
+        );
+      }
+
+      if (<int>{400, 401, 403, 404}.contains(response.statusCode)) {
         return OpenIrnApiAuthResult(
           status: OpenIrnApiAuthStatus.rejected,
           url: authUri.toString(),
           statusCode: response.statusCode,
           title: 'Authentification refusée',
           message:
-              decodedBody?['detail']?.toString() ??
+              rawDetail?.toString() ??
               'Le code utilisateur est incorrect ou l’utilisateur est inactif.',
           tenantId: safeTenantId,
           userId: safeUserId,
@@ -1965,7 +2175,8 @@ class OpenIrnApiClient {
           url: pinUri.toString(),
           statusCode: response.statusCode,
           title: 'Code utilisateur mis à jour',
-          message: 'Le code personnel a été remplacé côté serveur.',
+          message:
+              'Le code temporaire a été enregistré. Les sessions de cet utilisateur ont été révoquées et il devra choisir un nouveau code à sa prochaine connexion.',
           tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
           userId: decodedBody?['userId']?.toString() ?? safeUserId,
           responseBody: decodedBody,
@@ -3905,7 +4116,7 @@ class OpenIrnApiClient {
           expiresAt: null,
           expiresInMinutes: 0,
           qrPayloadText: '',
-          apiToken: '',
+          apiToken: decodedBody?['apiToken']?.toString().trim() ?? '',
           device: device,
           responseBody: decodedBody,
         );
@@ -5057,6 +5268,22 @@ class OpenIrnApiClient {
       return value.toInt();
     }
     return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  String _apiErrorCode(Map<String, dynamic>? body) {
+    final detail = body?['detail'];
+    if (detail is Map) {
+      return detail['code']?.toString() ?? '';
+    }
+    return '';
+  }
+
+  String _apiErrorDetail(Map<String, dynamic>? body) {
+    final detail = body?['detail'];
+    if (detail is Map) {
+      return detail['message']?.toString() ?? detail['code']?.toString() ?? '';
+    }
+    return detail?.toString() ?? '';
   }
 
   Map<String, dynamic>? _decodeJsonObject(String body) {

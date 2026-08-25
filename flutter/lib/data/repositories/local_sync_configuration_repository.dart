@@ -1,17 +1,23 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../domain/models/sync_configuration.dart';
 import '../../domain/services/app_session_manager.dart';
 
 class LocalSyncConfigurationRepository {
-  const LocalSyncConfigurationRepository();
+  final FlutterSecureStorage _secureStorage;
 
-  static const _schemaVersion = 5;
+  const LocalSyncConfigurationRepository({
+    FlutterSecureStorage secureStorage = const FlutterSecureStorage(),
+  }) : _secureStorage = secureStorage;
+
+  static const _schemaVersion = 6;
   static const _configurationKey = 'openirn.sync.configuration';
   static const _deviceIdKey = 'openirn.sync.deviceId';
+  static const _deviceCredentialKey = 'openirn.secure.deviceCredential.v1';
   static const _legacySecureFallbackConfigurationKey =
       'openirn.secureFallback.openirn.secure.sync.configuration';
   static const _legacySecureFallbackDeviceIdKey =
@@ -26,14 +32,27 @@ class LocalSyncConfigurationRepository {
     );
 
     final sessionManager = AppSessionManager.instance;
-    sessionManager.updateDeviceContext(
-      tenantId: sessionManager.hasActiveSession
-          ? sessionManager.tenantId
-          : normalized.tenantId,
-      deviceId: normalized.deviceId,
-    );
+    if (!sessionManager.hasActiveSession) {
+      sessionManager.updateDeviceContext(
+        tenantId: normalized.tenantId,
+        deviceId: normalized.deviceId,
+      );
+      final credential = await _readDeviceCredential();
+      if (credential != null && credential.matches(normalized)) {
+        sessionManager.setDeviceCredential(
+          apiToken: credential.apiToken,
+          tenantId: normalized.tenantId,
+          deviceId: normalized.deviceId,
+        );
+      } else {
+        sessionManager.clearDeviceCredential();
+        if (credential != null) {
+          await _secureStorage.delete(key: _deviceCredentialKey);
+        }
+      }
+    }
 
-    return normalized.copyWith(apiToken: AppSessionManager.instance.apiToken);
+    return normalized.copyWith(apiToken: sessionManager.apiToken);
   }
 
   Future<SyncConfiguration> saveConfiguration(
@@ -47,7 +66,10 @@ class LocalSyncConfigurationRepository {
               : existing.deviceId.trim()
         : configuration.deviceId.trim();
     final tenantId = configuration.tenantId.trim();
-    final sessionToken = configuration.apiToken.trim();
+    final suppliedToken = configuration.apiToken.trim();
+    final contextChanged =
+        existing.tenantId.trim() != tenantId ||
+        existing.deviceId.trim() != deviceId;
 
     final publicConfiguration = configuration.copyWith(
       apiBaseUrl: SyncConfiguration.fixedApiBaseUrl,
@@ -73,14 +95,42 @@ class LocalSyncConfigurationRepository {
       deviceId: publicConfiguration.deviceId,
     );
 
-    if (sessionToken.isNotEmpty) {
+    if (suppliedToken.startsWith('odt_')) {
+      await _writeDeviceCredential(
+        tenantId: publicConfiguration.tenantId,
+        deviceId: publicConfiguration.deviceId,
+        apiToken: suppliedToken,
+      );
+      AppSessionManager.instance.clearSession();
+      AppSessionManager.instance.setDeviceCredential(
+        apiToken: suppliedToken,
+        tenantId: publicConfiguration.tenantId,
+        deviceId: publicConfiguration.deviceId,
+      );
+    } else {
+      if (contextChanged) {
+        await _secureStorage.delete(key: _deviceCredentialKey);
+        AppSessionManager.instance.clearDeviceCredential();
+      } else {
+        final credential = await _readDeviceCredential();
+        if (credential != null && credential.matches(publicConfiguration)) {
+          AppSessionManager.instance.setDeviceCredential(
+            apiToken: credential.apiToken,
+            tenantId: publicConfiguration.tenantId,
+            deviceId: publicConfiguration.deviceId,
+          );
+        }
+      }
+    }
+
+    if (suppliedToken.isNotEmpty && !suppliedToken.startsWith('odt_')) {
       final sessionManager = AppSessionManager.instance;
       final preservedUser = sessionManager.activeUser;
       final preservedSessionId = sessionManager.sessionId;
       final preservedExpiresAt = sessionManager.expiresAt;
       final preservedIdleTimeout = sessionManager.idleTimeout;
       sessionManager.startSession(
-        apiToken: sessionToken,
+        apiToken: suppliedToken,
         tenantId: publicConfiguration.tenantId,
         deviceId: publicConfiguration.deviceId,
         sessionId: preservedSessionId,
@@ -134,6 +184,7 @@ class LocalSyncConfigurationRepository {
   }
 
   Future<String> resetDeviceId() async {
+    await clearDeviceAuthorization();
     final configuration = await loadConfiguration();
     final deviceId = _generateDeviceId();
     final updated = await saveConfiguration(
@@ -143,9 +194,55 @@ class LocalSyncConfigurationRepository {
   }
 
   Future<SyncConfiguration> clearTenantSelection() async {
+    await clearDeviceAuthorization();
     final configuration = await loadConfiguration();
     return saveConfiguration(
       configuration.copyWith(tenantId: '', enabled: false, apiToken: ''),
+    );
+  }
+
+  Future<void> clearDeviceAuthorization() async {
+    await _secureStorage.delete(key: _deviceCredentialKey);
+    AppSessionManager.instance.clearDeviceCredential(
+      reason: 'Autorisation du terminal supprimée.',
+    );
+  }
+
+  Future<_StoredDeviceCredential?> _readDeviceCredential() async {
+    final raw = await _secureStorage.read(key: _deviceCredentialKey);
+    if (raw == null || raw.trim().isEmpty) {
+      return null;
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) {
+        return null;
+      }
+      final credential = _StoredDeviceCredential.fromJson(
+        Map<String, dynamic>.from(decoded),
+      );
+      return credential.isValid ? credential : null;
+    } on FormatException {
+      return null;
+    }
+  }
+
+  Future<void> _writeDeviceCredential({
+    required String tenantId,
+    required String deviceId,
+    required String apiToken,
+  }) async {
+    final credential = _StoredDeviceCredential(
+      tenantId: tenantId.trim(),
+      deviceId: deviceId.trim(),
+      apiToken: apiToken.trim(),
+    );
+    if (!credential.isValid) {
+      throw ArgumentError('Invalid OpenIRN device credential');
+    }
+    await _secureStorage.write(
+      key: _deviceCredentialKey,
+      value: jsonEncode(credential.toJson()),
     );
   }
 
@@ -233,4 +330,37 @@ class LocalSyncConfigurationRepository {
     ).map((value) => value.toRadixString(16).padLeft(2, '0')).join();
     return 'openirn-$timestamp-$suffix';
   }
+}
+
+class _StoredDeviceCredential {
+  final String tenantId;
+  final String deviceId;
+  final String apiToken;
+
+  const _StoredDeviceCredential({
+    required this.tenantId,
+    required this.deviceId,
+    required this.apiToken,
+  });
+
+  factory _StoredDeviceCredential.fromJson(Map<String, dynamic> json) {
+    return _StoredDeviceCredential(
+      tenantId: json['tenantId']?.toString().trim() ?? '',
+      deviceId: json['deviceId']?.toString().trim() ?? '',
+      apiToken: json['apiToken']?.toString().trim() ?? '',
+    );
+  }
+
+  bool get isValid =>
+      tenantId.isNotEmpty && deviceId.isNotEmpty && apiToken.startsWith('odt_');
+
+  bool matches(SyncConfiguration configuration) =>
+      tenantId == configuration.tenantId.trim() &&
+      deviceId == configuration.deviceId.trim();
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'tenantId': tenantId,
+    'deviceId': deviceId,
+    'apiToken': apiToken,
+  };
 }

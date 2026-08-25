@@ -6,33 +6,16 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
-EXPECTED_TABLES = [
-    "schema_migrations",
-    "tenants",
-    "users",
-    "user_credentials",
-    "sync_snapshots",
-    "campaign_states",
-    "campaign_revisions",
-    "critical_functions",
-    "information_systems",
-    "information_assets",
-    "terminals",
-    "authorized_devices",
-    "device_enrollment_requests",
-    "device_enrollment_codes",
-    "api_sessions",
-    "auth_attempts",
-    "device_audit_log",
-    "official_referentials",
-    "official_referential_history",
-    "sync_events",
-    "backup_audit_log",
-    "id_aliases",
-]
+APP_DIR = Path(__file__).resolve().parents[1] / "app"
+sys.path.insert(0, str(APP_DIR))
+
+from database_contract import REQUIRED_TABLES  # noqa: E402
+
+EXPECTED_TABLES = list(REQUIRED_TABLES)
 
 
 def fail(message: str) -> None:
@@ -78,7 +61,7 @@ def config_from_args(args: argparse.Namespace) -> dict[str, Any]:
         config = {
             "host": args.host or os.environ.get("OPENIRN_MARIADB_HOST", "127.0.0.1"),
             "port": int(args.port or os.environ.get("OPENIRN_MARIADB_PORT", "3306")),
-            "user": args.user or os.environ.get("OPENIRN_MARIADB_USER", "openirn_api"),
+            "user": args.user or os.environ.get("OPENIRN_MARIADB_USER", "openirn_runtime"),
             "password": args.password if args.password is not None else os.environ.get("OPENIRN_MARIADB_PASSWORD", ""),
             "database": args.database or os.environ.get("OPENIRN_MARIADB_DATABASE", "openirn"),
             "charset": args.charset or os.environ.get("OPENIRN_MARIADB_CHARSET", "utf8mb4"),

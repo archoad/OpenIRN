@@ -20,9 +20,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 from urllib.parse import parse_qs, unquote, urlparse
 
-BOOTSTRAP_PEPPER = "openirn-device-enrollment-bootstrap-v1"
 ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 ALLOWED_EXPIRATIONS = {5, 10, 15}
+ENROLLMENT_CODE_SECRET_ENV = "OPENIRN_ENROLLMENT_CODE_SECRET"
 
 
 def utc_now() -> datetime:
@@ -43,13 +43,24 @@ def format_code(value: str) -> str:
 
 
 def new_code() -> str:
-    return "".join(secrets.choice(ALPHABET) for _ in range(10))
+    return "".join(secrets.choice(ALPHABET) for _ in range(14))
 
 
-def code_hash(tenant_id: str, code: str) -> str:
+def enrollment_code_secret() -> str:
+    secret = os.environ.get(ENROLLMENT_CODE_SECRET_ENV, "").strip()
+    if len(secret) < 32:
+        print(
+            f"ERROR: {ENROLLMENT_CODE_SECRET_ENV} must contain at least 32 characters.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    return secret
+
+
+def code_hash(tenant_id: str, code: str, secret: str) -> str:
     normalized = normalize_code(code)
     return hmac.new(
-        BOOTSTRAP_PEPPER.encode("utf-8"),
+        secret.encode("utf-8"),
         f"{tenant_id}:{normalized}".encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
@@ -412,6 +423,7 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 3
+        enrollment_secret = enrollment_code_secret()
 
         execute(
             con,
@@ -424,7 +436,7 @@ def main() -> int:
             (
                 tenant_id,
                 enrollment_id,
-                code_hash(tenant_id, normalized_code),
+                code_hash(tenant_id, normalized_code, enrollment_secret),
                 "server-bootstrap",
                 str(args.label or "Bootstrap terminal")[:120],
                 expires_at,

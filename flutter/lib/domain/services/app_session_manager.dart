@@ -13,7 +13,8 @@ class AppSessionManager extends ChangeNotifier {
 
   String _tenantId = '';
   String _deviceId = '';
-  String _apiToken = '';
+  String _deviceApiToken = '';
+  String _sessionApiToken = '';
   String _sessionId = '';
   DateTime? _expiresAt;
   DateTime? _lastActivityAt;
@@ -33,8 +34,11 @@ class AppSessionManager extends ChangeNotifier {
   bool get hasDeviceContext =>
       _tenantId.trim().isNotEmpty && _deviceId.trim().isNotEmpty;
 
+  bool get hasDeviceCredential =>
+      hasDeviceContext && _deviceApiToken.trim().startsWith('odt_');
+
   bool get hasActiveSession {
-    final token = _apiToken.trim();
+    final token = _sessionApiToken.trim();
     if (token.isEmpty) {
       return false;
     }
@@ -50,7 +54,16 @@ class AppSessionManager extends ChangeNotifier {
     return true;
   }
 
-  String get apiToken => hasActiveSession ? _apiToken.trim() : '';
+  String get apiToken => hasActiveSession
+      ? _sessionApiToken.trim()
+      : hasDeviceCredential
+      ? _deviceApiToken.trim()
+      : '';
+
+  String get sessionApiToken => hasActiveSession ? _sessionApiToken.trim() : '';
+
+  String get deviceApiToken =>
+      hasDeviceCredential ? _deviceApiToken.trim() : '';
 
   DateTime? get expiresAt => _expiresAt;
 
@@ -72,6 +85,29 @@ class AppSessionManager extends ChangeNotifier {
     _deviceId = deviceId.trim();
   }
 
+  void setDeviceCredential({
+    required String apiToken,
+    required String tenantId,
+    required String deviceId,
+  }) {
+    final token = apiToken.trim();
+    if (!token.startsWith('odt_')) {
+      throw ArgumentError.value(
+        apiToken,
+        'apiToken',
+        'Invalid OpenIRN device token',
+      );
+    }
+    updateDeviceContext(tenantId: tenantId, deviceId: deviceId);
+    _deviceApiToken = token;
+    notifyListeners();
+  }
+
+  void clearDeviceCredential({String reason = ''}) {
+    _deviceApiToken = '';
+    clearSession(reason: reason);
+  }
+
   void startSession({
     required String apiToken,
     required String tenantId,
@@ -82,7 +118,7 @@ class AppSessionManager extends ChangeNotifier {
     AppUser? activeUser,
   }) {
     updateDeviceContext(tenantId: tenantId, deviceId: deviceId);
-    _apiToken = apiToken.trim();
+    _sessionApiToken = apiToken.trim();
     _sessionId = sessionId.trim();
     _expiresAt = expiresAt?.toUtc();
     _idleTimeout = _normalizeIdleTimeout(idleTimeout ?? defaultIdleTimeout);
@@ -119,7 +155,7 @@ class AppSessionManager extends ChangeNotifier {
     _idleTimer?.cancel();
     _expirationTimer = null;
     _idleTimer = null;
-    _apiToken = '';
+    _sessionApiToken = '';
     _sessionId = '';
     _expiresAt = null;
     _lastActivityAt = null;
@@ -130,7 +166,7 @@ class AppSessionManager extends ChangeNotifier {
   }
 
   void _clearExpiredSessionIfNeeded() {
-    final token = _apiToken.trim();
+    final token = _sessionApiToken.trim();
     if (token.isEmpty) {
       return;
     }
@@ -166,7 +202,7 @@ class AppSessionManager extends ChangeNotifier {
   void _scheduleIdleTimer() {
     _idleTimer?.cancel();
     _idleTimer = null;
-    if (_apiToken.trim().isEmpty) {
+    if (_sessionApiToken.trim().isEmpty) {
       return;
     }
     final lastActivityAt = _lastActivityAt;

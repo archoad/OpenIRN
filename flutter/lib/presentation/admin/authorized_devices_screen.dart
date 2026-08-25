@@ -362,6 +362,7 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
     );
 
     if (success && isCurrentDevice) {
+      await _configurationRepository.clearDeviceAuthorization();
       final cleared =
           SyncConfiguration.empty(
             deviceId: state.configuration.deviceId,

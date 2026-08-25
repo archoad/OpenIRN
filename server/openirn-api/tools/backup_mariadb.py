@@ -17,25 +17,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
-TABLES = [
-    "tenants",
-    "users",
-    "sync_snapshots",
-    "campaign_states",
-    "campaign_revisions",
-    "critical_functions",
-    "information_systems",
-    "information_assets",
-    "terminals",
-    "authorized_devices",
-    "device_enrollment_requests",
-    "device_enrollment_codes",
-    "device_audit_log",
-    "official_referentials",
-    "official_referential_history",
-    "sync_events",
-    "backup_audit_log",
-]
+APP_DIR = Path(__file__).resolve().parents[1] / "app"
+sys.path.insert(0, str(APP_DIR))
+
+from database_contract import REQUIRED_MIGRATIONS, REQUIRED_TABLES  # noqa: E402
 
 
 def utc_now() -> datetime:
@@ -105,15 +90,23 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def backup_signature(metadata: dict[str, Any]) -> str:
-    secret = os.environ.get("OPENIRN_API_BACKUP_SIGNATURE_SECRET", "").strip()
-    if not secret:
-        return ""
+def backup_signature(metadata: dict[str, Any], secret: str | None = None) -> str:
+    effective_secret = (
+        str(secret).strip()
+        if secret is not None
+        else os.environ.get("OPENIRN_API_BACKUP_SIGNATURE_SECRET", "").strip()
+    )
+    if len(effective_secret) < 32:
+        raise RuntimeError("OPENIRN_API_BACKUP_SIGNATURE_SECRET doit contenir au moins 32 caractères")
     payload = dict(metadata)
     payload.pop("signature", None)
     payload.pop("signatureStatus", None)
     payload.pop("signatureAlgorithm", None)
-    return hmac.new(secret.encode("utf-8"), canonical_json(payload).encode("utf-8"), hashlib.sha256).hexdigest()
+    return hmac.new(
+        effective_secret.encode("utf-8"),
+        canonical_json(payload).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 def dump_binary() -> str:
@@ -123,24 +116,89 @@ def dump_binary() -> str:
     return shutil.which("mariadb-dump") or shutil.which("mysqldump") or ""
 
 
-def read_counts(config: dict[str, Any]) -> dict[str, int | None]:
-    counts: dict[str, int | None] = {}
+def read_counts(config: dict[str, Any]) -> dict[str, int]:
+    con = connect(config)
     try:
-        con = connect(config)
-        try:
-            with con.cursor() as cur:
-                for table in TABLES:
-                    try:
-                        cur.execute(f"SELECT COUNT(*) FROM `{table}`")
-                        counts[table] = int(cur.fetchone()[0])
-                    except Exception:
-                        counts[table] = None
-        finally:
-            con.close()
-    except Exception:
-        for table in TABLES:
-            counts[table] = None
-    return counts
+        with con.cursor() as cur:
+            cur.execute(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'
+                ORDER BY table_name
+                """
+            )
+            tables = [str(row[0]) for row in cur.fetchall()]
+            missing = sorted(set(REQUIRED_TABLES) - set(tables))
+            if missing:
+                raise RuntimeError(f"Schéma OpenIRN incomplet: {', '.join(missing)}")
+
+            counts: dict[str, int] = {}
+            for table in tables:
+                escaped_table = table.replace("`", "``")
+                cur.execute(f"SELECT COUNT(*) FROM `{escaped_table}`")
+                counts[table] = int(cur.fetchone()[0])
+            return counts
+    finally:
+        con.close()
+
+
+def verify_backup_artifacts(backup_path: Path, secret: str | None = None) -> dict[str, Any]:
+    if not backup_path.is_file():
+        raise RuntimeError(f"Dump MariaDB introuvable: {backup_path}")
+    sha_path = backup_path.with_suffix(backup_path.suffix + ".sha256")
+    meta_path = backup_path.with_suffix(backup_path.suffix + ".json")
+    if not sha_path.is_file() or not meta_path.is_file():
+        raise RuntimeError("Le dump, son SHA-256 et son manifeste signé sont indissociables")
+
+    digest = file_sha256(backup_path)
+    sha_parts = sha_path.read_text(encoding="utf-8").split()
+    expected_sha = sha_parts[0].strip() if sha_parts else ""
+    if len(expected_sha) != 64 or not hmac.compare_digest(digest, expected_sha):
+        raise RuntimeError("SHA-256 du dump MariaDB invalide")
+
+    try:
+        metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Manifeste de sauvegarde illisible") from exc
+    if not isinstance(metadata, dict):
+        raise RuntimeError("Manifeste de sauvegarde invalide")
+    if int(metadata.get("formatVersion") or 0) < 2:
+        raise RuntimeError("Format de sauvegarde antérieur à la procédure DBA vérifiée")
+    if str(metadata.get("databaseScope") or "") != "all_tenants":
+        raise RuntimeError("Le périmètre global de la sauvegarde n’est pas déclaré")
+    if str(metadata.get("backupName") or "") != backup_path.name:
+        raise RuntimeError("Le manifeste ne correspond pas au nom du dump")
+    if not hmac.compare_digest(str(metadata.get("sha256") or ""), digest):
+        raise RuntimeError("Le SHA-256 du manifeste ne correspond pas au dump")
+    if str(metadata.get("signatureAlgorithm") or "") != "hmac-sha256-canonical-json-v1":
+        raise RuntimeError("Algorithme de signature de sauvegarde non accepté")
+    if str(metadata.get("signatureStatus") or "") != "valid":
+        raise RuntimeError("Une sauvegarde non signée ne peut pas être restaurée")
+
+    signature = str(metadata.get("signature") or "")
+    expected_signature = backup_signature(metadata, secret)
+    if not signature or not hmac.compare_digest(signature, expected_signature):
+        raise RuntimeError("Signature HMAC du manifeste invalide")
+
+    counts = metadata.get("counts")
+    if not isinstance(counts, dict) or set(REQUIRED_TABLES) - set(counts):
+        raise RuntimeError("Les comptages du manifeste ne couvrent pas toutes les tables OpenIRN")
+    migrations = metadata.get("schemaMigrations")
+    expected_versions = {str(version) for version in REQUIRED_MIGRATIONS}
+    if not isinstance(migrations, dict) or expected_versions - set(migrations):
+        raise RuntimeError("Le manifeste ne couvre pas toutes les migrations OpenIRN requises")
+    return metadata
+
+
+def read_schema_migrations(config: dict[str, Any]) -> dict[str, str]:
+    con = connect(config)
+    try:
+        with con.cursor() as cur:
+            cur.execute("SELECT version, name FROM schema_migrations ORDER BY version")
+            return {str(int(version)): str(name or "") for version, name in cur.fetchall()}
+    finally:
+        con.close()
 
 
 def record_audit(config: dict[str, Any], backup_name: str, sha256: str, size_bytes: int, reason: str, automatic: bool) -> None:
@@ -190,6 +248,8 @@ def cleanup_old_backups(backup_dir: Path, keep: int) -> list[str]:
 
 def create_backup(backup_dir: Path, keep: int, reason: str, automatic: bool, verbose: bool) -> dict[str, Any]:
     config = parse_mysql_url(os.environ.get("OPENIRN_API_MYSQL_URL", "").strip())
+    if len(os.environ.get("OPENIRN_API_BACKUP_SIGNATURE_SECRET", "").strip()) < 32:
+        raise SystemExit("[ERREUR] OPENIRN_API_BACKUP_SIGNATURE_SECRET doit contenir au moins 32 caractères")
     binary = dump_binary()
     if not binary:
         raise SystemExit("[ERREUR] mariadb-dump/mysqldump introuvable")
@@ -225,6 +285,7 @@ def create_backup(backup_dir: Path, keep: int, reason: str, automatic: bool, ver
         "--quick",
         "--skip-comments",
         "--hex-blob",
+        "--no-tablespaces",
         config["database"],
     ]
     try:
@@ -249,13 +310,14 @@ def create_backup(backup_dir: Path, keep: int, reason: str, automatic: bool, ver
 
     metadata: dict[str, Any] = {
         "type": "openirn.mariadbDumpBackup",
-        "formatVersion": 1,
+        "formatVersion": 2,
         "backend": "mariadb",
+        "databaseScope": "all_tenants",
         "createdAt": utc_now().isoformat(),
         "sourceDb": f"{config['user']}@{config['host']}:{config['port']}/{config['database']}",
+        "sourceDatabase": config["database"],
         "backupDb": str(backup_path),
         "backupName": backup_path.name,
-        "tenantId": "default",
         "reason": reason,
         "automatic": automatic,
         "triggeredByUserId": "systemd-timer" if automatic else "server-cli",
@@ -264,16 +326,12 @@ def create_backup(backup_dir: Path, keep: int, reason: str, automatic: bool, ver
         "integrityCheck": "logical_dump_created",
         "retentionKeep": keep,
         "counts": read_counts(config),
+        "schemaMigrations": read_schema_migrations(config),
     }
     signature = backup_signature(metadata)
-    if signature:
-        metadata["signatureAlgorithm"] = "hmac-sha256-canonical-json-v1"
-        metadata["signature"] = signature
-        metadata["signatureStatus"] = "valid"
-    else:
-        metadata["signatureAlgorithm"] = ""
-        metadata["signature"] = ""
-        metadata["signatureStatus"] = "unsigned"
+    metadata["signatureAlgorithm"] = "hmac-sha256-canonical-json-v1"
+    metadata["signature"] = signature
+    metadata["signatureStatus"] = "valid"
 
     meta_path = backup_path.with_suffix(backup_path.suffix + ".json")
     meta_path.write_text(pretty_json(metadata) + "\n", encoding="utf-8")

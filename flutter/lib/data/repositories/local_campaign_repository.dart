@@ -48,12 +48,9 @@ class LocalCampaignRepository {
     required String referentialId,
     required String campaignId,
   }) async {
-    final bundles = await _store.loadBundles(referentialId: referentialId);
-    await _store.saveBundles(
+    await _store.deleteBundle(
       referentialId: referentialId,
-      bundles: bundles
-          .where((bundle) => bundle.campaign.id != campaignId)
-          .toList(growable: false),
+      campaignId: campaignId,
     );
   }
 

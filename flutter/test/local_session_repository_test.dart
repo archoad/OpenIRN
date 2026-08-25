@@ -10,7 +10,7 @@ void main() {
   group('LocalSessionRepository', () {
     setUp(() {
       SharedPreferences.setMockInitialValues(<String, Object>{});
-      AppSessionManager.instance.clearSession();
+      AppSessionManager.instance.clearDeviceCredential();
     });
 
     test('fails when no server session is active', () async {
@@ -43,5 +43,29 @@ void main() {
       expect(activeUser.id, user.id);
       expect(activeUser.role, AppUserRole.evaluator);
     });
+
+    test(
+      'falls back to the device credential after locking the user session',
+      () {
+        final session = AppSessionManager.instance;
+        session.setDeviceCredential(
+          apiToken: 'odt_device-secret',
+          tenantId: 'archoad',
+          deviceId: 'device-test',
+        );
+        session.startSession(
+          apiToken: 'ost_user-session',
+          tenantId: 'archoad',
+          deviceId: 'device-test',
+          expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+        );
+
+        expect(session.apiToken, 'ost_user-session');
+        session.clearSession();
+
+        expect(session.hasActiveSession, isFalse);
+        expect(session.apiToken, 'odt_device-secret');
+      },
+    );
   });
 }

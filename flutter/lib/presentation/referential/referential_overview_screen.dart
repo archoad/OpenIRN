@@ -9,6 +9,7 @@ import '../../domain/models/sync_configuration.dart';
 import '../../domain/models/tenant_info.dart';
 import '../../domain/repositories/irn_referential_repository.dart';
 import '../../domain/services/app_session_manager.dart';
+import '../../domain/services/pin_policy.dart';
 import '../../domain/services/app_sync_coordinator.dart';
 import '../../domain/services/access_policy_service.dart';
 import '../../domain/services/referential_catalog_service.dart';
@@ -838,7 +839,7 @@ class _HomeContentState extends State<_HomeContent> {
       return false;
     }
 
-    final result = await _apiClient.verifyUserPin(
+    var result = await _apiClient.verifyUserPin(
       baseUrl: authenticationData.apiBaseUrl,
       tenantId: authenticationData.tenantId,
       apiToken: authenticationData.apiToken,
@@ -850,25 +851,33 @@ class _HomeContentState extends State<_HomeContent> {
       return result.isAccepted;
     }
 
+    if (result.mustChangePin) {
+      final newPin = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _InitialPinChangeDialog(user: user),
+      );
+      if (newPin == null || !mounted) {
+        return false;
+      }
+      result = await _apiClient.verifyUserPin(
+        baseUrl: authenticationData.apiBaseUrl,
+        tenantId: authenticationData.tenantId,
+        apiToken: authenticationData.apiToken,
+        userId: user.id,
+        pin: pin,
+        newPin: newPin,
+      );
+      if (!mounted) {
+        return result.isAccepted;
+      }
+    }
+
     if (!result.isAccepted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${result.title} — ${result.message}')),
       );
       return false;
-    }
-
-    if (result.mustChangePin) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            context.tr(
-              'home.pin.initial_accepted',
-              fallback:
-                  'Code initial accepté. Pensez à définir un code personnel dans l’administration.',
-            ),
-          ),
-        ),
-      );
     }
 
     return true;
@@ -1850,6 +1859,123 @@ class _AdministrationPinAuthenticationDialogState
             icon: const Icon(Icons.login_outlined),
             label: Text(context.tr('common.open', fallback: 'Ouvrir')),
           ),
+      ],
+    );
+  }
+}
+
+class _InitialPinChangeDialog extends StatefulWidget {
+  final AppUser user;
+
+  const _InitialPinChangeDialog({required this.user});
+
+  @override
+  State<_InitialPinChangeDialog> createState() =>
+      _InitialPinChangeDialogState();
+}
+
+class _InitialPinChangeDialogState extends State<_InitialPinChangeDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _newPinController = TextEditingController();
+  final _confirmPinController = TextEditingController();
+
+  @override
+  void dispose() {
+    _newPinController.dispose();
+    _confirmPinController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (_formKey.currentState?.validate() != true) {
+      return;
+    }
+    Navigator.of(context).pop(_newPinController.text.trim());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      insetPadding: responsiveDialogInsetPadding(context),
+      title: Text(context.tr('home.pin_change_required.title')),
+      content: ResponsiveDialogContent(
+        maxWidth: 520,
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                context.tr(
+                  'home.pin_change_required.message',
+                  values: {'user': widget.user.displayName},
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _newPinController,
+                autofocus: shouldAutofocusTextField(context),
+                obscureText: true,
+                keyboardType: safeKeyboardType(
+                  context,
+                  TextInputType.visiblePassword,
+                ),
+                autocorrect: false,
+                enableSuggestions: false,
+                decoration: InputDecoration(
+                  labelText: context.tr('common.access_code.new'),
+                  helperText: context.tr('home.pin_change_required.helper'),
+                  prefixIcon: const Icon(Icons.password_outlined),
+                ),
+                validator: (value) {
+                  final pin = value?.trim() ?? '';
+                  if (pin.length < 4) {
+                    return context.tr('common.access_code.too_short');
+                  }
+                  if (pin.length > 32) {
+                    return context.tr('common.access_code.too_long');
+                  }
+                  if (isPredictableOpenIrnPin(pin)) {
+                    return context.tr('common.access_code.too_predictable');
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _confirmPinController,
+                obscureText: true,
+                keyboardType: safeKeyboardType(
+                  context,
+                  TextInputType.visiblePassword,
+                ),
+                autocorrect: false,
+                enableSuggestions: false,
+                decoration: InputDecoration(
+                  labelText: context.tr('common.access_code.confirm'),
+                  prefixIcon: const Icon(Icons.done_all_outlined),
+                ),
+                validator: (value) =>
+                    (value?.trim() ?? '') != _newPinController.text.trim()
+                    ? context.tr('common.access_code.confirm_mismatch')
+                    : null,
+                onFieldSubmitted: (_) => _submit(),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(context.tr('common.action.cancel')),
+        ),
+        FilledButton.icon(
+          onPressed: _submit,
+          icon: const Icon(Icons.lock_reset_outlined),
+          label: Text(context.tr('common.action.save')),
+        ),
       ],
     );
   }

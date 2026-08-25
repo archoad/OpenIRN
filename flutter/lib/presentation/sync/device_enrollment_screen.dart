@@ -193,7 +193,7 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
 
     final deviceId =
         result.device?.deviceId.trim() ?? currentConfiguration.deviceId.trim();
-    if (deviceId.isEmpty) {
+    if (deviceId.isEmpty || !result.apiToken.trim().startsWith('odt_')) {
       setState(() {
         _working = false;
         _enrollmentResult = OpenIrnApiEnrollmentResult(
@@ -207,7 +207,7 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
           message: OpenIrnLocalizations.instance.tr(
             'device_enrollment.error.incomplete_response.message',
             fallback:
-                'Le serveur a accepté le code, mais n’a pas retourné l’identifiant du terminal.',
+                'Le serveur a accepté le code, mais n’a pas retourné toutes les informations d’autorisation du terminal.',
           ),
           tenantId: result.tenantId,
           enrollmentId: result.enrollmentId,
@@ -228,7 +228,7 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
       tenantDisplayName: result.device?.tenantLabel ?? '',
       deviceId: deviceId,
       enabled: true,
-      apiToken: '',
+      apiToken: result.apiToken,
     );
     final saved = await _configurationRepository.saveConfiguration(
       configuration,

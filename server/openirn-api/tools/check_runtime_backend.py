@@ -2,29 +2,16 @@
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-TABLES = [
-    "schema_migrations",
-    "tenants",
-    "users",
-    "user_credentials",
-    "sync_snapshots",
-    "campaign_states",
-    "campaign_revisions",
-    "terminals",
-    "authorized_devices",
-    "device_enrollment_requests",
-    "device_enrollment_codes",
-    "api_sessions",
-    "auth_attempts",
-    "device_audit_log",
-    "official_referentials",
-    "official_referential_history",
-    "sync_events",
-    "backup_audit_log",
-    "id_aliases",
-]
+APP_DIR = Path(__file__).resolve().parents[1] / "app"
+sys.path.insert(0, str(APP_DIR))
+
+from database_contract import REQUIRED_TABLES  # noqa: E402
+
+TABLES = list(REQUIRED_TABLES)
 
 
 def parse_mysql_url() -> dict[str, object]:

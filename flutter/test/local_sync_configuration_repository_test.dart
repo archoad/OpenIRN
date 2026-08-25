@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:openirn/data/repositories/local_sync_configuration_repository.dart';
 import 'package:openirn/domain/models/sync_configuration.dart';
 import 'package:openirn/domain/services/app_session_manager.dart';
@@ -10,7 +11,8 @@ void main() {
   group('LocalSyncConfigurationRepository', () {
     setUp(() {
       SharedPreferences.setMockInitialValues(<String, Object>{});
-      AppSessionManager.instance.clearSession();
+      FlutterSecureStorage.setMockInitialValues(<String, String>{});
+      AppSessionManager.instance.clearDeviceCredential();
       AppSessionManager.instance.updateDeviceContext(
         tenantId: '',
         deviceId: '',
@@ -34,7 +36,7 @@ void main() {
     );
 
     test(
-      'saves and reloads synchronization configuration without persisting API token',
+      'stores the device token securely and never in public preferences',
       () async {
         const repository = LocalSyncConfigurationRepository();
         final initial = await repository.loadConfiguration();
@@ -44,25 +46,60 @@ void main() {
             enabled: true,
             apiBaseUrl: 'https://openirn.example.org/api/',
             tenantId: 'archoad-lab',
-            apiToken: 'test-token-with-more-than-16-chars',
+            apiToken: 'odt_test-token-with-more-than-16-chars',
           ),
         );
 
         expect(saved.apiBaseUrl, SyncConfiguration.fixedApiBaseUrl);
         expect(saved.tenantId, 'archoad-lab');
         expect(saved.deviceId, initial.deviceId);
-        expect(saved.apiToken, 'test-token-with-more-than-16-chars');
+        expect(saved.apiToken, 'odt_test-token-with-more-than-16-chars');
         expect(saved.isConfigured, isTrue);
 
-        AppSessionManager.instance.clearSession();
+        final preferences = await SharedPreferences.getInstance();
+        expect(
+          preferences.getString('openirn.sync.configuration'),
+          isNot(contains('odt_test-token-with-more-than-16-chars')),
+        );
+
+        AppSessionManager.instance.clearDeviceCredential();
         final reloaded = await repository.loadConfiguration();
 
         expect(reloaded.apiBaseUrl, SyncConfiguration.fixedApiBaseUrl);
         expect(reloaded.tenantId, 'archoad-lab');
         expect(reloaded.deviceId, initial.deviceId);
-        expect(reloaded.apiToken, isEmpty);
+        expect(reloaded.apiToken, 'odt_test-token-with-more-than-16-chars');
         expect(reloaded.isConfigured, isTrue);
       },
     );
+
+    test('never persists a user session token', () async {
+      const repository = LocalSyncConfigurationRepository();
+      final initial = await repository.loadConfiguration();
+      final enrolled = await repository.saveConfiguration(
+        SyncConfiguration.empty(deviceId: initial.deviceId).copyWith(
+          enabled: true,
+          tenantId: 'archoad-lab',
+          apiToken: 'odt_device-secret',
+        ),
+      );
+
+      AppSessionManager.instance.startSession(
+        apiToken: 'ost_user-session',
+        tenantId: enrolled.tenantId,
+        deviceId: enrolled.deviceId,
+        expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      );
+      await repository.saveConfiguration(
+        enrolled.copyWith(apiToken: 'ost_user-session'),
+      );
+
+      AppSessionManager.instance.clearDeviceCredential();
+      final reloaded = await repository.loadConfiguration();
+
+      expect(reloaded.apiToken, 'odt_device-secret');
+      expect(reloaded.usesDeviceToken, isTrue);
+      expect(AppSessionManager.instance.hasActiveSession, isFalse);
+    });
   });
 }

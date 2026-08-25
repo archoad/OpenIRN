@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/api/openirn_api_client.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/services/app_session_manager.dart';
+import '../../domain/services/pin_policy.dart';
 import '../../l10n/openirn_localizations.dart';
 import 'responsive_autofocus.dart';
 import 'responsive_dialog.dart';
@@ -263,6 +264,9 @@ class _AccessCodeChangeDialogState extends State<_AccessCodeChangeDialog> {
                     return context.trText(
                       'Le code ne doit pas dépasser 32 caractères.',
                     );
+                  }
+                  if (isPredictableOpenIrnPin(code)) {
+                    return context.tr('common.access_code.too_predictable');
                   }
                   if (code == _currentCodeController.text.trim()) {
                     return context.trText(
