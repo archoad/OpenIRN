@@ -45,8 +45,12 @@ coverage/
 
 # Local IRN data
 /branding/
+/devsteps/
 AGENTS.md
 .agents/
+
+# Generated release documentation
+/docs/pdf/*.pdf
 
 # Release signing material — never commit private signing assets
 /secrets/

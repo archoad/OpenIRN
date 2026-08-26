@@ -10,7 +10,7 @@ required_files=(
   ".github/workflows/release.yml"
   "flutter/android/app/build.gradle.kts"
   "flutter/pubspec.yaml"
-  "docs/149_releases_signees.md"
+  "docs/deploiement-applications.md"
 )
 
 for file in "${required_files[@]}"; do

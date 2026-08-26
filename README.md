@@ -32,7 +32,7 @@ La solution couvre aujourd’hui :
 - la consultation des sessions serveur actives ;
 - la consultation du journal de sécurité serveur ;
 - la maintenance serveur et les sauvegardes MariaDB signées ;
-- une interface bilingue français / anglais.
+- une interface multilingue français / anglais / espagnol / allemand.
 
 ## Architecture générale
 
@@ -207,15 +207,17 @@ OPENIRN_API_BACKUP_SIGNATURE_SECRET=secret_de_signature_des_manifestes
 
 La restauration applicative directe a été retirée volontairement. Une restauration MariaDB doit être conduite par une procédure d’administration maîtrisée.
 
-## Bilinguisme
+## Internationalisation
 
-L’interface utilisateur est bilingue français / anglais.
+L’interface utilisateur est disponible en français, anglais, espagnol et allemand.
 
 Le français reste la langue métier de référence du projet. Les libellés applicatifs sont externalisés dans des fichiers JSON alignés :
 
 ```text
 flutter/assets/i18n/fr.json
 flutter/assets/i18n/en.json
+flutter/assets/i18n/es.json
+flutter/assets/i18n/de.json
 ```
 
 La couche Flutter fournit les helpers nécessaires pour traduire les libellés applicatifs et les textes hérités encore transmis sous forme de chaînes métier.
@@ -229,6 +231,7 @@ Le dépôt contient des workflows GitHub Actions pour :
 - exécuter un préflight de release ;
 - produire des artefacts Android signés ;
 - produire des artefacts Windows signés ;
+- convertir les guides Markdown français en PDF ;
 - publier les empreintes SHA-256 des artefacts.
 
 Les artefacts signés actuellement visés sont :
@@ -236,16 +239,27 @@ Les artefacts signés actuellement visés sont :
 - `openirn-android.apk` ;
 - `openirn-android.aab` ;
 - `openirn-windows-signed.zip` ;
+- `openirn-windows-x64.msix` ;
+- les quatre guides OpenIRN au format PDF ;
 - `SHA256SUMS.txt`.
 
 macOS et iOS restent présents dans le projet Flutter, mais ne font pas encore partie du profil de release signé principal tant qu’un circuit Apple Developer n’est pas configuré.
+
+## Documentation
+
+- [Installation et initialisation du serveur API](docs/installation-serveur-api.md)
+- [Déploiement des applications](docs/deploiement-applications.md)
+- [Guide utilisateur par rôle](docs/guide-utilisateur.md)
+- [Administration quotidienne d’une instance](docs/administration-instance.md)
+
+Lors d’une release, ces quatre sources Markdown sont converties dans `docs/pdf/` puis jointes à la GitHub Release. Le répertoire local `devsteps/`, qui contient l’historique de travail du développement, est volontairement ignoré par Git.
 
 ## Structure du dépôt
 
 ```text
 OpenIRN/
 ├── api/                 # contrats OpenAPI et brouillons d’API
-├── docs/                # documentation projet, notes de patch et releases
+├── docs/                # guides publics et style de génération PDF
 ├── flutter/             # application Flutter multi-plateforme
 ├── server/              # API serveur, SQL, systemd et outils serveur
 ├── tools/               # outils de contrôle, release et maintenance projet
@@ -284,8 +298,8 @@ Depuis la racine du dépôt :
 Le serveur attend une base MariaDB et une URL de connexion :
 
 ```env
-OPENIRN_API_MYSQL_URL=mysql+pymysql://openirn_api:MOT_DE_PASSE@127.0.0.1:3306/openirn?charset=utf8mb4
-OPENIRN_API_BACKUP_SIGNATURE_SECRET=secret_de_signature_des_manifestes
+OPENIRN_API_MYSQL_URL=mysql+pymysql://openirn_runtime:MOT_DE_PASSE@127.0.0.1:3306/openirn?charset=utf8mb4
+OPENIRN_API_BACKUP_SIGNATURE_SECRET=SECRET_ALEATOIRE_D_AU_MOINS_32_CARACTERES
 ```
 
 Le schéma de référence est disponible dans :

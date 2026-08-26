@@ -1,0 +1,32 @@
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{titling}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\definecolor{OpenIRNIndigo}{HTML}{3F51B5}
+\definecolor{OpenIRNDark}{HTML}{1F2937}
+\definecolor{OpenIRNLight}{HTML}{EEF0FA}
+\renewcommand{\familydefault}{\sfdefault}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=OpenIRNIndigo,
+  urlcolor=OpenIRNIndigo,
+  citecolor=OpenIRNIndigo
+}
+\titleformat{\section}{\Large\bfseries\color{OpenIRNIndigo}}{\thesection}{0.7em}{}
+\titleformat{\subsection}{\large\bfseries\color{OpenIRNDark}}{\thesubsection}{0.7em}{}
+\titleformat{\subsubsection}{\normalsize\bfseries\color{OpenIRNDark}}{\thesubsubsection}{0.7em}{}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\textcolor{OpenIRNIndigo}{\textbf{OpenIRN}}}
+\fancyhead[R]{\textcolor{OpenIRNDark}{Documentation}}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{OpenIRNIndigo}\leaders\hrule height \headrulewidth\hfill}}
+\setlength{\headheight}{15pt}
+\pretitle{\begin{center}\includegraphics[width=28mm]{flutter/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-App-1024x1024@1x.png}\par\vskip 1.5em\Huge\bfseries\color{OpenIRNIndigo}}
+\posttitle{\par\end{center}\vskip 1em}
+\preauthor{\begin{center}\large\color{OpenIRNDark}}
+\postauthor{\par\end{center}}
+\postdate{\par\end{center}\clearpage}

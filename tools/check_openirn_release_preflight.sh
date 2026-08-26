@@ -162,7 +162,7 @@ require_file server/openirn-api/app/main.py 'API serveur'
 require_dir .github/workflows 'workflows GitHub Actions'
 require_file .github/workflows/release.yml 'workflow release signé Android / Windows'
 require_file .github/workflows/build_artifacts.yml 'workflow artefacts manuel'
-require_file tools/check_release_signing_setup.sh 'contrôle signature 149/150'
+require_file tools/check_release_signing_setup.sh 'contrôle de la chaîne de signature'
 require_file tools/check_open_source_readiness.sh 'contrôle publication open source'
 
 printf '\n== Version et tag ==\n'

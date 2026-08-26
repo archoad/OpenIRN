@@ -1,0 +1,22 @@
+[Unit]
+Description=OpenIRN FastAPI server
+After=network-online.target mariadb.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+EnvironmentFile=/etc/openirn-api.env
+WorkingDirectory=/opt/openirn-api
+ExecStart=/opt/openirn-api/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8091 --no-proxy-headers
+Restart=on-failure
+RestartSec=5s
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/openirn-api
+
+[Install]
+WantedBy=multi-user.target

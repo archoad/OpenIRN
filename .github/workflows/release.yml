@@ -394,12 +394,45 @@ jobs:
             release_artifacts/openirn-windows-x64.msix
           if-no-files-found: error
 
+  documentation:
+    name: Documentation PDF OpenIRN
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release ref
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name || github.ref }}
+
+      - name: Install PDF toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            pandoc \
+            texlive-xetex \
+            texlive-latex-extra
+
+      - name: Build OpenIRN documentation
+        env:
+          DOC_VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name || github.ref_name }}
+        run: |
+          chmod +x tools/build_docs.sh
+          ./tools/build_docs.sh
+
+      - name: Upload PDF documentation
+        uses: actions/upload-artifact@v4
+        with:
+          name: openirn-documentation-fr
+          path: docs/pdf/*.pdf
+          if-no-files-found: error
+
   publish:
     name: Publier la release GitHub
     needs:
       - validate
       - android
       - windows
+      - documentation
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -453,6 +486,10 @@ jobs:
           - `openirn-android.aab` : Android App Bundle signé pour Google Play.
           - `openirn-windows-signed.zip` : distribution Windows portable avec `OpenIRN.exe` signé.
           - `openirn-windows-x64.msix` : package MSIX x64 signé et horodaté.
+          - `openirn-installation-serveur-api.pdf` : recette d’installation du serveur API.
+          - `openirn-deploiement-applications.pdf` : guide de déploiement des applications.
+          - `openirn-guide-utilisateur.pdf` : mode d’emploi par rôle.
+          - `openirn-administration-instance.pdf` : guide d’exploitation quotidienne.
           - `SHA256SUMS.txt` : empreintes SHA-256 des artefacts.
 
           ## Signature Windows
