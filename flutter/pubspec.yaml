@@ -10,6 +10,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   flutter_secure_storage: ^10.3.1
   shared_preferences: ^2.3.3
   file_selector: ^1.0.4
@@ -27,3 +29,5 @@ flutter:
   assets:
     - assets/i18n/fr.json
     - assets/i18n/en.json
+    - assets/i18n/es.json
+    - assets/i18n/de.json

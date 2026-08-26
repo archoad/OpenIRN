@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'data/repositories/api_irn_referential_repository.dart';
 import 'data/repositories/legacy_local_storage_purge_service.dart';
@@ -18,42 +19,63 @@ Future<void> main() async {
 }
 
 class OpenIrnApp extends StatelessWidget {
-  const OpenIrnApp({super.key});
+  final Widget? home;
+
+  const OpenIrnApp({this.home, super.key});
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = ColorScheme.fromSeed(seedColor: Colors.indigo);
+    final i18n = OpenIrnLocalizations.instance;
 
-    return MaterialApp(
-      navigatorKey: openIrnNavigatorKey,
-      title: 'OpenIRN',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: colorScheme,
-        useMaterial3: true,
-        appBarTheme: AppBarTheme(
-          backgroundColor: colorScheme.surface,
-          foregroundColor: colorScheme.onSurface,
-          centerTitle: true,
-        ),
-        cardTheme: CardThemeData(
-          clipBehavior: Clip.antiAlias,
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: colorScheme.outlineVariant),
+    return ListenableBuilder(
+      listenable: i18n,
+      builder: (context, _) {
+        return MaterialApp(
+          navigatorKey: openIrnNavigatorKey,
+          title: 'OpenIRN',
+          debugShowCheckedModeBanner: false,
+          locale: Locale(i18n.languageCode),
+          supportedLocales: OpenIrnLanguage.values
+              .map((language) => Locale(language.code))
+              .toList(growable: false),
+          localizationsDelegates: const [
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          theme: ThemeData(
+            colorScheme: colorScheme,
+            useMaterial3: true,
+            appBarTheme: AppBarTheme(
+              backgroundColor: colorScheme.surface,
+              foregroundColor: colorScheme.onSurface,
+              centerTitle: true,
+            ),
+            cardTheme: CardThemeData(
+              clipBehavior: Clip.antiAlias,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(color: colorScheme.outlineVariant),
+              ),
+            ),
           ),
-        ),
-      ),
-      builder: (context, child) {
-        return OpenIrnLocalizationScope(
-          controller: OpenIrnLocalizations.instance,
-          child: _SessionActivityScope(child: child ?? const SizedBox.shrink()),
+          builder: (context, child) {
+            return OpenIrnLocalizationScope(
+              controller: i18n,
+              child: _SessionActivityScope(
+                child: child ?? const SizedBox.shrink(),
+              ),
+            );
+          },
+          home:
+              home ??
+              const ReferentialOverviewScreen(
+                repository: ApiIrnReferentialRepository(),
+              ),
         );
       },
-      home: const ReferentialOverviewScreen(
-        repository: ApiIrnReferentialRepository(),
-      ),
     );
   }
 }
@@ -69,9 +91,12 @@ class _SessionActivityScope extends StatefulWidget {
 
 class _SessionActivityScopeState extends State<_SessionActivityScope>
     with WidgetsBindingObserver {
+  late bool _hadActiveSession;
+
   @override
   void initState() {
     super.initState();
+    _hadActiveSession = AppSessionManager.instance.hasActiveSession;
     WidgetsBinding.instance.addObserver(this);
     AppSessionManager.instance.addListener(_handleSessionChanged);
   }
@@ -92,7 +117,10 @@ class _SessionActivityScopeState extends State<_SessionActivityScope>
   }
 
   void _handleSessionChanged() {
-    if (AppSessionManager.instance.hasActiveSession) {
+    final hasActiveSession = AppSessionManager.instance.hasActiveSession;
+    final sessionEnded = _hadActiveSession && !hasActiveSession;
+    _hadActiveSession = hasActiveSession;
+    if (!sessionEnded) {
       return;
     }
 
@@ -100,6 +128,7 @@ class _SessionActivityScopeState extends State<_SessionActivityScope>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       openIrnNavigatorKey.currentState?.popUntil((route) => route.isFirst);
     });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   void _recordUserActivity() {

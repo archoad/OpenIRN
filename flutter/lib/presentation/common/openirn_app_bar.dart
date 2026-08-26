@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../l10n/openirn_localizations.dart';
@@ -106,55 +108,77 @@ class OpenIrnLanguageSwitcher extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final i18n = context.i18n;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: OpenIrnLanguage.values.map((language) {
-        final selected = i18n.language == language;
-        final tooltipKey = switch (language) {
-          OpenIrnLanguage.fr => 'common.language.switch_to_fr',
-          OpenIrnLanguage.en => 'common.language.switch_to_en',
-        };
-        return Tooltip(
-          message: context.tr(tooltipKey, fallback: language.label),
+    return ListenableBuilder(
+      listenable: i18n,
+      builder: (context, _) {
+        final currentLanguage = i18n.language;
+        final chooseLanguageLabel = context.tr(
+          'common.language.choose',
+          fallback: 'Choisir la langue de l’interface',
+        );
+        return PopupMenuButton<OpenIrnLanguage>(
+          key: ValueKey<OpenIrnLanguage>(currentLanguage),
+          tooltip: chooseLanguageLabel,
+          initialValue: currentLanguage,
+          padding: EdgeInsets.zero,
+          onSelected: (language) {
+            unawaited(i18n.setLanguage(language));
+          },
+          itemBuilder: (context) => OpenIrnLanguage.values.map((language) {
+            final selected = currentLanguage == language;
+            final languageLabel = context.tr(
+              'common.language.${language.code}',
+              fallback: language.label,
+            );
+            return PopupMenuItem<OpenIrnLanguage>(
+              value: language,
+              child: Semantics(
+                selected: selected,
+                label: languageLabel,
+                child: Row(
+                  children: [
+                    ExcludeSemantics(
+                      child: Text(
+                        language.flag,
+                        style: const TextStyle(fontSize: 22),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(child: Text(languageLabel)),
+                    if (selected) ...[
+                      const SizedBox(width: 12),
+                      const Icon(Icons.check, size: 20),
+                    ],
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
           child: Semantics(
             button: true,
-            selected: selected,
             label: context.tr(
               'common.language.current',
               fallback: 'Langue actuelle : {language}',
-              values: {'language': language.label},
-            ),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(14),
-              onTap: selected
-                  ? null
-                  : () {
-                      i18n.setLanguage(language);
-                    },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 160),
-                margin: const EdgeInsets.symmetric(horizontal: 1),
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: selected
-                        ? Theme.of(context).colorScheme.primary
-                        : Theme.of(context).colorScheme.outlineVariant,
-                  ),
-                  color: selected
-                      ? Theme.of(context).colorScheme.primaryContainer
-                      : Colors.transparent,
+              values: {
+                'language': context.tr(
+                  'common.language.${currentLanguage.code}',
+                  fallback: currentLanguage.label,
                 ),
+              },
+            ),
+            hint: chooseLanguageLabel,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: ExcludeSemantics(
                 child: Text(
-                  language.flag,
-                  style: const TextStyle(fontSize: 16),
+                  currentLanguage.flag,
+                  style: const TextStyle(fontSize: 20),
                 ),
               ),
             ),
           ),
         );
-      }).toList(),
+      },
     );
   }
 }

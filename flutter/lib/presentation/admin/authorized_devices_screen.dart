@@ -903,7 +903,7 @@ class _EnrollmentRequestsSection extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         for (final request in pending) ...[
-          _EnrollmentRequestCard(
+          EnrollmentRequestCard(
             request: request,
             working: working,
             onApprove: () => onApprove(request),
@@ -912,7 +912,7 @@ class _EnrollmentRequestsSection extends StatelessWidget {
           const SizedBox(height: 12),
         ],
         for (final request in history) ...[
-          _EnrollmentRequestCard(
+          EnrollmentRequestCard(
             request: request,
             working: working,
             onApprove: () => onApprove(request),
@@ -925,17 +925,18 @@ class _EnrollmentRequestsSection extends StatelessWidget {
   }
 }
 
-class _EnrollmentRequestCard extends StatelessWidget {
+class EnrollmentRequestCard extends StatelessWidget {
   final DeviceEnrollmentRequest request;
   final bool working;
   final VoidCallback onApprove;
   final VoidCallback onReject;
 
-  const _EnrollmentRequestCard({
+  const EnrollmentRequestCard({
     required this.request,
     required this.working,
     required this.onApprove,
     required this.onReject,
+    super.key,
   });
 
   @override
@@ -949,112 +950,125 @@ class _EnrollmentRequestCard extends StatelessWidget {
         ? colorScheme.onTertiaryContainer
         : colorScheme.onSurfaceVariant;
 
+    final details = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          request.isPending
+              ? Icons.phonelink_lock_outlined
+              : Icons.phonelink_setup_outlined,
+          size: 34,
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text(request.displayName, style: theme.textTheme.titleMedium),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: statusColor,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      child: Text(
+                        context.trText(request.statusLabel),
+                        style: TextStyle(color: statusTextColor),
+                      ),
+                    ),
+                  ),
+                  if (request.tenantId.trim().isNotEmpty)
+                    Chip(
+                      avatar: const Icon(Icons.account_tree_outlined, size: 18),
+                      label: Text(request.tenantLabel),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                context.tr(
+                  'authorized_devices.requests.requested_at',
+                  fallback: '{platform} — demandée le {date}',
+                  values: {
+                    'platform': request.platformLabel,
+                    'date': _formatDateTime(request.requestedAt),
+                  },
+                ),
+              ),
+              if (request.requesterNote.trim().isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(request.requesterNote, style: theme.textTheme.bodySmall),
+              ],
+              if (request.decidedAt != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  context.tr(
+                    'authorized_devices.requests.decided_at',
+                    fallback: 'Traitée le {date}',
+                    values: {'date': _formatDateTime(request.decidedAt)},
+                  ),
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+    final actions = Wrap(
+      alignment: WrapAlignment.end,
+      spacing: 4,
+      runSpacing: 8,
+      children: [
+        TextButton.icon(
+          onPressed: working ? null : onReject,
+          icon: const Icon(Icons.block_outlined),
+          label: Text(context.tr('common.reject', fallback: 'Refuser')),
+        ),
+        FilledButton.icon(
+          onPressed: working ? null : onApprove,
+          icon: const Icon(Icons.check_circle_outline),
+          label: Text(context.tr('common.approve', fallback: 'Approuver')),
+        ),
+      ],
+    );
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(
-              request.isPending
-                  ? Icons.phonelink_lock_outlined
-                  : Icons.phonelink_setup_outlined,
-              size: 34,
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final isCompact = constraints.maxWidth < 680;
+            if (isCompact) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      Text(
-                        request.displayName,
-                        style: theme.textTheme.titleMedium,
-                      ),
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: statusColor,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 4,
-                          ),
-                          child: Text(
-                            context.trText(request.statusLabel),
-                            style: TextStyle(color: statusTextColor),
-                          ),
-                        ),
-                      ),
-                      if (request.tenantId.trim().isNotEmpty)
-                        Chip(
-                          avatar: const Icon(
-                            Icons.account_tree_outlined,
-                            size: 18,
-                          ),
-                          label: Text(request.tenantLabel),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    context.tr(
-                      'authorized_devices.requests.requested_at',
-                      fallback: '{platform} — demandée le {date}',
-                      values: {
-                        'platform': request.platformLabel,
-                        'date': _formatDateTime(request.requestedAt),
-                      },
-                    ),
-                  ),
-                  if (request.requesterNote.trim().isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    Text(
-                      request.requesterNote,
-                      style: theme.textTheme.bodySmall,
-                    ),
-                  ],
-                  if (request.decidedAt != null) ...[
-                    const SizedBox(height: 6),
-                    Text(
-                      context.tr(
-                        'authorized_devices.requests.decided_at',
-                        fallback: 'Traitée le {date}',
-                        values: {'date': _formatDateTime(request.decidedAt)},
-                      ),
-                      style: theme.textTheme.bodySmall,
-                    ),
+                  details,
+                  if (request.isPending) ...[
+                    const SizedBox(height: 12),
+                    Align(alignment: Alignment.centerRight, child: actions),
                   ],
                 ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            if (request.isPending)
-              Wrap(
-                spacing: 4,
-                children: [
-                  TextButton.icon(
-                    onPressed: working ? null : onReject,
-                    icon: const Icon(Icons.block_outlined),
-                    label: Text(
-                      context.tr('common.reject', fallback: 'Refuser'),
-                    ),
-                  ),
-                  FilledButton.icon(
-                    onPressed: working ? null : onApprove,
-                    icon: const Icon(Icons.check_circle_outline),
-                    label: Text(
-                      context.tr('common.approve', fallback: 'Approuver'),
-                    ),
-                  ),
-                ],
-              ),
-          ],
+              );
+            }
+
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: details),
+                if (request.isPending) ...[const SizedBox(width: 12), actions],
+              ],
+            );
+          },
         ),
       ),
     );

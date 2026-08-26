@@ -101,5 +101,95 @@ void main() {
       expect(reloaded.usesDeviceToken, isTrue);
       expect(AppSessionManager.instance.hasActiveSession, isFalse);
     });
+
+    test(
+      'preserves one secure device token per tenant across switches and restarts',
+      () async {
+        const repository = LocalSyncConfigurationRepository();
+        final initial = await repository.loadConfiguration();
+        final tenantA = await repository.saveConfiguration(
+          SyncConfiguration.empty(deviceId: initial.deviceId).copyWith(
+            enabled: true,
+            tenantId: 'tenant-a',
+            apiToken: 'odt_tenant-a-secret',
+          ),
+        );
+
+        await repository.clearTenantSelection();
+        final tenantB = await repository.saveConfiguration(
+          tenantA.copyWith(
+            enabled: true,
+            tenantId: 'tenant-b',
+            apiToken: 'odt_tenant-b-secret',
+          ),
+        );
+        expect(tenantB.apiToken, 'odt_tenant-b-secret');
+
+        final switchedBack = await repository.saveConfiguration(
+          tenantB.copyWith(tenantId: 'tenant-a', apiToken: ''),
+        );
+        expect(switchedBack.apiToken, 'odt_tenant-a-secret');
+
+        AppSessionManager.instance.clearDeviceCredential();
+        final reloaded = await repository.loadConfiguration();
+        expect(reloaded.tenantId, 'tenant-a');
+        expect(reloaded.apiToken, 'odt_tenant-a-secret');
+
+        final switchedAgain = await repository.saveConfiguration(
+          reloaded.copyWith(tenantId: 'tenant-b', apiToken: ''),
+        );
+        expect(switchedAgain.apiToken, 'odt_tenant-b-secret');
+      },
+    );
+
+    test('revokes only the selected tenant credential locally', () async {
+      const repository = LocalSyncConfigurationRepository();
+      final initial = await repository.loadConfiguration();
+      final tenantA = await repository.saveConfiguration(
+        SyncConfiguration.empty(deviceId: initial.deviceId).copyWith(
+          enabled: true,
+          tenantId: 'tenant-a',
+          apiToken: 'odt_tenant-a-secret',
+        ),
+      );
+      final tenantB = await repository.saveConfiguration(
+        tenantA.copyWith(tenantId: 'tenant-b', apiToken: 'odt_tenant-b-secret'),
+      );
+
+      await repository.clearDeviceAuthorization();
+      final tenantBReloaded = await repository.loadConfiguration();
+      expect(tenantBReloaded.apiToken, isEmpty);
+
+      final tenantAReloaded = await repository.saveConfiguration(
+        tenantB.copyWith(tenantId: 'tenant-a', apiToken: ''),
+      );
+      expect(tenantAReloaded.apiToken, 'odt_tenant-a-secret');
+    });
+
+    test('migrates the legacy single credential without losing pairing', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'openirn.sync.configuration':
+            '{"schemaVersion":6,"configuration":{"apiBaseUrl":"https://www.archoad.io/api","tenantId":"tenant-a","deviceId":"device-a","enabled":true,"apiToken":"","updatedAt":"2026-08-25T00:00:00.000Z"}}',
+        'openirn.sync.deviceId': 'device-a',
+      });
+      FlutterSecureStorage.setMockInitialValues(<String, String>{
+        'openirn.secure.deviceCredential.v1':
+            '{"tenantId":"tenant-a","deviceId":"device-a","apiToken":"odt_legacy-secret"}',
+      });
+      const repository = LocalSyncConfigurationRepository();
+
+      final reloaded = await repository.loadConfiguration();
+
+      expect(reloaded.apiToken, 'odt_legacy-secret');
+      const secureStorage = FlutterSecureStorage();
+      expect(
+        await secureStorage.read(key: 'openirn.secure.deviceCredential.v1'),
+        isNull,
+      );
+      expect(
+        await secureStorage.read(key: 'openirn.secure.deviceCredentials.v2'),
+        contains('odt_legacy-secret'),
+      );
+    });
   });
 }

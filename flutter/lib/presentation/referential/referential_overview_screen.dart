@@ -271,6 +271,7 @@ class _HomeContentState extends State<_HomeContent> {
   late Future<SyncConfiguration> _syncConfigurationFuture;
 
   String _lastDisplayedLockReason = '';
+  bool _openingDeviceEnrollment = false;
 
   @override
   void initState() {
@@ -325,26 +326,40 @@ class _HomeContentState extends State<_HomeContent> {
   }
 
   Future<void> _openDeviceEnrollment() async {
-    final configuration = await _syncConfigurationRepository
-        .loadConfiguration();
-    if (!mounted) {
+    if (_openingDeviceEnrollment) {
       return;
     }
-    final enrolled = await Navigator.of(context).push<bool>(
-      MaterialPageRoute<bool>(
-        builder: (_) =>
-            DeviceEnrollmentScreen(initialTenantId: configuration.tenantId),
-      ),
-    );
-    if (!mounted) {
-      return;
-    }
-    if (enrolled == true || enrolled == false) {
-      widget.onConfigurationChanged();
-      setState(() {
-        _syncConfigurationFuture = _syncConfigurationRepository
-            .loadConfiguration();
-      });
+    setState(() {
+      _openingDeviceEnrollment = true;
+    });
+    try {
+      final configuration = await _syncConfigurationRepository
+          .loadConfiguration();
+      if (!mounted) {
+        return;
+      }
+      final enrolled = await Navigator.of(context).push<bool>(
+        MaterialPageRoute<bool>(
+          builder: (_) =>
+              DeviceEnrollmentScreen(initialTenantId: configuration.tenantId),
+        ),
+      );
+      if (!mounted) {
+        return;
+      }
+      if (enrolled == true || enrolled == false) {
+        widget.onConfigurationChanged();
+        setState(() {
+          _syncConfigurationFuture = _syncConfigurationRepository
+              .loadConfiguration();
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _openingDeviceEnrollment = false;
+        });
+      }
     }
   }
 
@@ -1020,7 +1035,9 @@ class _HomeContentState extends State<_HomeContent> {
                       values: {'workspace': currentTenantPhrase},
                     ),
                     buttonLabel: 'Appairer',
-                    onPressed: _openDeviceEnrollment,
+                    onPressed: _openingDeviceEnrollment
+                        ? null
+                        : _openDeviceEnrollment,
                   ),
                   const SizedBox(height: 12),
                   _HomeActionCard(
@@ -1345,7 +1362,7 @@ class _HomeActionCard extends StatelessWidget {
   final String title;
   final String subtitle;
   final String buttonLabel;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   const _HomeActionCard({
     required this.icon,

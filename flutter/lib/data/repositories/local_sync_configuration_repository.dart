@@ -17,7 +17,9 @@ class LocalSyncConfigurationRepository {
   static const _schemaVersion = 6;
   static const _configurationKey = 'openirn.sync.configuration';
   static const _deviceIdKey = 'openirn.sync.deviceId';
-  static const _deviceCredentialKey = 'openirn.secure.deviceCredential.v1';
+  static const _deviceCredentialsKey = 'openirn.secure.deviceCredentials.v2';
+  static const _legacyDeviceCredentialKey =
+      'openirn.secure.deviceCredential.v1';
   static const _legacySecureFallbackConfigurationKey =
       'openirn.secureFallback.openirn.secure.sync.configuration';
   static const _legacySecureFallbackDeviceIdKey =
@@ -37,8 +39,8 @@ class LocalSyncConfigurationRepository {
         tenantId: normalized.tenantId,
         deviceId: normalized.deviceId,
       );
-      final credential = await _readDeviceCredential();
-      if (credential != null && credential.matches(normalized)) {
+      final credential = await _readDeviceCredential(normalized);
+      if (credential != null) {
         sessionManager.setDeviceCredential(
           apiToken: credential.apiToken,
           tenantId: normalized.tenantId,
@@ -46,9 +48,6 @@ class LocalSyncConfigurationRepository {
         );
       } else {
         sessionManager.clearDeviceCredential();
-        if (credential != null) {
-          await _secureStorage.delete(key: _deviceCredentialKey);
-        }
       }
     }
 
@@ -109,17 +108,15 @@ class LocalSyncConfigurationRepository {
       );
     } else {
       if (contextChanged) {
-        await _secureStorage.delete(key: _deviceCredentialKey);
         AppSessionManager.instance.clearDeviceCredential();
-      } else {
-        final credential = await _readDeviceCredential();
-        if (credential != null && credential.matches(publicConfiguration)) {
-          AppSessionManager.instance.setDeviceCredential(
-            apiToken: credential.apiToken,
-            tenantId: publicConfiguration.tenantId,
-            deviceId: publicConfiguration.deviceId,
-          );
-        }
+      }
+      final credential = await _readDeviceCredential(publicConfiguration);
+      if (credential != null) {
+        AppSessionManager.instance.setDeviceCredential(
+          apiToken: credential.apiToken,
+          tenantId: publicConfiguration.tenantId,
+          deviceId: publicConfiguration.deviceId,
+        );
       }
     }
 
@@ -184,8 +181,11 @@ class LocalSyncConfigurationRepository {
   }
 
   Future<String> resetDeviceId() async {
-    await clearDeviceAuthorization();
     final configuration = await loadConfiguration();
+    await _deleteDeviceCredentialsForDevice(configuration.deviceId);
+    AppSessionManager.instance.clearDeviceCredential(
+      reason: 'Identité locale du terminal réinitialisée.',
+    );
     final deviceId = _generateDeviceId();
     final updated = await saveConfiguration(
       configuration.copyWith(deviceId: deviceId, apiToken: ''),
@@ -194,37 +194,81 @@ class LocalSyncConfigurationRepository {
   }
 
   Future<SyncConfiguration> clearTenantSelection() async {
-    await clearDeviceAuthorization();
     final configuration = await loadConfiguration();
+    AppSessionManager.instance.clearDeviceCredential();
     return saveConfiguration(
       configuration.copyWith(tenantId: '', enabled: false, apiToken: ''),
     );
   }
 
   Future<void> clearDeviceAuthorization() async {
-    await _secureStorage.delete(key: _deviceCredentialKey);
+    final preferences = await SharedPreferences.getInstance();
+    final configuration = await _loadPublicConfiguration(preferences);
+    await _deleteDeviceCredential(configuration);
     AppSessionManager.instance.clearDeviceCredential(
       reason: 'Autorisation du terminal supprimée.',
     );
   }
 
-  Future<_StoredDeviceCredential?> _readDeviceCredential() async {
-    final raw = await _secureStorage.read(key: _deviceCredentialKey);
-    if (raw == null || raw.trim().isEmpty) {
-      return null;
-    }
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map) {
-        return null;
+  Future<_StoredDeviceCredential?> _readDeviceCredential(
+    SyncConfiguration configuration,
+  ) async {
+    final credentials = await _readDeviceCredentials();
+    for (final credential in credentials) {
+      if (credential.matches(configuration)) {
+        return credential;
       }
-      final credential = _StoredDeviceCredential.fromJson(
-        Map<String, dynamic>.from(decoded),
-      );
-      return credential.isValid ? credential : null;
-    } on FormatException {
-      return null;
     }
+    return null;
+  }
+
+  Future<List<_StoredDeviceCredential>> _readDeviceCredentials() async {
+    final credentialsByKey = <String, _StoredDeviceCredential>{};
+    final rawCollection = await _secureStorage.read(key: _deviceCredentialsKey);
+    if (rawCollection != null && rawCollection.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawCollection);
+        final rawCredentials = decoded is Map ? decoded['credentials'] : null;
+        if (rawCredentials is List) {
+          for (final rawCredential in rawCredentials) {
+            if (rawCredential is! Map) {
+              continue;
+            }
+            final credential = _StoredDeviceCredential.fromJson(
+              Map<String, dynamic>.from(rawCredential),
+            );
+            if (credential.isValid) {
+              credentialsByKey[credential.storageKey] = credential;
+            }
+          }
+        }
+      } on FormatException {
+        // Fail closed: a corrupt collection never exposes a token.
+      }
+    }
+
+    final legacyRaw = await _secureStorage.read(
+      key: _legacyDeviceCredentialKey,
+    );
+    if (legacyRaw != null && legacyRaw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(legacyRaw);
+        if (decoded is Map) {
+          final credential = _StoredDeviceCredential.fromJson(
+            Map<String, dynamic>.from(decoded),
+          );
+          if (credential.isValid) {
+            credentialsByKey[credential.storageKey] = credential;
+            await _writeDeviceCredentials(credentialsByKey.values.toList());
+          }
+        }
+      } on FormatException {
+        // An invalid legacy token is discarded below.
+      }
+      await _secureStorage.delete(key: _legacyDeviceCredentialKey);
+    }
+
+    return credentialsByKey.values.toList(growable: false);
   }
 
   Future<void> _writeDeviceCredential({
@@ -240,9 +284,48 @@ class LocalSyncConfigurationRepository {
     if (!credential.isValid) {
       throw ArgumentError('Invalid OpenIRN device credential');
     }
+    final credentials = await _readDeviceCredentials();
+    final credentialsByKey = <String, _StoredDeviceCredential>{
+      for (final stored in credentials) stored.storageKey: stored,
+      credential.storageKey: credential,
+    };
+    await _writeDeviceCredentials(credentialsByKey.values.toList());
+  }
+
+  Future<void> _deleteDeviceCredential(SyncConfiguration configuration) async {
+    final credentials = await _readDeviceCredentials();
+    final remaining = credentials
+        .where((credential) => !credential.matches(configuration))
+        .toList(growable: false);
+    await _writeDeviceCredentials(remaining);
+  }
+
+  Future<void> _deleteDeviceCredentialsForDevice(String deviceId) async {
+    final normalizedDeviceId = deviceId.trim();
+    final credentials = await _readDeviceCredentials();
+    final remaining = credentials
+        .where((credential) => credential.deviceId != normalizedDeviceId)
+        .toList(growable: false);
+    await _writeDeviceCredentials(remaining);
+  }
+
+  Future<void> _writeDeviceCredentials(
+    List<_StoredDeviceCredential> credentials,
+  ) async {
+    if (credentials.isEmpty) {
+      await _secureStorage.delete(key: _deviceCredentialsKey);
+      return;
+    }
+    final sortedCredentials = List<_StoredDeviceCredential>.of(credentials)
+      ..sort((left, right) => left.storageKey.compareTo(right.storageKey));
     await _secureStorage.write(
-      key: _deviceCredentialKey,
-      value: jsonEncode(credential.toJson()),
+      key: _deviceCredentialsKey,
+      value: jsonEncode(<String, dynamic>{
+        'schemaVersion': 2,
+        'credentials': sortedCredentials
+            .map((credential) => credential.toJson())
+            .toList(growable: false),
+      }),
     );
   }
 
@@ -353,6 +436,8 @@ class _StoredDeviceCredential {
 
   bool get isValid =>
       tenantId.isNotEmpty && deviceId.isNotEmpty && apiToken.startsWith('odt_');
+
+  String get storageKey => '$tenantId\u0000$deviceId';
 
   bool matches(SyncConfiguration configuration) =>
       tenantId == configuration.tenantId.trim() &&

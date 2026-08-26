@@ -8,10 +8,18 @@ import '../models/irn_referential.dart';
 import '../models/local_campaign.dart';
 import 'official_rnr_scoring_service.dart';
 
+typedef AssessmentPdfTranslate =
+    String Function(
+      String key, {
+      String? fallback,
+      Map<String, Object?> values,
+    });
+
 class AssessmentPdfExportService {
   const AssessmentPdfExportService();
 
   Future<Uint8List> buildSummaryPdf({
+    required AssessmentPdfTranslate translate,
     required LocalCampaign campaign,
     required IrnReferential referential,
     required IrnScoreSummary globalSummary,
@@ -24,9 +32,12 @@ class AssessmentPdfExportService {
   }) async {
     final generatedAtUtc = (generatedAt ?? DateTime.now()).toUtc();
     final document = pw.Document(
-      title: 'OpenIRN - Synthese IRN - ${_clean(campaign.name)}',
+      title: translate(
+        'screen.summary.title_prefix',
+        values: {'campaign': _clean(campaign.name)},
+      ),
       author: 'OpenIRN',
-      subject: 'Synthese de campagne IRN',
+      subject: translate('pdf.summary.subject'),
       creator: 'OpenIRN',
     );
 
@@ -37,30 +48,38 @@ class AssessmentPdfExportService {
         footer: (context) => pw.Align(
           alignment: pw.Alignment.centerRight,
           child: pw.Text(
-            'OpenIRN - page ${context.pageNumber}/${context.pagesCount}',
+            _clean(
+              translate(
+                'pdf.summary.page',
+                values: {
+                  'current': context.pageNumber,
+                  'total': context.pagesCount,
+                },
+              ),
+            ),
             style: _smallTextStyle.copyWith(color: _mutedColor),
           ),
         ),
         build: (context) => [
-          _documentHeader(campaign, referential, generatedAtUtc),
+          _documentHeader(campaign, referential, generatedAtUtc, translate),
           pw.SizedBox(height: 14),
-          _globalSummaryBlock(globalSummary, maturitySummary),
+          _globalSummaryBlock(globalSummary, maturitySummary, translate),
           pw.SizedBox(height: 14),
-          _sectionTitle('Indicateurs IRN'),
+          _sectionTitle(translate('screen.summary.indicators')),
           pw.SizedBox(height: 6),
-          _pillarSummaryTable(pillarSummaries),
+          _pillarSummaryTable(pillarSummaries, translate),
           pw.SizedBox(height: 14),
-          _sectionTitle('Radar IRN - lecture tabulaire'),
+          _sectionTitle(translate('pdf.summary.radar_table')),
           pw.SizedBox(height: 6),
-          _radarLikeTable(pillarSummaries),
+          _radarLikeTable(pillarSummaries, translate),
           pw.SizedBox(height: 14),
-          _sectionTitle('Repartition par portee'),
+          _sectionTitle(translate('screen.summary.by_scope')),
           pw.SizedBox(height: 6),
-          _scopeSummaryTable(scopeSummaries),
+          _scopeSummaryTable(scopeSummaries, translate),
           pw.SizedBox(height: 14),
-          _twoColumnRankedBlocks(strongestPillars, weakestPillars),
+          _twoColumnRankedBlocks(strongestPillars, weakestPillars, translate),
           pw.SizedBox(height: 14),
-          _methodNote(referential),
+          _methodNote(referential, translate),
         ],
       ),
     );
@@ -72,6 +91,7 @@ class AssessmentPdfExportService {
     LocalCampaign campaign,
     IrnReferential referential,
     DateTime generatedAtUtc,
+    AssessmentPdfTranslate translate,
   ) {
     return pw.Container(
       padding: const pw.EdgeInsets.all(14),
@@ -79,7 +99,7 @@ class AssessmentPdfExportService {
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Text('Synthese IRN', style: _titleStyle),
+          pw.Text(translate('screen.assessment.summary'), style: _titleStyle),
           pw.SizedBox(height: 4),
           pw.Text(_clean(campaign.name), style: _subtitleStyle),
           if (campaign.description.trim().isNotEmpty) ...[
@@ -88,11 +108,17 @@ class AssessmentPdfExportService {
           ],
           pw.SizedBox(height: 10),
           _keyValue(
-            'Referentiel',
+            translate('about.referential_used'),
             '${referential.id} - ${referential.version}',
           ),
-          _keyValue('Statut campagne', campaign.status.label),
-          _keyValue('Genere le', '${generatedAtUtc.toIso8601String()} UTC'),
+          _keyValue(
+            translate('pdf.summary.campaign_status'),
+            translate('campaign.status.${campaign.status.jsonValue}'),
+          ),
+          _keyValue(
+            translate('pdf.summary.generated_at'),
+            '${generatedAtUtc.toIso8601String()} UTC',
+          ),
         ],
       ),
     );
@@ -101,6 +127,7 @@ class AssessmentPdfExportService {
   pw.Widget _globalSummaryBlock(
     IrnScoreSummary summary,
     IrnSystemMaturitySummary? maturitySummary,
+    AssessmentPdfTranslate translate,
   ) {
     final maturity = maturitySummary;
     final scoreLabel =
@@ -111,22 +138,27 @@ class AssessmentPdfExportService {
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Text('Score global', style: _sectionStyle),
+          pw.Text(
+            translate('screen.summary.global_score'),
+            style: _sectionStyle,
+          ),
           pw.SizedBox(height: 8),
           pw.Row(
             children: [
               _metricBox(
-                maturity == null ? 'Score IRN' : 'Maturite SI',
+                maturity == null
+                    ? translate('assessment.score.title')
+                    : translate('screen.summary.si_maturity'),
                 scoreLabel,
               ),
               pw.SizedBox(width: 8),
               _metricBox(
-                'Completude',
+                translate('pdf.summary.column.completion'),
                 '${(summary.completionRate * 100).toStringAsFixed(0)} %',
               ),
               pw.SizedBox(width: 8),
               _metricBox(
-                'Criteres renseignes',
+                translate('pdf.summary.column.answered'),
                 '${summary.answeredCriteria}/${summary.totalCriteria}',
               ),
             ],
@@ -136,18 +168,59 @@ class AssessmentPdfExportService {
             spacing: 8,
             runSpacing: 6,
             children: [
-              _chip('N.C. : ${summary.notConcernedCriteria}'),
-              _chip('NR : ${summary.nonResilientCriteria}'),
-              _chip('Intention : ${summary.intentionCriteria}'),
-              _chip('Moyen : ${summary.mediumCriteria}'),
-              _chip('Resultat : ${summary.resultCriteria}'),
-              _chip('Non renseignes : ${summary.notAnsweredCriteria}'),
+              _chip(
+                translate(
+                  'assessment.score.not_concerned',
+                  values: {'count': summary.notConcernedCriteria},
+                ),
+              ),
+              _chip(
+                translate(
+                  'assessment.score.non_resilient',
+                  values: {'count': summary.nonResilientCriteria},
+                ),
+              ),
+              _chip(
+                translate(
+                  'assessment.score.intention',
+                  values: {'count': summary.intentionCriteria},
+                ),
+              ),
+              _chip(
+                translate(
+                  'assessment.score.medium',
+                  values: {'count': summary.mediumCriteria},
+                ),
+              ),
+              _chip(
+                translate(
+                  'assessment.score.result',
+                  values: {'count': summary.resultCriteria},
+                ),
+              ),
+              _chip(
+                translate(
+                  'assessment.score.not_answered',
+                  values: {'count': summary.notAnsweredCriteria},
+                ),
+              ),
               if (maturity != null)
                 _chip(
-                  'Actifs notes : ${maturity.scoredAssetCount}/${maturity.totalAssetCount}',
+                  translate(
+                    'assessment.score.scored_assets',
+                    values: {
+                      'scored': maturity.scoredAssetCount,
+                      'total': maturity.totalAssetCount,
+                    },
+                  ),
                 ),
               if (maturity != null)
-                _chip('Poids criticite : ${maturity.maturityWeightTotal}'),
+                _chip(
+                  translate(
+                    'assessment.score.criticality_weight',
+                    values: {'weight': maturity.maturityWeightTotal},
+                  ),
+                ),
             ],
           ),
         ],
@@ -155,7 +228,10 @@ class AssessmentPdfExportService {
     );
   }
 
-  pw.Widget _pillarSummaryTable(Map<IrnPillar, IrnScoreSummary> summaries) {
+  pw.Widget _pillarSummaryTable(
+    Map<IrnPillar, IrnScoreSummary> summaries,
+    AssessmentPdfTranslate translate,
+  ) {
     final rows = summaries.entries
         .map(
           (entry) => <String>[
@@ -174,17 +250,17 @@ class AssessmentPdfExportService {
         .toList(growable: false);
 
     return _table(
-      headers: const [
-        'Code',
-        'Pilier',
-        'Score',
+      headers: [
+        translate('pdf.summary.column.code'),
+        translate('pdf.summary.column.pillar'),
+        translate('pdf.summary.column.score'),
         'NC',
         'NR',
-        'Int.',
-        'Moy.',
-        'Res.',
-        'Rens.',
-        'Completude',
+        translate('pdf.summary.column.intention'),
+        translate('pdf.summary.column.medium'),
+        translate('pdf.summary.column.result'),
+        translate('pdf.summary.column.answered'),
+        translate('pdf.summary.column.completion'),
       ],
       rows: rows,
       columnWidths: const <int, pw.TableColumnWidth>{
@@ -202,14 +278,17 @@ class AssessmentPdfExportService {
     );
   }
 
-  pw.Widget _radarLikeTable(Map<IrnPillar, IrnScoreSummary> summaries) {
+  pw.Widget _radarLikeTable(
+    Map<IrnPillar, IrnScoreSummary> summaries,
+    AssessmentPdfTranslate translate,
+  ) {
     final rows = summaries.entries
         .map(
           (entry) => <String>[
             entry.key.code,
             _clean(entry.key.label),
             entry.value.formattedOpenIrnRnrScore,
-            _riskLevel(entry.value.openIrnRnrScore),
+            _riskLevel(entry.value.openIrnRnrScore, translate),
             '${(entry.value.completionRate * 100).toStringAsFixed(0)} %',
           ],
         )
@@ -219,12 +298,18 @@ class AssessmentPdfExportService {
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
         pw.Text(
-          'Lecture tabulaire du radar, sans rendu vectoriel complexe, pour garantir un PDF lisible sur tous les lecteurs.',
+          translate('pdf.summary.radar_help'),
           style: _smallTextStyle.copyWith(color: _mutedColor),
         ),
         pw.SizedBox(height: 6),
         _table(
-          headers: const ['Code', 'Pilier', 'Score', 'Niveau', 'Completude'],
+          headers: [
+            translate('pdf.summary.column.code'),
+            translate('pdf.summary.column.pillar'),
+            translate('pdf.summary.column.score'),
+            translate('pdf.summary.column.level'),
+            translate('pdf.summary.column.completion'),
+          ],
           rows: rows,
           columnWidths: const <int, pw.TableColumnWidth>{
             0: pw.FixedColumnWidth(52),
@@ -238,11 +323,14 @@ class AssessmentPdfExportService {
     );
   }
 
-  pw.Widget _scopeSummaryTable(Map<CriterionScope, IrnScoreSummary> summaries) {
+  pw.Widget _scopeSummaryTable(
+    Map<CriterionScope, IrnScoreSummary> summaries,
+    AssessmentPdfTranslate translate,
+  ) {
     final rows = summaries.entries
         .map(
           (entry) => <String>[
-            _clean(entry.key.label),
+            translate('assessment.criterion.scope.${entry.key.jsonValue}'),
             entry.value.formattedOpenIrnRnrScore,
             '${entry.value.notConcernedCriteria}',
             '${entry.value.nonResilientCriteria}',
@@ -256,16 +344,16 @@ class AssessmentPdfExportService {
         .toList(growable: false);
 
     return _table(
-      headers: const [
-        'Portee',
-        'Score',
+      headers: [
+        translate('pdf.summary.column.scope'),
+        translate('pdf.summary.column.score'),
         'NC',
         'NR',
-        'Int.',
-        'Moy.',
-        'Res.',
-        'Rens.',
-        'Completude',
+        translate('pdf.summary.column.intention'),
+        translate('pdf.summary.column.medium'),
+        translate('pdf.summary.column.result'),
+        translate('pdf.summary.column.answered'),
+        translate('pdf.summary.column.completion'),
       ],
       rows: rows,
       columnWidths: const <int, pw.TableColumnWidth>{
@@ -285,23 +373,24 @@ class AssessmentPdfExportService {
   pw.Widget _twoColumnRankedBlocks(
     List<MapEntry<IrnPillar, IrnScoreSummary>> strongestPillars,
     List<MapEntry<IrnPillar, IrnScoreSummary>> weakestPillars,
+    AssessmentPdfTranslate translate,
   ) {
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
         pw.Expanded(
           child: _rankedBlock(
-            'Points forts provisoires',
+            translate('screen.summary.strengths'),
             strongestPillars,
-            'Pas encore assez de criteres cotes.',
+            translate('pdf.summary.not_enough_scored'),
           ),
         ),
         pw.SizedBox(width: 10),
         pw.Expanded(
           child: _rankedBlock(
-            'Points d attention provisoires',
+            translate('screen.summary.attention'),
             weakestPillars,
-            'Pas encore assez de criteres cotes.',
+            translate('pdf.summary.not_enough_scored'),
           ),
         ),
       ],
@@ -337,19 +426,19 @@ class AssessmentPdfExportService {
     );
   }
 
-  pw.Widget _methodNote(IrnReferential referential) {
+  pw.Widget _methodNote(
+    IrnReferential referential,
+    AssessmentPdfTranslate translate,
+  ) {
     return pw.Container(
       padding: const pw.EdgeInsets.all(10),
       decoration: _panelDecoration,
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Text('Note methodologique', style: _labelStyle),
+          pw.Text(translate('pdf.summary.method_title'), style: _labelStyle),
           pw.SizedBox(height: 4),
-          pw.Text(
-            'Maturite IRN : pour chaque actif, moyenne geometrique des scores de piliers RES ; pour le SI, moyenne geometrique ponderee par la criticite des actifs. N.C. est exclu du score et inclus dans la completude.',
-            style: _smallTextStyle,
-          ),
+          pw.Text(translate('pdf.summary.method_body'), style: _smallTextStyle),
           if (referential.scoring.disclaimer.trim().isNotEmpty) ...[
             pw.SizedBox(height: 4),
             pw.Text(
@@ -449,20 +538,20 @@ class AssessmentPdfExportService {
     return pw.Text(_clean(title), style: _sectionStyle);
   }
 
-  String _riskLevel(double? score) {
+  String _riskLevel(double? score, AssessmentPdfTranslate translate) {
     if (score == null) {
-      return 'Non cote';
+      return translate('screen.summary.not_scored');
     }
     if (score >= 80) {
-      return 'Faible';
+      return translate('screen.summary.risk.low');
     }
     if (score >= 60) {
-      return 'Modere';
+      return translate('screen.summary.risk.moderate');
     }
     if (score >= 40) {
-      return 'Haut';
+      return translate('screen.summary.risk.high');
     }
-    return 'Critique';
+    return translate('screen.summary.risk.critical');
   }
 
   String _clean(String value) {

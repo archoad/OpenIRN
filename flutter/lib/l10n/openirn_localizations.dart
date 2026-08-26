@@ -6,7 +6,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 enum OpenIrnLanguage {
   fr('fr', 'Français', '🇫🇷'),
-  en('en', 'English', '🇬🇧');
+  en('en', 'English', '🇬🇧'),
+  es('es', 'Español', '🇪🇸'),
+  de('de', 'Deutsch', '🇩🇪');
 
   final String code;
   final String label;
@@ -30,6 +32,7 @@ class OpenIrnLocalizations extends ChangeNotifier {
   Map<String, String> _messages = const <String, String>{};
   Map<String, String> _frenchMessages = const <String, String>{};
   Map<String, String> _frenchTextToKey = const <String, String>{};
+  final Map<OpenIrnLanguage, Map<String, String>> _catalogCache = {};
 
   OpenIrnLocalizations._();
 
@@ -39,6 +42,11 @@ class OpenIrnLocalizations extends ChangeNotifier {
   Future<void> initialize() async {
     _frenchMessages = await _loadLanguage(OpenIrnLanguage.fr);
     _frenchTextToKey = _buildReverseIndex(_frenchMessages);
+    await Future.wait(
+      OpenIrnLanguage.values
+          .where((language) => language != OpenIrnLanguage.fr)
+          .map(_loadLanguage),
+    );
 
     final preferences = await SharedPreferences.getInstance();
     final storedCode =
@@ -50,22 +58,24 @@ class OpenIrnLocalizations extends ChangeNotifier {
     OpenIrnLanguage language, {
     bool persist = true,
   }) async {
-    _language = language;
-    _messages = language == OpenIrnLanguage.fr
+    final messages = language == OpenIrnLanguage.fr
         ? _frenchMessages
-        : await _loadLanguage(language);
+        : _catalogCache[language] ?? await _loadLanguage(language);
+    _language = language;
+    _messages = messages;
+    notifyListeners();
 
     if (persist) {
       final preferences = await SharedPreferences.getInstance();
       await preferences.setString(_preferenceKey, language.code);
     }
-    notifyListeners();
   }
 
   Future<void> toggleLanguage() async {
-    await setLanguage(
-      _language == OpenIrnLanguage.fr ? OpenIrnLanguage.en : OpenIrnLanguage.fr,
-    );
+    final languages = OpenIrnLanguage.values;
+    final nextLanguage =
+        languages[(languages.indexOf(_language) + 1) % languages.length];
+    await setLanguage(nextLanguage);
   }
 
   String tr(
@@ -94,11 +104,19 @@ class OpenIrnLocalizations extends ChangeNotifier {
   }
 
   Future<Map<String, String>> _loadLanguage(OpenIrnLanguage language) async {
+    final cached = _catalogCache[language];
+    if (cached != null) {
+      return cached;
+    }
     final raw = await rootBundle.loadString(
       'assets/i18n/${language.code}.json',
     );
     final decoded = jsonDecode(raw) as Map<String, dynamic>;
-    return decoded.map((key, value) => MapEntry(key, value?.toString() ?? ''));
+    final messages = Map<String, String>.unmodifiable(
+      decoded.map((key, value) => MapEntry(key, value?.toString() ?? '')),
+    );
+    _catalogCache[language] = messages;
+    return messages;
   }
 
   Map<String, String> _buildReverseIndex(Map<String, String> messages) {

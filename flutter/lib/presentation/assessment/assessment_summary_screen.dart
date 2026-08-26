@@ -11,6 +11,7 @@ import '../../domain/models/irn_referential.dart';
 import '../../domain/models/local_campaign.dart';
 import '../../domain/services/assessment_pdf_export_service.dart';
 import '../../domain/services/official_rnr_scoring_service.dart';
+import '../../l10n/openirn_localizations.dart';
 import 'widgets/pillar_radar_chart.dart';
 import '../common/openirn_app_bar.dart';
 
@@ -77,7 +78,13 @@ class _AssessmentSummaryScreenState extends State<AssessmentSummaryScreen> {
     final radarData = _radarData(pillarSummaries);
 
     return Scaffold(
-      appBar: OpenIrnAppBar(title: 'Synthèse — ${widget.campaign.name}'),
+      appBar: OpenIrnAppBar(
+        title: context.tr(
+          'screen.summary.title_prefix',
+          fallback: 'Synthèse — {campaign}',
+          values: {'campaign': widget.campaign.name},
+        ),
+      ),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 1100),
@@ -118,8 +125,9 @@ class _AssessmentSummaryScreenState extends State<AssessmentSummaryScreen> {
                   onExportPressed: () => _exportCardAsPng(
                     boundaryKey: _indicatorBoardKey,
                     suggestedName: _buildExportName('indicateurs_irn'),
-                    successMessage:
-                        'Le cartouche Indicateurs IRN a été exporté au format PNG.',
+                    successMessage: context.trText(
+                      'Le cartouche Indicateurs IRN a été exporté au format PNG.',
+                    ),
                     setExporting: (value) {
                       if (!mounted) {
                         return;
@@ -138,8 +146,9 @@ class _AssessmentSummaryScreenState extends State<AssessmentSummaryScreen> {
                   onExportPressed: () => _exportCardAsPng(
                     boundaryKey: _radarKey,
                     suggestedName: _buildExportName('radar_irn'),
-                    successMessage:
-                        'Le cartouche Radar IRN a été exporté au format PNG.',
+                    successMessage: context.trText(
+                      'Le cartouche Radar IRN a été exporté au format PNG.',
+                    ),
                     setExporting: (value) {
                       if (!mounted) {
                         return;
@@ -150,37 +159,34 @@ class _AssessmentSummaryScreenState extends State<AssessmentSummaryScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              const _SectionTitle(
-                title: 'Score par pilier',
-                subtitle: 'Lecture selon la grille IRN, hors critères N.C.',
+              _SectionTitle(
+                title: context.tr('screen.summary.score_by_pillar'),
+                subtitle: context.tr('screen.summary.irn_scale_reading'),
               ),
               const SizedBox(height: 8),
               for (final entry in pillarSummaries.entries)
                 _PillarScoreCard(pillar: entry.key, summary: entry.value),
               const SizedBox(height: 12),
-              const _SectionTitle(
-                title: 'Répartition par portée',
-                subtitle:
-                    'Utile pour distinguer les critères organisationnels et les critères d’actif numérique.',
+              _SectionTitle(
+                title: context.tr('screen.summary.by_scope'),
+                subtitle: context.tr('screen.summary.by_scope_help'),
               ),
               const SizedBox(height: 8),
               for (final entry in scopeSummaries.entries)
                 _ScopeScoreCard(scope: entry.key, summary: entry.value),
               const SizedBox(height: 12),
               _RankedPillarsCard(
-                title: 'Points forts provisoires',
+                title: context.tr('screen.summary.strengths'),
                 icon: Icons.trending_up,
                 entries: strongestPillars,
-                emptyMessage:
-                    'Pas encore assez de critères cotés pour identifier les points forts.',
+                emptyMessage: context.tr('screen.summary.strengths_empty'),
               ),
               const SizedBox(height: 12),
               _RankedPillarsCard(
-                title: 'Points d’attention provisoires',
+                title: context.tr('screen.summary.attention'),
                 icon: Icons.priority_high,
                 entries: weakestPillars,
-                emptyMessage:
-                    'Pas encore assez de critères cotés pour identifier les points d’attention.',
+                emptyMessage: context.tr('screen.summary.attention_empty'),
               ),
             ],
           ),
@@ -217,6 +223,7 @@ class _AssessmentSummaryScreenState extends State<AssessmentSummaryScreen> {
 
     try {
       final bytes = await _pdfExportService.buildSummaryPdf(
+        translate: context.i18n.tr,
         campaign: widget.campaign,
         referential: widget.referential,
         globalSummary: globalSummary,
@@ -236,16 +243,21 @@ class _AssessmentSummaryScreenState extends State<AssessmentSummaryScreen> {
       }
 
       if (path == null) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Export PDF annulé.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(context.tr('screen.summary.export.pdf_cancelled')),
+          ),
+        );
         return;
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'La synthèse IRN a été exportée en PDF.\nFichier : $path',
+            context.tr(
+              'screen.summary.export.pdf_success',
+              values: {'path': path},
+            ),
           ),
         ),
       );
@@ -256,7 +268,10 @@ class _AssessmentSummaryScreenState extends State<AssessmentSummaryScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'L’export PDF n’a pas pu être effectué. Détail : $error',
+            context.tr(
+              'screen.summary.export.pdf_failed',
+              values: {'error': error},
+            ),
           ),
         ),
       );
@@ -285,7 +300,9 @@ class _AssessmentSummaryScreenState extends State<AssessmentSummaryScreen> {
 
       final boundaryContext = boundaryKey.currentContext;
       if (boundaryContext == null) {
-        throw StateError('Le visuel à exporter n’est pas disponible.');
+        throw StateError(
+          context.tr('screen.summary.export.visual_unavailable'),
+        );
       }
       if (!boundaryContext.mounted) {
         return;
@@ -293,7 +310,9 @@ class _AssessmentSummaryScreenState extends State<AssessmentSummaryScreen> {
 
       final renderObject = boundaryContext.findRenderObject();
       if (renderObject is! RenderRepaintBoundary) {
-        throw StateError('Le visuel à exporter ne peut pas être capturé.');
+        throw StateError(
+          context.tr('screen.summary.export.capture_unavailable'),
+        );
       }
 
       final image = await renderObject.toImage(
@@ -301,7 +320,11 @@ class _AssessmentSummaryScreenState extends State<AssessmentSummaryScreen> {
       );
       final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       if (byteData == null) {
-        throw StateError('Le rendu de l’image a échoué.');
+        image.dispose();
+        if (!mounted) {
+          return;
+        }
+        throw StateError(context.tr('screen.summary.export.render_failed'));
       }
 
       final path = await _imageFileService.savePng(
@@ -315,14 +338,23 @@ class _AssessmentSummaryScreenState extends State<AssessmentSummaryScreen> {
       }
 
       if (path == null) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Export PNG annulé.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(context.tr('screen.summary.export.png_cancelled')),
+          ),
+        );
         return;
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$successMessage\nFichier : $path')),
+        SnackBar(
+          content: Text(
+            context.tr(
+              'screen.summary.export.png_success',
+              values: {'message': successMessage, 'path': path},
+            ),
+          ),
+        ),
       );
     } catch (error) {
       if (!mounted) {
@@ -331,7 +363,10 @@ class _AssessmentSummaryScreenState extends State<AssessmentSummaryScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'L’export PNG n’a pas pu être effectué. Détail : $error',
+            context.tr(
+              'screen.summary.export.png_failed',
+              values: {'error': error},
+            ),
           ),
         ),
       );
@@ -398,30 +433,41 @@ class _CampaignSummaryHeader extends StatelessWidget {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(18),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Icon(Icons.folder_outlined),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    campaign.name,
-                    style: Theme.of(context).textTheme.titleLarge,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final campaignDetails = Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.folder_outlined),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        campaign.name,
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        context.tr(
+                          'screen.summary.campaign_referential',
+                          values: {
+                            'id': referential.id,
+                            'version': referential.version,
+                          },
+                        ),
+                      ),
+                      if (campaign.description.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(campaign.description),
+                      ],
+                    ],
                   ),
-                  const SizedBox(height: 4),
-                  Text('Campagne · ${referential.id} · ${referential.version}'),
-                  if (campaign.description.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(campaign.description),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            OutlinedButton.icon(
+                ),
+              ],
+            );
+            final exportButton = OutlinedButton.icon(
               onPressed: isExportingPdf ? null : onExportPdfPressed,
               icon: isExportingPdf
                   ? const SizedBox(
@@ -431,10 +477,32 @@ class _CampaignSummaryHeader extends StatelessWidget {
                     )
                   : const Icon(Icons.picture_as_pdf_outlined),
               label: Text(
-                isExportingPdf ? 'Export PDF...' : 'Exporter la synthèse PDF',
+                isExportingPdf
+                    ? context.tr('common.loading')
+                    : context.tr('screen.summary.action.export_pdf'),
               ),
-            ),
-          ],
+            );
+
+            if (constraints.maxWidth < 620) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  campaignDetails,
+                  const SizedBox(height: 12),
+                  exportButton,
+                ],
+              );
+            }
+
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: campaignDetails),
+                const SizedBox(width: 12),
+                exportButton,
+              ],
+            );
+          },
         ),
       ),
     );
@@ -470,12 +538,19 @@ class _GlobalSummaryCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Score IRN', style: theme.textTheme.headlineSmall),
+                      Text(
+                        context.tr('assessment.score.title'),
+                        style: theme.textTheme.headlineSmall,
+                      ),
                       const SizedBox(height: 4),
                       Text(
                         maturity == null
-                            ? 'Score selon la grille IRN : NR=10, Intention=25, Moyen=50, Résultat=95. Les N.C. sont exclus du score.'
-                            : 'Maturité IRN du SI : moyenne géométrique des scores par pilier pour chaque actif, pondérée par la criticité des actifs.',
+                            ? context.tr(
+                                'assessment.score.standard_description',
+                              )
+                            : context.tr(
+                                'assessment.score.si_maturity_description',
+                              ),
                       ),
                     ],
                   ),
@@ -490,33 +565,101 @@ class _GlobalSummaryCard extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                Chip(label: Text('Critères : ${summary.totalCriteria}')),
-                Chip(label: Text('Renseignés : ${summary.answeredCriteria}')),
-                Chip(label: Text('N.C. : ${summary.notConcernedCriteria}')),
-                Chip(label: Text('NR : ${summary.nonResilientCriteria}')),
-                Chip(label: Text('Intention : ${summary.intentionCriteria}')),
-                Chip(label: Text('Moyen : ${summary.mediumCriteria}')),
-                Chip(label: Text('Résultat : ${summary.resultCriteria}')),
                 Chip(
                   label: Text(
-                    'Non renseignés : ${summary.notAnsweredCriteria}',
+                    context.tr(
+                      'assessment.score.criteria',
+                      values: {'count': summary.totalCriteria},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'assessment.score.answered',
+                      values: {'count': summary.answeredCriteria},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'assessment.score.not_concerned',
+                      values: {'count': summary.notConcernedCriteria},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'assessment.score.non_resilient',
+                      values: {'count': summary.nonResilientCriteria},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'assessment.score.intention',
+                      values: {'count': summary.intentionCriteria},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'assessment.score.medium',
+                      values: {'count': summary.mediumCriteria},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'assessment.score.result',
+                      values: {'count': summary.resultCriteria},
+                    ),
+                  ),
+                ),
+                Chip(
+                  label: Text(
+                    context.tr(
+                      'assessment.score.not_answered',
+                      values: {'count': summary.notAnsweredCriteria},
+                    ),
                   ),
                 ),
                 if (maturity != null) ...[
                   Chip(
                     label: Text(
-                      'Actifs notés : ${maturity.scoredAssetCount}/${maturity.totalAssetCount}',
+                      context.tr(
+                        'assessment.score.scored_assets',
+                        values: {
+                          'scored': maturity.scoredAssetCount,
+                          'total': maturity.totalAssetCount,
+                        },
+                      ),
                     ),
                   ),
                   Chip(
                     label: Text(
-                      'Poids criticité : ${maturity.maturityWeightTotal}',
+                      context.tr(
+                        'assessment.score.criticality_weight',
+                        values: {'weight': maturity.maturityWeightTotal},
+                      ),
                     ),
                   ),
                 ],
                 Chip(
                   label: Text(
-                    'Complétude : ${(summary.completionRate * 100).toStringAsFixed(0)} %',
+                    context.tr(
+                      'assessment.score.completion',
+                      values: {
+                        'rate': (summary.completionRate * 100).toStringAsFixed(
+                          0,
+                        ),
+                      },
+                    ),
                   ),
                 ),
               ],
@@ -543,7 +686,11 @@ class _InterpretationCard extends StatelessWidget {
     final maturity = maturitySummary;
     final score = maturity?.maturityScore ?? summary.openIrnRnrScore;
     final completion = summary.completionRate;
-    final interpretation = _interpret(score: score, completion: completion);
+    final interpretation = _interpret(
+      context,
+      score: score,
+      completion: completion,
+    );
 
     return Card(
       child: Padding(
@@ -557,14 +704,21 @@ class _InterpretationCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Lecture rapide', style: theme.textTheme.titleMedium),
+                  Text(
+                    context.tr('screen.summary.quick_reading'),
+                    style: theme.textTheme.titleMedium,
+                  ),
                   const SizedBox(height: 4),
                   Text(interpretation),
                   const SizedBox(height: 8),
                   Text(
                     maturity == null
-                        ? 'Cette synthèse reste indicative tant que la campagne n’est pas complète et validée.'
-                        : 'La note consolide les actifs du SI avec leur criticité. Elle reste à interpréter avec la complétude et les actifs non encore notés.',
+                        ? context.tr(
+                            'screen.summary.interpretation.standard_note',
+                          )
+                        : context.tr(
+                            'screen.summary.interpretation.asset_note',
+                          ),
                   ),
                 ],
               ),
@@ -575,20 +729,24 @@ class _InterpretationCard extends StatelessWidget {
     );
   }
 
-  String _interpret({required double? score, required double completion}) {
+  String _interpret(
+    BuildContext context, {
+    required double? score,
+    required double completion,
+  }) {
     if (score == null) {
-      return 'Aucun critère n’est encore noté. Commence par renseigner la grille IRN.';
+      return context.tr('screen.summary.interpretation.no_score');
     }
     if (completion < 0.5) {
-      return 'Le score est encore fragile : moins de la moitié du référentiel est coté.';
+      return context.tr('screen.summary.interpretation.low_completion');
     }
     if (score >= 80) {
-      return 'Le niveau de résilience déclaré est élevé sur les critères cotés.';
+      return context.tr('screen.summary.interpretation.high');
     }
     if (score >= 60) {
-      return 'Le niveau de résilience déclaré est intermédiaire, avec des points d’amélioration visibles.';
+      return context.tr('screen.summary.interpretation.intermediate');
     }
-    return 'Le niveau de résilience déclaré est faible sur les critères cotés : les critères NR doivent être analysés en priorité.';
+    return context.tr('screen.summary.interpretation.low');
   }
 }
 
@@ -618,26 +776,15 @@ class _IrnIndicatorBoardCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                const Icon(Icons.grid_view_rounded),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Indicateurs IRN',
-                    style: theme.textTheme.titleMedium,
-                  ),
-                ),
-                if (!isExporting)
-                  OutlinedButton.icon(
-                    onPressed: onExportPressed,
-                    icon: const Icon(Icons.image_outlined),
-                    label: const Text('Exporter en PNG'),
-                  ),
-              ],
+            _ExportableCardHeader(
+              icon: Icons.grid_view_rounded,
+              title: context.tr('screen.summary.indicators'),
+              titleStyle: theme.textTheme.titleMedium,
+              isExporting: isExporting,
+              onExportPressed: onExportPressed,
             ),
             const SizedBox(height: 4),
-            const Text('Détail du score global et de chaque pilier sur 100.'),
+            Text(context.tr('screen.summary.indicators_help')),
             const SizedBox(height: 16),
             LayoutBuilder(
               builder: (context, constraints) {
@@ -727,13 +874,29 @@ class _GlobalIndicatorTile extends StatelessWidget {
     return AspectRatio(
       aspectRatio: 1,
       child: _IndicatorTile(
-        title: maturity == null ? 'Score global' : 'Maturité SI',
+        title: maturity == null
+            ? context.tr('screen.summary.global_score')
+            : context.tr('screen.summary.si_maturity'),
         score: maturity?.maturityScore ?? summary.openIrnRnrScore,
         compactTitle: false,
         icon: Icons.speed_rounded,
         subtitle: maturity == null
-            ? '${summary.answeredCriteria}/${summary.totalCriteria} coté(s) · Complétude ${(summary.completionRate * 100).toStringAsFixed(0)} %'
-            : '${maturity.scoredAssetCount}/${maturity.totalAssetCount} actif(s) noté(s) · Complétude ${(summary.completionRate * 100).toStringAsFixed(0)} %',
+            ? context.tr(
+                'screen.summary.progress.criteria',
+                values: {
+                  'answered': summary.answeredCriteria,
+                  'total': summary.totalCriteria,
+                  'rate': (summary.completionRate * 100).toStringAsFixed(0),
+                },
+              )
+            : context.tr(
+                'screen.summary.progress.assets',
+                values: {
+                  'scored': maturity.scoredAssetCount,
+                  'total': maturity.totalAssetCount,
+                  'rate': (summary.completionRate * 100).toStringAsFixed(0),
+                },
+              ),
       ),
     );
   }
@@ -757,7 +920,7 @@ class _PillarIndicatorGrid extends StatelessWidget {
             crossAxisCount: crossAxisCount,
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
-            childAspectRatio: crossAxisCount == 4 ? 1.0 : 0.95,
+            childAspectRatio: crossAxisCount == 4 ? 1.0 : 0.82,
           ),
           itemBuilder: (context, index) {
             final entry = entries[index];
@@ -767,8 +930,14 @@ class _PillarIndicatorGrid extends StatelessWidget {
               badge: entry.key.code,
               compactTitle: true,
               icon: _pillarIcon(entry.key),
-              subtitle:
-                  'NC ${entry.value.notConcernedCriteria} · NR ${entry.value.nonResilientCriteria} · Résultat ${entry.value.resultCriteria}',
+              subtitle: context.tr(
+                'screen.summary.pillar_indicator',
+                values: {
+                  'notConcerned': entry.value.notConcernedCriteria,
+                  'nonResilient': entry.value.nonResilientCriteria,
+                  'result': entry.value.resultCriteria,
+                },
+              ),
             );
           },
         );
@@ -944,27 +1113,46 @@ class _IndicatorLegend extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final entries = const [
-      _IndicatorLegendEntry(label: '80–100', description: 'Faible', score: 90),
-      _IndicatorLegendEntry(label: '60–79', description: 'Modéré', score: 70),
-      _IndicatorLegendEntry(label: '40–59', description: 'Haut', score: 50),
-      _IndicatorLegendEntry(label: '0–39', description: 'Critique', score: 20),
+    final entries = [
+      _IndicatorLegendEntry(
+        label: '80–100',
+        description: context.tr('screen.summary.risk.low'),
+        score: 90,
+      ),
+      _IndicatorLegendEntry(
+        label: '60–79',
+        description: context.tr('screen.summary.risk.moderate'),
+        score: 70,
+      ),
+      _IndicatorLegendEntry(
+        label: '40–59',
+        description: context.tr('screen.summary.risk.high'),
+        score: 50,
+      ),
+      _IndicatorLegendEntry(
+        label: '0–39',
+        description: context.tr('screen.summary.risk.critical'),
+        score: 20,
+      ),
     ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Légende', style: theme.textTheme.labelLarge),
+        Text(
+          context.tr('screen.summary.legend'),
+          style: theme.textTheme.labelLarge,
+        ),
         const SizedBox(height: 8),
         Wrap(
           spacing: 10,
           runSpacing: 8,
           children: [
             for (final entry in entries) _IndicatorLegendChip(entry: entry),
-            const _IndicatorLegendChip(
+            _IndicatorLegendChip(
               entry: _IndicatorLegendEntry(
                 label: '—',
-                description: 'Non renseigné',
+                description: context.tr('screen.summary.not_scored'),
                 score: null,
               ),
             ),
@@ -1112,25 +1300,15 @@ class _PillarRadarCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                const Icon(Icons.radar),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text('Radar IRN', style: theme.textTheme.titleMedium),
-                ),
-                if (!isExporting)
-                  OutlinedButton.icon(
-                    onPressed: onExportPressed,
-                    icon: const Icon(Icons.image_outlined),
-                    label: const Text('Exporter en PNG'),
-                  ),
-              ],
+            _ExportableCardHeader(
+              icon: Icons.radar,
+              title: context.tr('screen.summary.radar'),
+              titleStyle: theme.textTheme.titleMedium,
+              isExporting: isExporting,
+              onExportPressed: onExportPressed,
             ),
             const SizedBox(height: 4),
-            const Text(
-              'Visualisation du score IRN par pilier. Les critères N.C. sont exclus du score et aucune pondération n’est appliquée.',
-            ),
+            Text(context.tr('screen.summary.radar_help')),
             const SizedBox(height: 16),
             LayoutBuilder(
               builder: (context, constraints) {
@@ -1165,6 +1343,58 @@ class _PillarRadarCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _ExportableCardHeader extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final TextStyle? titleStyle;
+  final bool isExporting;
+  final VoidCallback onExportPressed;
+
+  const _ExportableCardHeader({
+    required this.icon,
+    required this.title,
+    required this.titleStyle,
+    required this.isExporting,
+    required this.onExportPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final heading = Row(
+      children: [
+        Icon(icon),
+        const SizedBox(width: 8),
+        Expanded(child: Text(title, style: titleStyle)),
+      ],
+    );
+    final exportButton = OutlinedButton.icon(
+      onPressed: onExportPressed,
+      icon: const Icon(Icons.image_outlined),
+      label: Text(context.tr('screen.summary.action.export_png')),
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 500) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              heading,
+              if (!isExporting) ...[const SizedBox(height: 8), exportButton],
+            ],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: heading),
+            if (!isExporting) ...[const SizedBox(width: 12), exportButton],
+          ],
+        );
+      },
     );
   }
 }
@@ -1250,8 +1480,14 @@ class _PillarScoreCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return _ScoreLineCard(
       title: '${pillar.code} — ${pillar.label}',
-      subtitle:
-          '${summary.answeredCriteria}/${summary.totalCriteria} renseigné(s) · Score ${summary.formattedOpenIrnRnrScore}',
+      subtitle: context.tr(
+        'screen.summary.score_progress',
+        values: {
+          'answered': summary.answeredCriteria,
+          'total': summary.totalCriteria,
+          'score': summary.formattedOpenIrnRnrScore,
+        },
+      ),
       summary: summary,
     );
   }
@@ -1266,9 +1502,15 @@ class _ScopeScoreCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _ScoreLineCard(
-      title: scope.label,
-      subtitle:
-          '${summary.answeredCriteria}/${summary.totalCriteria} renseigné(s) · Score ${summary.formattedOpenIrnRnrScore}',
+      title: context.tr('assessment.criterion.scope.${scope.jsonValue}'),
+      subtitle: context.tr(
+        'screen.summary.score_progress',
+        values: {
+          'answered': summary.answeredCriteria,
+          'total': summary.totalCriteria,
+          'score': summary.formattedOpenIrnRnrScore,
+        },
+      ),
       summary: summary,
     );
   }
@@ -1350,7 +1592,12 @@ class _RankedPillarsCard extends StatelessWidget {
               children: [
                 Icon(icon),
                 const SizedBox(width: 8),
-                Text(title, style: Theme.of(context).textTheme.titleMedium),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 8),

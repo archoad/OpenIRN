@@ -775,6 +775,10 @@ def _session_auth_context(provided_token: str) -> dict[str, Any] | None:
                 (now.isoformat(), row["tenant_id"], row["device_id"]),
             )
             _touch_terminal(con, str(row["device_id"] or ""), now.isoformat())
+            solution_administrator = _is_solution_administrator_user(
+                con,
+                str(row["user_id"] or "").strip(),
+            )
             con.commit()
             return {
                 "authMode": "session",
@@ -783,6 +787,7 @@ def _session_auth_context(provided_token: str) -> dict[str, Any] | None:
                 "deviceId": row["device_id"],
                 "userId": row["user_id"],
                 "userRole": _role_normalize(row["user_role"]),
+                "solutionAdministrator": solution_administrator,
             }
     except DbError:
         return None
@@ -864,11 +869,9 @@ def _is_administrator_context(context: dict[str, Any] | None) -> bool:
 
 
 def _is_solution_admin_context(context: dict[str, Any] | None) -> bool:
-    # Depuis la v1, le rôle Administrateur représente l’administration globale
-    # OpenIRN, quel que soit l’espace de travail utilisé pour ouvrir la session.
-    # Le nom historique "solution admin" reste conservé pour compatibilité avec
-    # les réponses API et l’interface existante.
-    return _is_administrator_context(context)
+    return _is_administrator_context(context) and bool(
+        context.get("solutionAdministrator")
+    )
 
 
 def _request_has_solution_admin_authorization(request: Request) -> bool:
@@ -911,7 +914,7 @@ def _require_role_authorization(
         raise HTTPException(status_code=403, detail=detail)
 
     if tenant_id and str(context.get("tenantId") or "") != tenant_id:
-        if _is_administrator_context(context):
+        if _is_solution_admin_context(context):
             return context
         raise HTTPException(status_code=403, detail="La session ne correspond pas à l’espace de travail demandé")
 
@@ -957,7 +960,7 @@ def _require_device_or_authorized_read(request: Request, tenant_id: str) -> dict
         )
     if not tenant_id or str(context.get("tenantId") or "") == tenant_id:
         return context
-    if _is_administrator_context(context):
+    if _is_solution_admin_context(context):
         return context
     raise HTTPException(status_code=403, detail="L’autorisation ne correspond pas à l’espace de travail demandé")
 
@@ -1449,6 +1452,9 @@ def _verify_runtime_schema() -> dict[str, Any]:
 @app.on_event("startup")
 def _startup() -> None:
     _verify_runtime_schema()
+    with _db() as con:
+        with con:
+            _sync_solution_administrators_to_all_tenants(con)
 
 
 
@@ -2188,7 +2194,6 @@ def _copy_user_to_tenant(
     ).fetchone()
     if source_user is None:
         return
-    now = _utc_now().isoformat()
     payload = _parse_json(source_user["payload_json"], {})
     if not isinstance(payload, dict):
         payload = {}
@@ -2201,7 +2206,7 @@ def _copy_user_to_tenant(
             "role": source_user["role"],
             "active": bool(source_user["active"]),
             "createdAt": source_user["created_at"],
-            "updatedAt": now,
+            "updatedAt": source_user["updated_at"],
         }
     )
     con.execute(
@@ -2210,7 +2215,15 @@ def _copy_user_to_tenant(
             tenant_id, user_id, first_name, last_name, email, role,
             active, created_at, updated_at, payload_json
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(tenant_id, user_id) DO NOTHING
+        ON CONFLICT(tenant_id, user_id) DO UPDATE SET
+            first_name = excluded.first_name,
+            last_name = excluded.last_name,
+            email = excluded.email,
+            role = excluded.role,
+            active = excluded.active,
+            created_at = excluded.created_at,
+            updated_at = excluded.updated_at,
+            payload_json = excluded.payload_json
         """,
         (
             target_tenant_id,
@@ -2221,7 +2234,7 @@ def _copy_user_to_tenant(
             source_user["role"],
             int(source_user["active"] or 0),
             source_user["created_at"],
-            now,
+            source_user["updated_at"],
             _canonical_json(payload),
         ),
     )
@@ -2341,8 +2354,6 @@ def _sync_solution_administrators_to_all_tenants(con: Any) -> None:
         "SELECT id FROM tenants WHERE id <> ? ORDER BY id ASC",
         (source_tenant_id,),
     ).fetchall()
-    if not tenants:
-        return
 
     for tenant_row in tenants:
         target_tenant_id = str(tenant_row["id"] or "").strip()
@@ -2355,6 +2366,121 @@ def _sync_solution_administrators_to_all_tenants(con: Any) -> None:
                 target_tenant_id=target_tenant_id,
                 user_id=str(administrator["user_id"] or ""),
             )
+
+    # The solution administrator is one logical account. Credentials remain
+    # physically tenant-scoped for referential integrity, so reconcile every
+    # copy after provisioning. The most recently changed credential wins; the
+    # source tenant is only the tie-breaker.
+    for administrator in administrators:
+        _synchronize_solution_administrator_credential(
+            con,
+            str(administrator["user_id"] or ""),
+            source_tenant_id=source_tenant_id,
+        )
+
+
+def _is_solution_administrator_user(con: Any, user_id: str) -> bool:
+    normalized_user_id = str(user_id or "").strip()
+    if not normalized_user_id:
+        return False
+    source_tenant_id = _resolve_tenant_id(
+        con,
+        SOLUTION_ADMIN_TENANT_ID,
+        DEFAULT_TENANT_ID,
+    )
+    if not source_tenant_id:
+        return False
+    row = con.execute(
+        """
+        SELECT 1
+        FROM users
+        WHERE tenant_id = ? AND user_id = ?
+          AND active = 1 AND role = 'administrator'
+        """,
+        (source_tenant_id, normalized_user_id),
+    ).fetchone()
+    return row is not None
+
+
+def _solution_administrator_tenant_ids(con: Any, user_id: str) -> list[str]:
+    normalized_user_id = str(user_id or "").strip()
+    if not normalized_user_id or not _is_solution_administrator_user(con, normalized_user_id):
+        return []
+    rows = con.execute(
+        """
+        SELECT tenant_id
+        FROM users
+        WHERE user_id = ? AND active = 1 AND role = 'administrator'
+        ORDER BY tenant_id ASC
+        """,
+        (normalized_user_id,),
+    ).fetchall()
+    return [
+        str(row["tenant_id"] or "").strip()
+        for row in rows
+        if str(row["tenant_id"] or "").strip()
+    ]
+
+
+def _synchronize_solution_administrator_credential(
+    con: Any,
+    user_id: str,
+    *,
+    source_tenant_id: str | None = None,
+) -> list[str]:
+    normalized_user_id = str(user_id or "").strip()
+    tenant_ids = _solution_administrator_tenant_ids(con, normalized_user_id)
+    if not tenant_ids:
+        return []
+    resolved_source_tenant_id = source_tenant_id or _resolve_tenant_id(
+        con,
+        SOLUTION_ADMIN_TENANT_ID,
+        DEFAULT_TENANT_ID,
+    )
+    credential = con.execute(
+        """
+        SELECT c.algorithm, c.iterations, c.salt, c.pin_hash,
+               c.requires_change, c.updated_at
+        FROM user_credentials c
+        INNER JOIN users u
+          ON u.tenant_id = c.tenant_id AND u.user_id = c.user_id
+        WHERE c.user_id = ? AND u.active = 1 AND u.role = 'administrator'
+        ORDER BY c.updated_at DESC,
+                 CASE WHEN c.tenant_id = ? THEN 0 ELSE 1 END ASC
+        LIMIT 1
+        """,
+        (normalized_user_id, resolved_source_tenant_id),
+    ).fetchone()
+    if credential is None:
+        return []
+
+    for tenant_id in tenant_ids:
+        con.execute(
+            """
+            INSERT INTO user_credentials(
+                tenant_id, user_id, algorithm, iterations, salt, pin_hash,
+                requires_change, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(tenant_id, user_id) DO UPDATE SET
+                algorithm = excluded.algorithm,
+                iterations = excluded.iterations,
+                salt = excluded.salt,
+                pin_hash = excluded.pin_hash,
+                requires_change = excluded.requires_change,
+                updated_at = excluded.updated_at
+            """,
+            (
+                tenant_id,
+                normalized_user_id,
+                credential["algorithm"],
+                credential["iterations"],
+                credential["salt"],
+                credential["pin_hash"],
+                credential["requires_change"],
+                credential["updated_at"],
+            ),
+        )
+    return tenant_ids
 
 
 
@@ -3995,7 +4121,35 @@ def _validate_new_pin(pin: str, *, current_pin: str = "") -> str:
     return cleaned_pin
 
 
-def _set_user_pin(con: Any, tenant_id: str, user_id: str, pin: str, *, requires_change: bool) -> None:
+def _user_pin_scope_tenant_ids(con: Any, tenant_id: str, user_id: str) -> list[str]:
+    current_user = con.execute(
+        """
+        SELECT active, role
+        FROM users
+        WHERE tenant_id = ? AND user_id = ?
+        """,
+        (tenant_id, user_id),
+    ).fetchone()
+    if (
+        current_user is None
+        or int(current_user["active"] or 0) != 1
+        or _role_normalize(current_user["role"]) != "administrator"
+    ):
+        return [tenant_id]
+    solution_tenant_ids = _solution_administrator_tenant_ids(con, user_id)
+    if solution_tenant_ids:
+        return solution_tenant_ids
+    return [tenant_id]
+
+
+def _set_user_pin(
+    con: Any,
+    tenant_id: str,
+    user_id: str,
+    pin: str,
+    *,
+    requires_change: bool,
+) -> list[str]:
     cleaned_pin = _validate_new_pin(pin)
 
     user_exists = con.execute(
@@ -4005,31 +4159,36 @@ def _set_user_pin(con: Any, tenant_id: str, user_id: str, pin: str, *, requires_
     if not user_exists:
         raise HTTPException(status_code=404, detail="Unknown user")
 
+    target_tenant_ids = _user_pin_scope_tenant_ids(con, tenant_id, user_id)
     salt = uuid.uuid4().hex
-    con.execute(
-        """
-        INSERT INTO user_credentials(
-            tenant_id, user_id, algorithm, iterations, salt, pin_hash,
-            requires_change, updated_at
-        ) VALUES (?, ?, 'pbkdf2_sha256', ?, ?, ?, ?, ?)
-        ON CONFLICT(tenant_id, user_id) DO UPDATE SET
-            algorithm = excluded.algorithm,
-            iterations = excluded.iterations,
-            salt = excluded.salt,
-            pin_hash = excluded.pin_hash,
-            requires_change = excluded.requires_change,
-            updated_at = excluded.updated_at
-        """,
-        (
-            tenant_id,
-            user_id,
-            PIN_ITERATIONS,
-            salt,
-            _pin_hash(cleaned_pin, salt, PIN_ITERATIONS),
-            1 if requires_change else 0,
-            _utc_now().isoformat(),
-        ),
-    )
+    pin_hash = _pin_hash(cleaned_pin, salt, PIN_ITERATIONS)
+    updated_at = _utc_now().isoformat()
+    for target_tenant_id in target_tenant_ids:
+        con.execute(
+            """
+            INSERT INTO user_credentials(
+                tenant_id, user_id, algorithm, iterations, salt, pin_hash,
+                requires_change, updated_at
+            ) VALUES (?, ?, 'pbkdf2_sha256', ?, ?, ?, ?, ?)
+            ON CONFLICT(tenant_id, user_id) DO UPDATE SET
+                algorithm = excluded.algorithm,
+                iterations = excluded.iterations,
+                salt = excluded.salt,
+                pin_hash = excluded.pin_hash,
+                requires_change = excluded.requires_change,
+                updated_at = excluded.updated_at
+            """,
+            (
+                target_tenant_id,
+                user_id,
+                PIN_ITERATIONS,
+                salt,
+                pin_hash,
+                1 if requires_change else 0,
+                updated_at,
+            ),
+        )
+    return target_tenant_ids
 
 
 def _verify_user_pin(
@@ -5223,7 +5382,7 @@ def devices(
 ) -> dict[str, Any]:
     tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
     auth_context = _require_campaign_manager_authorization(request, tenant_id)
-    include_all_tenants = bool(allTenants and _is_administrator_context(auth_context))
+    include_all_tenants = bool(allTenants and _is_solution_admin_context(auth_context))
     with _db() as con:
         _ensure_tenant(con, tenant_id)
         devices_list = _list_all_devices(con) if include_all_tenants else _list_devices(con, tenant_id)
@@ -7609,7 +7768,7 @@ def users(
     include_all_tenants = False
     if allTenants:
         auth_context = _require_admin_authorization(request, tenant_id)
-        include_all_tenants = _is_administrator_context(auth_context)
+        include_all_tenants = _is_solution_admin_context(auth_context)
         if not include_all_tenants:
             raise HTTPException(status_code=403, detail="La vue multi-espaces est réservée à l’administrateur")
     else:
@@ -7686,6 +7845,27 @@ async def users_replace(request: Request) -> dict[str, Any]:
     with _db() as con:
         with con:
             _ensure_tenant(con, tenant_id)
+            source_tenant_id = _resolve_tenant_id(
+                con,
+                SOLUTION_ADMIN_TENANT_ID,
+                DEFAULT_TENANT_ID,
+            )
+            protected_ids: set[str] = set()
+            if tenant_id == source_tenant_id:
+                protected_administrators = con.execute(
+                    """
+                    SELECT user_id
+                    FROM users
+                    WHERE tenant_id = ? AND active = 1
+                      AND role = 'administrator'
+                    """,
+                    (source_tenant_id,),
+                ).fetchall()
+                protected_ids = {
+                    str(row["user_id"] or "").strip()
+                    for row in protected_administrators
+                    if str(row["user_id"] or "").strip()
+                }
             resolved_users: list[dict[str, Any]] = []
             for user in users_to_save:
                 original_user_id = str(user.get("id") or "").strip()
@@ -7697,6 +7877,21 @@ async def users_replace(request: Request) -> dict[str, Any]:
                 _save_user(con, tenant_id, user)
             users_to_save = resolved_users
             user_ids = {user["id"] for user in users_to_save}
+            if tenant_id == source_tenant_id:
+                retained_solution_administrators = {
+                    str(user.get("id") or "").strip()
+                    for user in users_to_save
+                    if user.get("active") is True
+                    and _role_normalize(user.get("role")) == "administrator"
+                }
+                if not protected_ids.issubset(retained_solution_administrators):
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "L’administrateur solution doit rester actif dans "
+                            "l’espace d’administration OpenIRN"
+                        ),
+                    )
             if user_ids:
                 placeholders = ",".join("?" for _ in user_ids)
                 con.execute(
@@ -7706,6 +7901,7 @@ async def users_replace(request: Request) -> dict[str, Any]:
             else:
                 con.execute("DELETE FROM users WHERE tenant_id = ?", (tenant_id,))
             _ensure_user_credentials(con, tenant_id, users_to_save)
+            _sync_solution_administrators_to_all_tenants(con)
 
     return {
         "status": "accepted",
@@ -7747,27 +7943,37 @@ async def users_pin(request: Request) -> dict[str, Any]:
     with _db() as con:
         with con:
             _ensure_tenant(con, tenant_id)
-            _set_user_pin(con, tenant_id, user_id, pin, requires_change=True)
-            con.execute(
-                """
-                UPDATE api_sessions
-                SET revoked_at = ?
-                WHERE tenant_id = ? AND user_id = ? AND revoked_at IS NULL
-                """,
-                (_utc_now().isoformat(), tenant_id, user_id),
-            )
-            _record_device_audit(
+            affected_tenant_ids = _set_user_pin(
                 con,
                 tenant_id,
-                "user.pin_reset_by_administrator",
-                device_id=str(auth_context.get("deviceId") or ""),
-                payload={
-                    "userId": user_id,
-                    "actorUserId": triggered_by_user_id,
-                    "sessionsRevoked": True,
-                    "requiresChange": True,
-                },
+                user_id,
+                pin,
+                requires_change=True,
             )
+            placeholders = ",".join("?" for _ in affected_tenant_ids)
+            con.execute(
+                f"""
+                UPDATE api_sessions
+                SET revoked_at = ?
+                WHERE tenant_id IN ({placeholders})
+                  AND user_id = ? AND revoked_at IS NULL
+                """,
+                (_utc_now().isoformat(), *affected_tenant_ids, user_id),
+            )
+            for affected_tenant_id in affected_tenant_ids:
+                _record_device_audit(
+                    con,
+                    affected_tenant_id,
+                    "user.pin_reset_by_administrator",
+                    device_id=str(auth_context.get("deviceId") or ""),
+                    payload={
+                        "userId": user_id,
+                        "actorUserId": triggered_by_user_id,
+                        "sessionsRevoked": True,
+                        "requiresChange": True,
+                        "globalSolutionAdministrator": len(affected_tenant_ids) > 1,
+                    },
+                )
 
     return {
         "status": "accepted",
@@ -7778,6 +7984,7 @@ async def users_pin(request: Request) -> dict[str, Any]:
         "serverTime": _utc_now().isoformat(),
         "userId": user_id,
         "requiresChange": True,
+        "affectedTenantCount": len(affected_tenant_ids),
         "protectiveBackup": protective_backup,
     }
 
