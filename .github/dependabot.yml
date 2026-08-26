@@ -12,6 +12,12 @@ updates:
     directory: "/flutter"
     schedule:
       interval: "weekly"
+    ignore:
+      # La version 11 impose Android compileSdk 37, qui n'est pas encore pris
+      # en charge par la chaîne Flutter/Android actuelle d'OpenIRN.
+      - dependency-name: "flutter_secure_storage"
+        versions:
+          - ">=11.0.0 <12.0.0"
     labels:
       - "dependencies"
       - "flutter"
