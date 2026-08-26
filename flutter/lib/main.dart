@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'data/network/openirn_system_proxy.dart';
 import 'data/repositories/api_irn_referential_repository.dart';
 import 'data/repositories/legacy_local_storage_purge_service.dart';
 import 'domain/services/app_session_manager.dart';
@@ -13,6 +14,7 @@ final GlobalKey<NavigatorState> openIrnNavigatorKey =
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await OpenIrnSystemProxy.configure();
   await const LegacyLocalStoragePurgeService().purge();
   await OpenIrnLocalizations.instance.initialize();
   runApp(const OpenIrnApp());

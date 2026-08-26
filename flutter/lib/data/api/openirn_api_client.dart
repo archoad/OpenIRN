@@ -14,6 +14,7 @@ import '../../domain/models/security_audit_event.dart';
 import '../../domain/models/sync_configuration.dart';
 import '../../domain/models/tenant_info.dart';
 import '../../domain/services/app_session_manager.dart';
+import '../network/openirn_system_proxy.dart';
 
 enum OpenIrnApiReachability { ready, reachable, unreachable }
 
@@ -4370,7 +4371,7 @@ class OpenIrnApiClient {
     ).replace(queryParameters: queryParameters);
 
     while (true) {
-      final client = HttpClient();
+      final client = await OpenIrnSystemProxy.createHttpClient(eventsUri);
       try {
         final request = await client.getUrl(eventsUri).timeout(timeout);
         request.headers.set(HttpHeaders.acceptHeader, 'text/event-stream');
@@ -4773,7 +4774,7 @@ class OpenIrnApiClient {
   }
 
   Future<_HttpResponse> _get(Uri uri, {String bearerToken = ''}) async {
-    final client = HttpClient();
+    final client = await OpenIrnSystemProxy.createHttpClient(uri);
     try {
       final request = await client.getUrl(uri).timeout(timeout);
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
@@ -4791,7 +4792,7 @@ class OpenIrnApiClient {
   }
 
   Future<_HttpResponse> _delete(Uri uri, {String bearerToken = ''}) async {
-    final client = HttpClient();
+    final client = await OpenIrnSystemProxy.createHttpClient(uri);
     try {
       final request = await client.deleteUrl(uri).timeout(timeout);
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
@@ -4813,7 +4814,7 @@ class OpenIrnApiClient {
     Map<String, dynamic> payload, {
     String bearerToken = '',
   }) async {
-    final client = HttpClient();
+    final client = await OpenIrnSystemProxy.createHttpClient(uri);
     try {
       final request = await client.openUrl('PATCH', uri).timeout(timeout);
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
@@ -4847,7 +4848,7 @@ class OpenIrnApiClient {
     Uri uri, {
     String bearerToken = '',
   }) async {
-    final client = HttpClient();
+    final client = await OpenIrnSystemProxy.createHttpClient(uri);
     try {
       final request = await client.getUrl(uri).timeout(timeout);
       request.headers.set(
@@ -4877,7 +4878,7 @@ class OpenIrnApiClient {
     String bearerToken = '',
     String contentType = 'application/octet-stream',
   }) async {
-    final client = HttpClient();
+    final client = await OpenIrnSystemProxy.createHttpClient(uri);
     try {
       final request = await client.postUrl(uri).timeout(timeout);
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
@@ -4901,7 +4902,7 @@ class OpenIrnApiClient {
     Map<String, dynamic> payload, {
     String bearerToken = '',
   }) async {
-    final client = HttpClient();
+    final client = await OpenIrnSystemProxy.createHttpClient(uri);
     try {
       final request = await client.postUrl(uri).timeout(timeout);
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');

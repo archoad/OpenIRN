@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../../data/network/openirn_system_proxy.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/sync_configuration.dart';
@@ -295,7 +296,7 @@ class _ServerMaintenanceScreenState extends State<ServerMaintenanceScreen> {
     required String method,
     Map<String, dynamic>? payload,
   }) async {
-    final client = HttpClient();
+    final client = await OpenIrnSystemProxy.createHttpClient(uri);
     try {
       final HttpClientRequest request;
       if (method == 'POST') {
