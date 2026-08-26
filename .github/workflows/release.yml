@@ -30,6 +30,7 @@ env:
   APP_BUNDLE_ID: io.github.archoad.openirn
   PUBLISHER_SUBJECT: 'CN=Archoad, O=Archoad, L=Noyen-sur-Sarthe, S=Sarthe, C=FR'
   MSIX_IDENTITY_NAME: Archoad.OpenIRN
+  MSIX_LOGO_PATH: 'ios\Runner\Assets.xcassets\AppIcon.appiconset\Icon-App-1024x1024@1x.png'
   ARTIFACT_SIGNING_ENDPOINT: https://neu.codesigning.azure.net/
   ARTIFACT_SIGNING_ACCOUNT: openirnsign
   ARTIFACT_SIGNING_PROFILE: openirn-public
@@ -270,6 +271,10 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path "build\windows\msix" | Out-Null
+          if (-not (Test-Path -LiteralPath $env:MSIX_LOGO_PATH -PathType Leaf)) {
+            throw "OpenIRN MSIX logo not found: $env:MSIX_LOGO_PATH"
+          }
+          Get-Item -LiteralPath $env:MSIX_LOGO_PATH | Format-List FullName, Length
           dart run msix:create `
             --build-windows false `
             --sign-msix false `
@@ -280,6 +285,7 @@ jobs:
             --identity-name "$env:MSIX_IDENTITY_NAME" `
             --publisher "$env:PUBLISHER_SUBJECT" `
             --version "$env:MSIX_VERSION" `
+            --logo-path "$env:MSIX_LOGO_PATH" `
             --output-path "build\windows\msix" `
             --output-name "OpenIRN"
           $msix = "build\windows\msix\OpenIRN.msix"
@@ -327,6 +333,35 @@ jobs:
           }
           if ($identity.Version -ne $env:MSIX_VERSION) {
             throw "Unexpected MSIX version: $($identity.Version)"
+          }
+          $storeLogo = $manifest.SelectSingleNode(
+            "/*[local-name()='Package']/*[local-name()='Properties']/*[local-name()='Logo']"
+          )
+          $visualElements = $manifest.SelectSingleNode(
+            "/*[local-name()='Package']/*[local-name()='Applications']/*[local-name()='Application']/*[local-name()='VisualElements']"
+          )
+          if (-not $storeLogo -or -not $visualElements) {
+            throw "Expected MSIX logo declarations are missing from AppxManifest.xml"
+          }
+          $requiredIconPaths = @(
+            [string]$storeLogo.InnerText,
+            [string]$visualElements.GetAttribute("Square150x150Logo"),
+            [string]$visualElements.GetAttribute("Square44x44Logo"),
+            "Images\Square44x44Logo.targetsize-256.png"
+          )
+          foreach ($iconPath in $requiredIconPaths) {
+            if ([string]::IsNullOrWhiteSpace($iconPath)) {
+              throw "An expected MSIX icon path is missing from AppxManifest.xml"
+            }
+            $iconFile = Join-Path $unpack $iconPath
+            if (-not (Test-Path -LiteralPath $iconFile -PathType Leaf)) {
+              throw "Expected MSIX icon is missing: $iconPath"
+            }
+            $iconInfo = Get-Item -LiteralPath $iconFile
+            if ($iconInfo.Length -le 0) {
+              throw "Expected MSIX icon is empty: $iconPath"
+            }
+            Write-Host "MSIX icon      : $iconPath ($($iconInfo.Length) bytes)"
           }
 
       - name: Sign OpenIRN MSIX
@@ -422,7 +457,7 @@ jobs:
       - name: Upload PDF documentation
         uses: actions/upload-artifact@v4
         with:
-          name: openirn-documentation-fr
+          name: openirn-documentation-fr-en
           path: docs/pdf/*.pdf
           if-no-files-found: error
 
@@ -490,6 +525,10 @@ jobs:
           - `openirn-deploiement-applications.pdf` : guide de déploiement des applications.
           - `openirn-guide-utilisateur.pdf` : mode d’emploi par rôle.
           - `openirn-administration-instance.pdf` : guide d’exploitation quotidienne.
+          - `openirn-server-api-installation-en.pdf` : API server installation and initialization guide.
+          - `openirn-application-deployment-en.pdf` : application deployment guide.
+          - `openirn-user-guide-en.pdf` : user guide organized by role.
+          - `openirn-instance-administration-en.pdf` : day-to-day instance administration guide.
           - `SHA256SUMS.txt` : empreintes SHA-256 des artefacts.
 
           ## Signature Windows

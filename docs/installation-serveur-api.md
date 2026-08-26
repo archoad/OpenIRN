@@ -6,34 +6,34 @@ author: "Projet OpenIRN"
 
 # Objet et périmètre
 
-Ce document installe une instance neuve de l’API OpenIRN derrière Apache, avec MariaDB comme unique base serveur. Il est rédigé comme une recette : exécute chaque étape dans l’ordre et ne poursuis que lorsque le contrôle annoncé réussit.
+Ce document décrit l'installation d'une instance de l'API OpenIRN derrière Apache, avec MariaDB comme unique base serveur.
 
-La recette cible un serveur **Debian 13** administré avec le compte `root`. Elle utilise :
+Ce guide part du principe que le serveur cible exécute GNU/Linux (testé sous **Debian 13**) et qu'il est administré avec le compte `root`.
+
+Le serveur API utilise :
 
 - Python 3 et un environnement virtuel dédié ;
 - MariaDB avec deux comptes distincts : migration et exploitation ;
 - Uvicorn lié uniquement à `127.0.0.1:8091` ;
 - Apache en frontal HTTPS sous le chemin public `/api/` ;
-- systemd pour l’API et les sauvegardes quotidiennes ;
-- une version publiée d’OpenIRN identifiée par un tag Git `vX.Y.Z`.
-
-> Les commandes ne contiennent aucun secret réel. Remplace les noms de domaine, le tag et les valeurs marquées `À_REMPLACER`. N’inscris jamais un mot de passe ou un secret dans le dépôt, un ticket ou un historique de commandes.
+- systemd pour l'API et les sauvegardes quotidiennes ;
+- une version publiée d'OpenIRN identifiée par un tag Git `vX.Y.Z`.
 
 # 1. Préparer les informations
 
-Choisis les valeurs suivantes avant de commencer :
+Choisir les valeurs suivantes avant de commencer :
 
 | Paramètre | Exemple documentaire | Usage |
 |---|---|---|
-| Nom DNS | `openirn.example.org` | URL publique de l’API |
+| Nom DNS | `openirn.example.org` | URL publique de l'API |
 | Tag OpenIRN | `vX.Y.Z` | version immuable à déployer |
-| Base MariaDB | `openirn` | données de l’instance |
-| Espace d’administration | `openirn-admin` | espace source de l’administrateur solution |
+| Base MariaDB | `openirn` | données de l'instance |
+| Espace d'administration | `openirn-admin` | espace source de l'administrateur solution |
 | Répertoire des versions | `/opt/openirn-releases` | installations immuables |
 | Lien actif | `/opt/openirn-api` | version exécutée |
 | Données | `/var/lib/openirn-api` | référentiels et sauvegardes |
 
-Déclare uniquement les valeurs non sensibles :
+Déclarer uniquement les valeurs non sensibles :
 
 ```bash
 export OPENIRN_HOST='openirn.example.org'
@@ -41,18 +41,18 @@ export OPENIRN_TAG='vX.Y.Z'
 export OPENIRN_ADMIN_TENANT='openirn-admin'
 ```
 
-Bloque la suite si le tag est encore un exemple :
+Bloquer la suite si le tag est encore un exemple :
 
 ```bash
 test "$OPENIRN_TAG" != 'vX.Y.Z' || {
-	echo 'Définis OPENIRN_TAG avec un tag publié' >&2
+	echo 'Définir OPENIRN_TAG avec un tag publié' >&2
 	exit 1
 }
 ```
 
 # 2. Vérifier le serveur et le DNS
 
-Contrôle le système :
+Contrôler le système :
 
 ```bash
 cat /etc/os-release
@@ -62,13 +62,13 @@ hostnamectl
 
 Résultat attendu : Debian 13, architecture compatible avec Python et MariaDB, horloge correctement synchronisée.
 
-Contrôle l’heure :
+Contrôler l'heure :
 
 ```bash
 timedatectl status
 ```
 
-Le champ `System clock synchronized` doit être `yes`. Les sessions et codes temporaires OpenIRN dépendent d’une heure correcte.
+Le champ `System clock synchronized` doit être `yes`. Les sessions et codes temporaires OpenIRN dépendent d'une heure correcte.
 
 Depuis un poste externe, le nom DNS doit pointer vers le serveur :
 
@@ -77,7 +77,7 @@ dig +short "$OPENIRN_HOST" A
 dig +short "$OPENIRN_HOST" AAAA
 ```
 
-N’ouvre publiquement que TCP/443. Le port MariaDB 3306 et le port Uvicorn 8091 doivent rester locaux ou filtrés.
+N'ouvrir publiquement que TCP/443. Le port MariaDB 3306 et le port Uvicorn 8091 doivent rester locaux ou filtrés.
 
 # 3. Installer les prérequis
 
@@ -98,7 +98,7 @@ apt install --yes \
 	tar
 ```
 
-Contrôle les services et versions réellement installés :
+Contrôler les services et versions réellement installés :
 
 ```bash
 python3 --version
@@ -112,7 +112,7 @@ Les deux dernières commandes doivent répondre `active`.
 
 # 4. Télécharger une version OpenIRN
 
-Crée les répertoires :
+Créer les répertoires :
 
 ```bash
 install -d -o root -g root -m 755 /opt/openirn-releases
@@ -120,7 +120,7 @@ install -d -o www-data -g www-data -m 750 /var/lib/openirn-api
 install -d -o www-data -g www-data -m 750 /var/lib/openirn-api/backups
 ```
 
-Télécharge l’archive source correspondant au tag :
+Télécharger l'archive source correspondant au tag :
 
 ```bash
 install_root="$(mktemp -d)"
@@ -133,7 +133,7 @@ test -n "$source_root"
 test -f "$source_root/server/openirn-api/app/main.py"
 ```
 
-Déploie seulement le serveur :
+Déployer seulement le serveur :
 
 ```bash
 release_dir="/opt/openirn-releases/${OPENIRN_TAG}"
@@ -144,7 +144,7 @@ chown -R root:root "$release_dir"
 ln -s "$release_dir" /opt/openirn-api
 ```
 
-Contrôle le lien et les fichiers :
+Contrôler le lien et les fichiers :
 
 ```bash
 readlink -f /opt/openirn-api
@@ -154,7 +154,7 @@ test -f /opt/openirn-api/sql/schema_mariadb.sql
 
 Le lien doit viser exactement `/opt/openirn-releases/$OPENIRN_TAG`.
 
-# 5. Créer l’environnement Python
+# 5. Créer l'environnement Python
 
 ```bash
 python3 -m venv /opt/openirn-api/.venv
@@ -163,7 +163,7 @@ python3 -m venv /opt/openirn-api/.venv
 	--requirement /opt/openirn-api/requirements-mariadb.txt
 ```
 
-Contrôle les imports sans démarrer l’API :
+Contrôler les imports sans démarrer l'API :
 
 ```bash
 cd /opt/openirn-api
@@ -173,20 +173,20 @@ cd /opt/openirn-api
 
 # 6. Créer la base et séparer les privilèges
 
-Génère deux mots de passe aléatoires distincts et conserve-les dans un gestionnaire de secrets. Les valeurs hexadécimales évitent les problèmes d’encodage dans les URL MariaDB :
+Générer deux mots de passe aléatoires distincts et les conserver dans un gestionnaire de secrets. Les valeurs hexadécimales évitent les problèmes d'encodage dans les URL MariaDB :
 
 ```bash
-openssl rand -hex 32
-openssl rand -hex 32
+openssl rand -hex 32 # MOT_DE_PASSE_RUNTIME
+openssl rand -hex 32 # MOT_DE_PASSE_MIGRATION
 ```
 
-Ouvre MariaDB sans conserver l’historique SQL :
+Ouvrir MariaDB sans conserver l'historique SQL :
 
 ```bash
 MYSQL_HISTFILE=/dev/null mariadb
 ```
 
-Adapte puis exécute :
+Adapter puis exécuter :
 
 ```sql
 CREATE DATABASE IF NOT EXISTS openirn
@@ -212,16 +212,16 @@ Le compte runtime ne doit posséder ni `CREATE`, ni `ALTER`, ni `DROP`, ni `INDE
 
 # 7. Créer les secrets de déploiement
 
-Génère séparément :
+Générer séparément :
 
 ```bash
 openssl rand -hex 32
 openssl rand -hex 32
 ```
 
-La première valeur servira à signer les manifestes de sauvegarde ; la seconde à hacher les codes d’enrôlement. Une rotation du secret d’enrôlement invalide les codes temporaires non consommés.
+La première valeur servira à signer les manifestes de sauvegarde et la seconde à hacher les codes d'enrôlement. Une rotation du secret d'enrôlement invalide les codes temporaires non consommés.
 
-Crée le fichier runtime, lisible uniquement par `root` :
+Créer le fichier runtime, lisible uniquement par `root` :
 
 ```bash
 install -o root -g root -m 600 /dev/null /etc/openirn-api.env
@@ -246,7 +246,7 @@ OPENIRN_SESSION_IDLE_TIMEOUT_MINUTES=30
 OPENIRN_LEGACY_GLOBAL_BEARER_ENABLED=false
 ```
 
-Crée séparément le fichier de migration :
+Créer séparément le fichier de migration :
 
 ```bash
 install -o root -g root -m 600 /dev/null /etc/openirn-api-migration.env
@@ -259,7 +259,7 @@ Contenu :
 OPENIRN_MIGRATION_MYSQL_URL=mysql+pymysql://openirn_migration:MOT_DE_PASSE_MIGRATION_À_REMPLACER@127.0.0.1:3306/openirn?charset=utf8mb4
 ```
 
-Contrôle les permissions sans afficher les valeurs :
+Contrôler les permissions sans afficher les valeurs :
 
 ```bash
 stat -c '%U %G %a %n' /etc/openirn-api.env /etc/openirn-api-migration.env
@@ -269,7 +269,7 @@ Résultat attendu : `root root 600` pour les deux fichiers.
 
 # 8. Appliquer le schéma MariaDB
 
-L’API n’applique pas de DDL au démarrage. Charge temporairement les deux fichiers puis exécute l’outil dédié :
+L'API n'applique pas de DDL au démarrage. Charger temporairement les deux fichiers puis exécuter l'outil dédié :
 
 ```bash
 cd /opt/openirn-api
@@ -283,7 +283,7 @@ unset OPENIRN_MIGRATION_MYSQL_URL OPENIRN_API_MYSQL_URL
 
 Résultat attendu : migrations appliquées, comptes de migration et runtime distincts, privilèges runtime limités à `SELECT`, `INSERT`, `UPDATE`, `DELETE`.
 
-Contrôle la base avec le compte runtime :
+Contrôler la base avec le compte runtime :
 
 ```bash
 (
@@ -296,7 +296,7 @@ Contrôle la base avec le compte runtime :
 
 Toutes les tables listées doivent être lisibles et aucune ne doit être signalée manquante.
 
-# 9. Installer et démarrer l’unité systemd
+# 9. Installer et démarrer l'unité systemd
 
 ```bash
 install -o root -g root -m 644 \
@@ -306,7 +306,7 @@ systemctl daemon-reload
 systemctl enable --now openirn-api.service
 ```
 
-Contrôle :
+Contrôler :
 
 ```bash
 systemctl is-active openirn-api.service
@@ -326,23 +326,23 @@ Le JSON doit notamment annoncer :
 }
 ```
 
-En cas d’échec :
+En cas d'échec :
 
 ```bash
 journalctl -u openirn-api.service -n 100 --no-pager
 ```
 
-# 10. Publier l’API avec Apache et TLS
+# 10. Publier l'API avec Apache et TLS
 
-Active les modules nécessaires :
+Activer les modules nécessaires :
 
 ```bash
 a2enmod headers proxy proxy_http ssl
 ```
 
-Installe d’abord un certificat TLS valide pour `$OPENIRN_HOST` selon la procédure de ton organisation. Les chemins ci-dessous sont des exemples à adapter.
+Installer d'abord un certificat TLS valide pour `$OPENIRN_HOST` selon la procédure de votre organisation. Les chemins ci-dessous sont des exemples à adapter.
 
-Crée le virtual host :
+Créer le virtual host :
 
 ```bash
 vim /etc/apache2/sites-available/openirn-api.conf
@@ -372,7 +372,7 @@ Contenu :
 </VirtualHost>
 ```
 
-Remplace le nom DNS et les chemins de certificat, puis vérifie et active :
+Remplacer le nom DNS et les chemins de certificat, puis vérifier et activer :
 
 ```bash
 apache2ctl configtest
@@ -381,13 +381,13 @@ systemctl reload apache2
 systemctl is-active apache2
 ```
 
-Contrôle depuis un poste qui résout le DNS :
+Contrôler depuis un poste qui résout le DNS :
 
 ```bash
 curl --fail --silent --show-error "https://${OPENIRN_HOST}/api/health" | jq
 ```
 
-Le port Uvicorn ne doit pas être joignable depuis l’extérieur. Ne configure `OPENIRN_TRUSTED_PROXY_CIDRS` qu’avec l’adresse du pair qui se connecte réellement à Uvicorn.
+Le port Uvicorn ne doit pas être joignable depuis l'extérieur. Ne configurer `OPENIRN_TRUSTED_PROXY_CIDRS` qu'avec l'adresse du pair qui se connecte réellement à Uvicorn.
 
 # 11. Installer les sauvegardes automatiques
 
@@ -403,7 +403,7 @@ systemctl enable --now openirn-api-backup.timer
 systemctl start openirn-api-backup.service
 ```
 
-Contrôle :
+Contrôler :
 
 ```bash
 systemctl list-timers openirn-api-backup.timer --no-pager
@@ -411,11 +411,11 @@ journalctl -u openirn-api-backup.service -n 50 --no-pager
 find /var/lib/openirn-api/backups -maxdepth 1 -type f -printf '%f %s octets\n' | sort
 ```
 
-Une sauvegarde valide comporte le dump, son empreinte SHA-256 et son manifeste signé. Une copie hors de l’hôte reste indispensable.
+Une sauvegarde valide comporte le dump, son empreinte SHA-256 et son manifeste signé. Une copie hors de l'hôte reste indispensable.
 
 # 12. Créer le premier administrateur solution
 
-Cette étape s’effectue une seule fois, après les migrations. L’outil refuse d’agir si un administrateur actif existe déjà dans l’espace cible.
+Cette étape s'effectue une seule fois, après les migrations. L'outil refuse d'agir si un administrateur actif existe déjà dans l'espace cible.
 
 ```bash
 cd /opt/openirn-api
@@ -432,16 +432,16 @@ cd /opt/openirn-api
 )
 ```
 
-Saisis deux fois un PIN temporaire non trivial. Il ne s’affiche pas et ne doit pas être placé dans la ligne de commande. OpenIRN imposera son remplacement à la première connexion.
+Saisir deux fois un PIN temporaire non trivial. Il ne s'affiche pas et ne doit pas être placé dans la ligne de commande. OpenIRN imposera son remplacement à la première connexion.
 
-Contrôle uniquement le nombre et le rôle, sans lire le hash :
+Contrôler uniquement le nombre et le rôle, sans lire le hash :
 
 ```bash
 MYSQL_HISTFILE=/dev/null mariadb openirn -e \
 	"SELECT tenant_id,email,role,active FROM users WHERE role='administrator';"
 ```
 
-Recharge l’API pour réconcilier l’administrateur solution avec les espaces déjà présents :
+Recharger l'API pour réconcilier l'administrateur solution avec les espaces déjà présents :
 
 ```bash
 systemctl restart openirn-api
@@ -450,7 +450,7 @@ systemctl is-active openirn-api
 
 # 13. Amorcer le premier terminal
 
-Liste les espaces existants :
+Lister les espaces existants :
 
 ```bash
 cd /opt/openirn-api
@@ -462,7 +462,7 @@ cd /opt/openirn-api
 )
 ```
 
-Crée un code à usage unique valable dix minutes :
+Créer un code à usage unique valable dix minutes :
 
 ```bash
 (
@@ -476,31 +476,31 @@ Crée un code à usage unique valable dix minutes :
 )
 ```
 
-Dans l’application installée sur le premier poste :
+Dans l'application installée sur le premier poste :
 
-1. Choisis l’espace d’administration.
-2. Ouvre **Autoriser ce terminal**.
-3. Saisis le code affiché par l’outil.
-4. Déverrouille OpenIRN avec le compte administrateur et son PIN temporaire.
-5. Choisis immédiatement un nouveau PIN personnel non trivial.
+1. Choisir l'espace d'administration.
+2. Ouvrir **Autoriser ce terminal**.
+3. Saisir le code affiché par l'outil.
+4. Déverrouiller OpenIRN avec le compte administrateur et son PIN temporaire.
+5. Choisir immédiatement un nouveau PIN personnel non trivial.
 
-Le code est à usage unique. Ne le conserve pas après consommation.
+Le code est à usage unique. Ne pas le conserver après consommation.
 
 # 14. Charger le référentiel officiel
 
 Avec la session administrateur ouverte :
 
-1. Ouvre **Administration**.
-2. Ouvre **Référentiel officiel aDRI**.
-3. Lance **Vérifier**.
-4. Examine la version, la source et le rapport de validation.
-5. Installe la version détectée si elle correspond à la version officielle attendue.
+1. Ouvrir **Administration**.
+2. Ouvrir **Référentiel officiel aDRI**.
+3. Lancer **Vérifier**.
+4. Examiner la version, la source et le rapport de validation.
+5. Installer la version détectée si elle correspond à la version officielle attendue.
 
-Reviens à l’accueil puis ouvre **Référentiel aDRI IRN**. Les piliers et critères doivent s’afficher. Ne présente pas OpenIRN comme une certification officielle : l’application exploite le référentiel publié séparément par l’aDRI/DRI.
+Revenir à l'accueil puis ouvrir **Référentiel aDRI IRN**. Les piliers et critères doivent s'afficher.
 
 # 15. Recette finale
 
-Exécute ces contrôles :
+Exécuter ces contrôles :
 
 ```bash
 systemctl is-active mariadb apache2 openirn-api openirn-api-backup.timer
@@ -512,21 +512,21 @@ journalctl -u openirn-api-backup.service -n 50 --no-pager
 
 La mise en service est terminée lorsque :
 
-- MariaDB, Apache, l’API et le timer sont actifs ;
-- l’API n’écoute que sur `127.0.0.1:8091` ;
+- MariaDB, Apache, l'API et le timer sont actifs ;
+- l'API n'écoute que sur `127.0.0.1:8091` ;
 - le health interne et le health HTTPS répondent `200` ;
 - le premier terminal est enrôlé dans le bon espace ;
-- l’administrateur a remplacé son PIN temporaire ;
+- l'administrateur a remplacé son PIN temporaire ;
 - le référentiel officiel est installé et consultable ;
-- une sauvegarde signée a été produite et copiée hors de l’hôte.
+- une sauvegarde signée a été produite et copiée hors de l'hôte.
 
-# Dépannage rapide de l’installation
+# Dépannage rapide de l'installation
 
 | Symptôme | Contrôle | Cause fréquente |
 |---|---|---|
-| L’API ne démarre pas | `journalctl -u openirn-api -n 100` | migration manquante ou privilèges runtime trop larges |
+| L'API ne démarre pas | `journalctl -u openirn-api -n 100` | migration manquante ou privilèges runtime trop larges |
 | `502` dans Apache | `curl http://127.0.0.1:8091/health` | Uvicorn arrêté ou mauvais `ProxyPass` |
-| `403` dans l’application | vérifier espace, terminal et session | terminal non enrôlé dans cet espace ou session expirée |
-| Code d’enrôlement refusé | vérifier heure et durée du code | code expiré, consommé ou secret d’enrôlement différent |
-| Sauvegarde refusée | journal de l’unité backup | secret de signature trop court ou droits du répertoire |
+| `403` dans l'application | vérifier espace, terminal et session | terminal non enrôlé dans cet espace ou session expirée |
+| Code d'enrôlement refusé | vérifier heure et durée du code | code expiré, consommé ou secret d'enrôlement différent |
+| Sauvegarde refusée | journal de l'unité backup | secret de signature trop court ou droits du répertoire |
 | Référentiel absent | écran Référentiel officiel | import non effectué ou accès sortant GitLab indisponible |

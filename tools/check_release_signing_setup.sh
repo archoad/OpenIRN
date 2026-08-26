@@ -10,6 +10,7 @@ required_files=(
   ".github/workflows/release.yml"
   "flutter/android/app/build.gradle.kts"
   "flutter/pubspec.yaml"
+  "flutter/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-App-1024x1024@1x.png"
   "docs/deploiement-applications.md"
 )
 
@@ -48,6 +49,9 @@ require_pattern 'azure/artifact-signing-action@v2' 'Azure Artifact Signing v2 co
 require_pattern 'openirnsign' 'compte Artifact Signing openirnsign configuré'
 require_pattern 'openirn-public' 'profil Artifact Signing openirn-public configuré'
 require_pattern 'msix:create' 'construction MSIX configurée'
+require_pattern 'MSIX_LOGO_PATH:.*Icon-App-1024x1024@1x\.png' 'source de l icône OpenIRN MSIX configurée'
+require_pattern '[[:space:]]--logo-path.*MSIX_LOGO_PATH' 'injection de l icône OpenIRN dans le MSIX configurée'
+require_pattern 'Square44x44Logo\.targetsize-256\.png' 'contrôle des ressources d icône MSIX configuré'
 require_pattern 'openirn-windows-x64\.msix' 'artefact MSIX de release configuré'
 require_pattern 'signtool' 'vérification MSIX par SignTool configurée'
 

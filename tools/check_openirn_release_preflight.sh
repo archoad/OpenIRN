@@ -214,10 +214,14 @@ require_file flutter/android/app/src/main/res/drawable-night/launch_background.x
 
 printf '\n== Windows ==\n'
 require_dir flutter/windows 'projet Windows Flutter'
+require_file flutter/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-App-1024x1024@1x.png 'icône source OpenIRN 1024 x 1024 pour le MSIX'
 require_grep 'signtool' .github/workflows/release.yml 'signature Windows par signtool présente'
 require_grep 'openirn-windows-signed.zip' .github/workflows/release.yml 'artefact Windows signé configuré'
 require_grep 'openirn-windows-x64\.msix' .github/workflows/release.yml 'artefact MSIX signé configuré'
 require_grep 'msix:create' .github/workflows/release.yml 'construction MSIX configurée'
+require_grep 'MSIX_LOGO_PATH:.*Icon-App-1024x1024@1x\.png' .github/workflows/release.yml 'source de l icône OpenIRN MSIX configurée'
+require_grep '[[:space:]]--logo-path.*MSIX_LOGO_PATH' .github/workflows/release.yml 'injection de l icône OpenIRN dans le MSIX configurée'
+require_grep 'Square44x44Logo\.targetsize-256\.png' .github/workflows/release.yml 'contrôle des ressources d icône MSIX configuré'
 
 printf '\n== Apple optionnel ==\n'
 if [[ "$WITH_APPLE" == true ]]; then

@@ -3,6 +3,7 @@ import 'package:openirn/data/api/openirn_api_client.dart';
 import 'package:openirn/data/repositories/local_sync_configuration_repository.dart';
 import 'package:openirn/data/repositories/server_campaign_store.dart';
 import 'package:openirn/domain/models/sync_configuration.dart';
+import 'package:openirn/domain/services/app_session_manager.dart';
 
 class _TestConfigurationRepository extends LocalSyncConfigurationRepository {
   const _TestConfigurationRepository();
@@ -88,6 +89,35 @@ class _RecordingApiClient extends OpenIrnApiClient {
   }
 }
 
+class _RetryingApiClient extends OpenIrnApiClient {
+  final bool rejectEveryRequest;
+  final List<String> receivedTokens = <String>[];
+
+  _RetryingApiClient({this.rejectEveryRequest = false});
+
+  @override
+  Future<OpenIrnApiCampaignStatesResult> loadCampaignStates({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+  }) async {
+    receivedTokens.add(apiToken);
+    if (rejectEveryRequest || receivedTokens.length == 1) {
+      return const OpenIrnApiCampaignStatesResult(
+        status: OpenIrnApiCampaignStatesStatus.rejected,
+        statusCode: 403,
+        campaigns: <OpenIrnApiCampaignState>[],
+        errorDetail: 'Session expirée ou autorisation OpenIRN invalide',
+      );
+    }
+    return const OpenIrnApiCampaignStatesResult(
+      status: OpenIrnApiCampaignStatesStatus.available,
+      statusCode: 200,
+      campaigns: <OpenIrnApiCampaignState>[],
+    );
+  }
+}
+
 void main() {
   group('ServerCampaignStore data integrity', () {
     late _RecordingApiClient apiClient;
@@ -139,5 +169,55 @@ void main() {
         expect(apiClient.pushedPayload, isNull);
       },
     );
+  });
+
+  group('ServerCampaignStore session recovery', () {
+    setUp(() {
+      AppSessionManager.instance.clearDeviceCredential();
+      AppSessionManager.instance.startSession(
+        apiToken: 'ost_current_session',
+        tenantId: 'tenant-a',
+        deviceId: 'device-a',
+        expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      );
+    });
+
+    tearDown(() {
+      AppSessionManager.instance.clearDeviceCredential();
+      AppSessionManager.instance.updateDeviceContext(
+        tenantId: '',
+        deviceId: '',
+      );
+    });
+
+    test('retries one rejected read with the current session token', () async {
+      final apiClient = _RetryingApiClient();
+      final store = ServerCampaignStore(
+        configurationRepository: const _TestConfigurationRepository(),
+        apiClient: apiClient,
+      );
+
+      final bundles = await store.loadBundles(referentialId: 'adri-irn-v1.1');
+
+      expect(bundles, isEmpty);
+      expect(apiClient.receivedTokens, <String>[
+        'ost_test_session',
+        'ost_current_session',
+      ]);
+    });
+
+    test('stops after one retry when authorization remains rejected', () async {
+      final apiClient = _RetryingApiClient(rejectEveryRequest: true);
+      final store = ServerCampaignStore(
+        configurationRepository: const _TestConfigurationRepository(),
+        apiClient: apiClient,
+      );
+
+      await expectLater(
+        store.loadBundles(referentialId: 'adri-irn-v1.1'),
+        throwsA(isA<ServerCampaignStoreException>()),
+      );
+      expect(apiClient.receivedTokens, hasLength(2));
+    });
   });
 }

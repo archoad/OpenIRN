@@ -77,11 +77,28 @@ class ServerCampaignStore {
       return const <ServerCampaignBundle>[];
     }
 
-    final result = await apiClient.loadCampaignStates(
+    var result = await apiClient.loadCampaignStates(
       baseUrl: configuration.apiBaseUrl,
       tenantId: configuration.tenantId,
       apiToken: configuration.apiToken,
     );
+
+    // The first foreground read can race with a session/configuration refresh.
+    // Retry this idempotent read once with the current in-memory session only;
+    // a persistent authorization failure is still returned to the caller.
+    if (!result.isAvailable && result.statusCode == 403) {
+      final sessionManager = AppSessionManager.instance;
+      sessionManager.validateSession();
+      final currentSessionToken = sessionManager.sessionApiToken;
+      if (currentSessionToken.isNotEmpty) {
+        await Future<void>.delayed(Duration.zero);
+        result = await apiClient.loadCampaignStates(
+          baseUrl: configuration.apiBaseUrl,
+          tenantId: configuration.tenantId,
+          apiToken: currentSessionToken,
+        );
+      }
+    }
 
     if (!result.isAvailable) {
       throw ServerCampaignStoreException(

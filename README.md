@@ -231,7 +231,7 @@ Le dépôt contient des workflows GitHub Actions pour :
 - exécuter un préflight de release ;
 - produire des artefacts Android signés ;
 - produire des artefacts Windows signés ;
-- convertir les guides Markdown français en PDF ;
+- convertir les guides Markdown français et anglais en PDF ;
 - publier les empreintes SHA-256 des artefacts.
 
 Les artefacts signés actuellement visés sont :
@@ -240,7 +240,7 @@ Les artefacts signés actuellement visés sont :
 - `openirn-android.aab` ;
 - `openirn-windows-signed.zip` ;
 - `openirn-windows-x64.msix` ;
-- les quatre guides OpenIRN au format PDF ;
+- les huit guides OpenIRN français et anglais au format PDF ;
 - `SHA256SUMS.txt`.
 
 macOS et iOS restent présents dans le projet Flutter, mais ne font pas encore partie du profil de release signé principal tant qu’un circuit Apple Developer n’est pas configuré.
@@ -252,7 +252,14 @@ macOS et iOS restent présents dans le projet Flutter, mais ne font pas encore p
 - [Guide utilisateur par rôle](docs/guide-utilisateur.md)
 - [Administration quotidienne d’une instance](docs/administration-instance.md)
 
-Lors d’une release, ces quatre sources Markdown sont converties dans `docs/pdf/` puis jointes à la GitHub Release. Le répertoire local `devsteps/`, qui contient l’historique de travail du développement, est volontairement ignoré par Git.
+English documentation:
+
+- [API server installation and initialization](docs/en/server-api-installation.md)
+- [Application deployment](docs/en/application-deployment.md)
+- [User guide by role](docs/en/user-guide.md)
+- [Day-to-day instance administration](docs/en/instance-administration.md)
+
+Lors d’une release, ces huit sources Markdown sont converties dans `docs/pdf/` puis jointes à la GitHub Release. Le répertoire local `devsteps/`, qui contient l’historique de travail du développement, est volontairement ignoré par Git.
 
 ## Structure du dépôt
 

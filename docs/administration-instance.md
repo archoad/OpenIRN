@@ -6,9 +6,9 @@ author: "Projet OpenIRN"
 
 # Objet
 
-Ce guide s’adresse à l’administrateur technique d’une instance OpenIRN. Il couvre le serveur Linux, MariaDB, Apache, l’API et le parc applicatif. Les commandes serveur sont prévues pour une session `root` ; elles n’utilisent pas `sudo`.
+Ce guide s'adresse à l'administrateur technique d'une instance OpenIRN. Il couvre le serveur Linux, MariaDB, Apache, l'API et le parc applicatif. Les commandes serveur sont prévues pour une session `root`.
 
-Adapte les noms DNS et versions à ton instance. Ne copie jamais dans un ticket ou un journal les fichiers `/etc/openirn-api*.env`, les PIN, les jetons de terminal, les codes d’enrôlement ou les secrets de signature.
+Adapter les noms DNS et versions à votre instance. Ne jamais copier dans un ticket ou un journal les fichiers `/etc/openirn-api*.env`, les PIN, les jetons de terminal, les codes d'enrôlement ou les secrets de signature.
 
 # 1. Architecture à connaître
 
@@ -23,7 +23,7 @@ Applications Android / Windows / Apple
                  |
         Uvicorn / FastAPI OpenIRN
                  |
-       MariaDB sur l’hôte ou réseau privé
+       MariaDB sur l'hôte ou réseau privé
 ```
 
 Répertoires et unités usuels :
@@ -40,7 +40,7 @@ Répertoires et unités usuels :
 | Sauvegarde | `openirn-api-backup.service` |
 | Planification | `openirn-api-backup.timer` |
 
-MariaDB est l’unique backend serveur. Le client ne conserve pas de données métier persistantes ; il conserve seulement les éléments nécessaires à la connexion, les préférences et le jeton terminal dans le stockage sécurisé de la plateforme.
+MariaDB est l'unique backend serveur. Le client ne conserve pas de données métier persistantes, il conserve seulement les éléments nécessaires à la connexion, les préférences et le jeton terminal dans le stockage sécurisé de la plateforme.
 
 # 2. Contrôle quotidien
 
@@ -60,14 +60,14 @@ curl --fail --silent --show-error http://127.0.0.1:8091/health | jq
 curl --fail --silent --show-error https://openirn.example.org/api/health | jq
 ```
 
-Contrôle les champs :
+Contrôler les champs :
 
 - `status` égal à `ok` ;
 - `storage` égal à `mariadb` ;
 - `authRequired` égal à `true` ;
 - `authMode` égal à `server_session_with_role_policy`.
 
-Un health `200` prouve la disponibilité de base, pas l’ensemble du parcours utilisateur. Complète-le régulièrement par une recette avec un compte et une campagne de test.
+Un health `200` prouve la disponibilité de base, pas l'ensemble du parcours utilisateur. Compléter régulièrement ce contrôle par une recette avec un compte et une campagne de test.
 
 ## Écoute réseau
 
@@ -79,7 +79,7 @@ Attendu :
 
 - Apache écoute sur les interfaces prévues en 443 ;
 - Uvicorn écoute uniquement sur `127.0.0.1:8091` ;
-- MariaDB n’est pas exposé publiquement.
+- MariaDB n'est pas exposé publiquement.
 
 ## Erreurs récentes
 
@@ -89,13 +89,13 @@ journalctl -u openirn-api-backup.service --since today --no-pager
 tail -n 100 /var/log/apache2/openirn-api-error.log
 ```
 
-Recherche notamment les redémarrages répétés, refus MariaDB, migrations manquantes, erreurs de sauvegarde, `AH01084`, `AH01097`, `Broken pipe`, `502` et `503`.
+Rechercher notamment les redémarrages répétés, refus MariaDB, migrations manquantes, erreurs de sauvegarde, `AH01084`, `AH01097`, `Broken pipe`, `502` et `503`.
 
 # 3. Contrôle hebdomadaire
 
 ## MariaDB
 
-Exécute l’outil avec le compte runtime sans afficher l’URL :
+Exécuter l'outil avec le compte runtime sans afficher l'URL :
 
 ```bash
 cd /opt/openirn-api
@@ -107,14 +107,14 @@ cd /opt/openirn-api
 )
 ```
 
-Vérifie aussi la taille des tables :
+Vérifier la taille des tables :
 
 ```bash
 MYSQL_HISTFILE=/dev/null mariadb openirn -e \
 	"SELECT table_name, table_rows, ROUND((data_length+index_length)/1024/1024,1) AS mib FROM information_schema.tables WHERE table_schema='openirn' ORDER BY data_length+index_length DESC;"
 ```
 
-`table_rows` est une estimation InnoDB. Utilise-la pour détecter une évolution anormale, pas comme preuve comptable.
+`table_rows` est une estimation InnoDB. L'utiliser pour détecter une évolution anormale, pas comme preuve comptable.
 
 ## Sauvegardes présentes
 
@@ -124,7 +124,7 @@ find /var/lib/openirn-api/backups -maxdepth 1 -type f \
 	-printf '%TY-%Tm-%Td %TH:%TM %s %f\n' | sort
 ```
 
-Vérifie qu’une sauvegarde récente existe, que les trois fichiers associés sont présents et qu’une copie chiffrée a quitté l’hôte.
+Vérifier qu'une sauvegarde récente existe, que les trois fichiers associés sont présents et qu'une copie chiffrée a quitté l'hôte.
 
 ## Certificat TLS
 
@@ -134,24 +134,24 @@ openssl s_client -connect openirn.example.org:443 \
 	openssl x509 -noout -subject -issuer -dates
 ```
 
-Planifie le renouvellement avant expiration et teste le rechargement Apache.
+Planifier le renouvellement avant expiration et tester le rechargement Apache.
 
 # 4. Contrôle mensuel
 
-- réalise une restauration complète dans une base vide ;
-- examine les comptes actifs et leurs rôles ;
-- révoque les sessions inutiles ;
-- examine les terminaux inactifs ou inconnus ;
-- contrôle les événements de sécurité et limitations répétées ;
-- vérifie les releases et dépendances disponibles ;
-- teste la mise à jour sur une instance ou un groupe pilote ;
-- vérifie que la documentation PDF publiée correspond à la version utilisée.
+- réaliser une restauration complète dans une base vide ;
+- examiner les comptes actifs et leurs rôles ;
+- révoquer les sessions inutiles ;
+- examiner les terminaux inactifs ou inconnus ;
+- contrôler les événements de sécurité et limitations répétées ;
+- vérifier les releases et dépendances disponibles ;
+- tester la mise à jour sur une instance ou un groupe pilote ;
+- vérifier que la documentation PDF publiée correspond à la version utilisée.
 
 # 5. Sauvegardes
 
 ## Sauvegarde planifiée
 
-Le timer exécute une sauvegarde quotidienne à l’heure définie dans `openirn-api-backup.timer`. Contrôle son prochain passage :
+Le timer exécute une sauvegarde quotidienne à l'heure définie dans `openirn-api-backup.timer`. Contrôler son prochain passage :
 
 ```bash
 systemctl list-timers openirn-api-backup.timer --all --no-pager
@@ -167,32 +167,32 @@ journalctl -u openirn-api-backup.service --since '10 minutes ago' --no-pager
 
 `systemctl is-failed` doit répondre `inactive`, pas `failed`.
 
-Identifie les fichiers récents :
+Identifier les fichiers récents :
 
 ```bash
 find /var/lib/openirn-api/backups -maxdepth 1 -type f \
 	-newermt '15 minutes ago' -printf '%f %s octets\n' | sort
 ```
 
-Le manifeste HMAC détecte une modification accidentelle ou malveillante des fichiers, mais ne chiffre pas les données. Chiffre les copies hors site et limite leur accès.
+Le manifeste HMAC détecte une modification accidentelle ou malveillante des fichiers, mais ne chiffre pas les données. Chiffrer les copies hors site et limiter leur accès.
 
 ## Rétention
 
-`OPENIRN_API_BACKUP_KEEP` fixe le nombre de sauvegardes conservées localement. Ne réduis pas la rétention avant d’avoir confirmé les copies externes. Une suppression de sauvegarde est irréversible si aucune autre copie n’existe.
+`OPENIRN_API_BACKUP_KEEP` fixe le nombre de sauvegardes conservées localement. Ne pas réduire la rétention avant d'avoir confirmé les copies externes. Une suppression de sauvegarde est irréversible si aucune autre copie n'existe.
 
 # 6. Exercice de restauration
 
-La restauration officielle cible une **base vide distincte**. L’outil refuse par défaut la base source et une cible non vide.
+La restauration officielle cible une **base vide distincte**. L'outil refuse par défaut la base source et une cible non vide.
 
 ## Préparer une cible de test
 
-Choisis un nom daté, puis ouvre MariaDB sans historique :
+Choisir un nom daté, puis ouvrir MariaDB sans historique :
 
 ```bash
 MYSQL_HISTFILE=/dev/null mariadb
 ```
 
-Adapte les valeurs :
+Adapter les valeurs :
 
 ```sql
 CREATE DATABASE openirn_restore_YYYYMMDD
@@ -204,7 +204,7 @@ GRANT ALL PRIVILEGES ON openirn_restore_YYYYMMDD.*
 FLUSH PRIVILEGES;
 ```
 
-Crée un fichier temporaire protégé :
+Créer un fichier temporaire protégé :
 
 ```bash
 install -o root -g root -m 600 /dev/null /etc/openirn-api-restore.env
@@ -236,11 +236,11 @@ set +a
 unset OPENIRN_RESTORE_MYSQL_URL OPENIRN_API_BACKUP_SIGNATURE_SECRET
 ```
 
-Examine le rapport : migrations, nombres de lignes, clés étrangères et catégories d’orphelins doivent être valides.
+Examiner le rapport : migrations, nombres de lignes, clés étrangères et catégories d'orphelins doivent être valides.
 
 ## Détruire la cible de test
 
-Les commandes suivantes suppriment définitivement la base restaurée et son compte. Ne les exécute qu’après validation du rapport et de la cible exacte :
+Les commandes suivantes suppriment définitivement la base restaurée et son compte. Ne les exécuter qu'après validation du rapport et de la cible exacte :
 
 ```bash
 MYSQL_HISTFILE=/dev/null mariadb
@@ -251,7 +251,7 @@ DROP DATABASE openirn_restore_YYYYMMDD;
 DROP USER 'openirn_restore'@'localhost';
 ```
 
-Puis supprime le fichier de connexion temporaire :
+Puis supprimer le fichier de connexion temporaire :
 
 ```bash
 rm /etc/openirn-api-restore.env
@@ -261,28 +261,28 @@ rm /etc/openirn-api-restore.env
 
 Une restauration réelle est une opération de crise :
 
-1. arrête l’API pour stopper les écritures ;
-2. conserve la base défaillante sans la modifier ;
-3. restaure dans une nouvelle base vide ;
-4. valide le rapport de restauration ;
-5. modifie l’URL runtime vers la nouvelle base ;
-6. démarre l’API ;
-7. exécute les contrôles interne et public ;
-8. réalise une recette fonctionnelle ;
-9. ne supprime l’ancienne base qu’après décision formelle et expiration du délai de retour arrière.
+1. arrêter l'API pour stopper les écritures ;
+2. conserver la base défaillante sans la modifier ;
+3. restaurer dans une nouvelle base vide ;
+4. valider le rapport de restauration ;
+5. modifier l'URL runtime vers la nouvelle base ;
+6. démarrer l'API ;
+7. exécuter les contrôles interne et public ;
+8. réaliser une recette fonctionnelle ;
+9. ne supprimer l'ancienne base qu'après décision formelle et expiration du délai de retour arrière.
 
-Ne restaure jamais directement par-dessus une base active ou partiellement remplie.
+Ne jamais restaurer directement par-dessus une base active ou partiellement remplie.
 
 # 8. Mise à jour du serveur API
 
 ## Préparer
 
-1. lis les notes de release ;
-2. vérifie la compatibilité client/API ;
-3. contrôle l’espace disque ;
-4. réalise et externalise une sauvegarde ;
-5. annonce la fenêtre de maintenance ;
-6. conserve le chemin de la version actuellement active.
+1. lire les notes de release ;
+2. vérifier la compatibilité client/API ;
+3. contrôler l'espace disque ;
+4. réaliser et externaliser une sauvegarde ;
+5. annoncer la fenêtre de maintenance ;
+6. conserver le chemin de la version actuellement active.
 
 ```bash
 df -h /opt /var/lib/openirn-api
@@ -317,13 +317,13 @@ python3 -m venv "$release_dir/.venv"
 
 ## Migrer et basculer
 
-L’arrêt interrompt les utilisateurs et les synchronisations. Vérifie la fenêtre de maintenance avant cette commande :
+L'arrêt interrompt les utilisateurs et les synchronisations. Vérifier la fenêtre de maintenance avant cette commande :
 
 ```bash
 systemctl stop openirn-api
 ```
 
-Applique les migrations avec le code de la nouvelle version :
+Appliquer les migrations avec le code de la nouvelle version :
 
 ```bash
 cd "$release_dir"
@@ -335,7 +335,7 @@ set +a
 unset OPENIRN_MIGRATION_MYSQL_URL OPENIRN_API_MYSQL_URL
 ```
 
-La commande suivante remplace le lien symbolique actif. Le retour au code précédent restera possible, mais une migration de données peut ne pas être réversible ; la sauvegarde est donc obligatoire :
+La commande suivante remplace le lien symbolique actif. Le retour au code précédent restera possible, mais une migration de données peut ne pas être réversible, la sauvegarde est donc obligatoire :
 
 ```bash
 ln -sfn "$release_dir" /opt/openirn-api
@@ -352,9 +352,9 @@ curl --fail --silent --show-error http://127.0.0.1:8091/health | jq
 curl --fail --silent --show-error https://openirn.example.org/api/health | jq
 ```
 
-Puis vérifie avec un terminal pilote :
+Puis vérifier avec un terminal pilote :
 
-- choix de l’espace ;
+- choix de l'espace ;
 - ouverture et verrouillage de session ;
 - référentiel ;
 - campagne de recette ;
@@ -365,7 +365,7 @@ Puis vérifie avec un terminal pilote :
 
 # 9. Retour arrière du code
 
-Si la nouvelle version échoue avant toute migration irréversible, repointe le lien vers la version précédente :
+Si la nouvelle version échoue avant toute migration irréversible, repointer le lien vers la version précédente :
 
 ```bash
 systemctl stop openirn-api
@@ -374,19 +374,19 @@ systemctl start openirn-api
 systemctl is-active openirn-api
 ```
 
-Si le schéma ou les données ont changé, ne démarre pas aveuglément l’ancien code. Restaure la sauvegarde dans une nouvelle base, valide-la puis bascule l’URL runtime conformément au plan de reprise.
+Si le schéma ou les données ont changé, ne pas démarrer aveuglément l'ancien code. Restaurer la sauvegarde dans une nouvelle base, la valider puis basculer l'URL runtime conformément au plan de reprise.
 
 # 10. Mise à jour des applications
 
-1. vérifie les empreintes de la release ;
-2. déploie Android et Windows sur un groupe pilote ;
-3. mets à jour en place, sans désinstallation ;
-4. vérifie que l’enrôlement a été conservé ;
-5. teste les rôles représentatifs ;
-6. surveille l’API et le journal sécurité ;
-7. élargis la vague.
+1. vérifier les empreintes de la release ;
+2. déployer Android et Windows sur un groupe pilote ;
+3. mettre à jour en place, sans désinstallation ;
+4. vérifier que l'enrôlement a été conservé ;
+5. tester les rôles représentatifs ;
+6. surveiller l'API et le journal sécurité ;
+7. élargir la vague.
 
-Les releases actuelles ne publient pas d’artefacts Apple signés. Ne considère pas macOS/iOS comme déployés tant qu’une chaîne Developer ID/TestFlight ou MDM n’a pas été validée.
+Les releases actuelles ne publient pas d'artefacts Apple signés.
 
 # 11. Dépannage par symptôme
 
@@ -397,7 +397,7 @@ systemctl status openirn-api --no-pager
 journalctl -u openirn-api -n 150 --no-pager
 ```
 
-Vérifie ensuite :
+Vérifier ensuite :
 
 ```bash
 readlink -f /opt/openirn-api
@@ -406,7 +406,7 @@ cd /opt/openirn-api
 .venv/bin/python -m py_compile app/main.py app/database_contract.py
 ```
 
-Causes courantes : dépendance absente, URL MariaDB incorrecte, migration manquante, privilèges runtime trop larges ou fichier d’environnement absent.
+Causes courantes : dépendance absente, URL MariaDB incorrecte, migration manquante, privilèges runtime trop larges ou fichier d'environnement absent.
 
 ## Health interne OK, public en 502
 
@@ -417,41 +417,41 @@ tail -n 150 /var/log/apache2/openirn-api-error.log
 curl --verbose http://127.0.0.1:8091/health
 ```
 
-Vérifie `ProxyPass`, le chemin `/api/`, le certificat et les règles réseau locales.
+Vérifier `ProxyPass`, le chemin `/api/`, le certificat et les règles réseau locales.
 
 ## Réponse 413
 
 Une réponse `413` signifie que le corps dépasse une limite. Les valeurs par défaut sont 1 Mio pour une requête ordinaire, 16 Mio pour la synchronisation et 5 Mio pour un import XLSX, avec 64 Mio décompressés au maximum.
 
-Ne relève pas globalement la limite sans identifier la route et le besoin. Vérifie aussi `LimitRequestBody` côté Apache.
+Ne pas relever globalement la limite sans identifier la route et le besoin. Vérifier aussi `LimitRequestBody` côté Apache.
 
 ## Réponse 429
 
-Une réponse `429` sur l’enrôlement indique une limitation anti-abus. Attends la durée `Retry-After`, vérifie l’adresse client remontée par le proxy et recherche une répétition anormale dans le journal sécurité.
+Une réponse `429` sur l'enrôlement indique une limitation anti-abus. Attendre la durée `Retry-After`, vérifier l'adresse client remontée par le proxy et rechercher une répétition anormale dans le journal sécurité.
 
 ## Terminal non autorisé ou 403
 
-Vérifie dans cet ordre :
+Vérifier dans cet ordre :
 
 1. espace sélectionné ;
 2. présence du terminal dans cet espace ;
 3. statut actif et absence de révocation ;
 4. session utilisateur valide ;
-5. rôle compatible avec l’action ;
+5. rôle compatible avec l'action ;
 6. heure du terminal et du serveur.
 
-Un terminal autorisé dans un espace ne l’est pas automatiquement dans les autres.
+Un terminal autorisé dans un espace ne l'est pas automatiquement dans les autres.
 
 ## Session expirée
 
-Demande à l’utilisateur de revenir à l’accueil et de se déverrouiller. Si le problème se répète immédiatement :
+Demander à l'utilisateur de revenir à l'accueil et de se déverrouiller. Si le problème se répète immédiatement :
 
 ```bash
 timedatectl status
 journalctl -u openirn-api --since '15 minutes ago' --no-pager
 ```
 
-Vérifie les paramètres `OPENIRN_SESSION_TTL_MINUTES` et `OPENIRN_SESSION_IDLE_TIMEOUT_MINUTES` sans afficher le reste du fichier d’environnement.
+Vérifier les paramètres `OPENIRN_SESSION_TTL_MINUTES` et `OPENIRN_SESSION_IDLE_TIMEOUT_MINUTES` sans afficher le reste du fichier d'environnement.
 
 ## Sauvegarde en échec
 
@@ -462,73 +462,73 @@ namei -l /var/lib/openirn-api/backups
 df -h /var/lib/openirn-api
 ```
 
-Vérifie le binaire de dump, les droits `www-data`, l’espace disque et la présence d’un secret de signature d’au moins 32 caractères.
+Vérifier le binaire de dump, les droits `www-data`, l'espace disque et la présence d'un secret de signature d'au moins 32 caractères.
 
 ## Synchronisation incohérente
 
-- suspends les modifications concurrentes sur la campagne concernée ;
-- note la campagne, l’espace, les terminaux et l’heure ;
-- consulte **Administration → Historique / conflits** ;
-- compare la révision courante et les révisions précédentes ;
-- ne restaure une révision qu’après avoir compris les données perdues par ce choix.
+- suspendre les modifications concurrentes sur la campagne concernée ;
+- noter la campagne, l'espace, les terminaux et l'heure ;
+- consulter **Administration → Historique / conflits** ;
+- comparer la révision courante et les révisions précédentes ;
+- ne restaurer une révision qu'après avoir compris les données perdues par ce choix.
 
-La restauration de campagne crée une nouvelle évolution serveur ; elle ne remplace pas une restauration MariaDB globale.
+La restauration de campagne crée une nouvelle évolution serveur, elle ne remplace pas une restauration MariaDB globale.
 
-# 12. Administration de sécurité dans l’application
+# 12. Administration de sécurité dans l'application
 
 ## Utilisateurs
 
-- désactive rapidement les comptes sortants ;
-- vérifie périodiquement les administrateurs et Pilotes IRN ;
-- attribue un PIN temporaire non trivial uniquement lorsque nécessaire ;
-- confirme que le changement est exigé à la prochaine connexion ;
-- utilise des comptes nominatifs.
+- désactiver rapidement les comptes sortants ;
+- vérifier périodiquement les administrateurs et Pilotes IRN ;
+- attribuer un PIN temporaire non trivial uniquement lorsque nécessaire ;
+- confirmer que le changement est exigé à la prochaine connexion ;
+- utiliser des comptes nominatifs.
 
 ## Sessions
 
-Dans **Administration → Sessions serveur**, révoque les sessions inconnues, anciennes ou associées à un incident. Une réinitialisation de PIN par un administrateur révoque les sessions existantes de l’utilisateur ciblé.
+Dans **Administration → Sessions serveur**, révoquer les sessions inconnues, anciennes ou associées à un incident. Une réinitialisation de PIN par un administrateur révoque les sessions existantes de l'utilisateur ciblé.
 
 ## Terminaux
 
-- vérifie nom, plateforme, espace et dernière activité ;
-- approuve une demande seulement après confirmation du demandeur ;
-- révoque immédiatement un terminal perdu ;
-- supprime les autorisations devenues inutiles ;
-- conserve le terminal dans le seul périmètre nécessaire.
+- vérifier nom, plateforme, espace et dernière activité ;
+- approuver une demande seulement après confirmation du demandeur ;
+- révoquer immédiatement un terminal perdu ;
+- supprimer les autorisations devenues inutiles ;
+- conserver le terminal dans le seul périmètre nécessaire.
 
 ## Journal sécurité
 
-Recherche les échecs répétés, limitations, créations de codes, enrôlements, révocations, changements de PIN, restaurations et opérations de maintenance. Le journal ne doit contenir ni PIN ni jeton complet.
+Rechercher les échecs répétés, limitations, créations de codes, enrôlements, révocations, changements de PIN, restaurations et opérations de maintenance. Le journal ne doit contenir ni PIN ni jeton complet.
 
 # 13. Gestion des espaces de travail
 
 Chaque espace isole utilisateurs, campagnes, inventaire et autorisations de terminal. Le référentiel officiel est global et partagé.
 
-Lors de la création d’un espace :
+Lors de la création d'un espace :
 
-1. choisis un nom métier non ambigu ;
-2. désigne un Pilote IRN initial ;
-3. vérifie ses coordonnées et son rôle ;
-4. enrôle explicitement les terminaux nécessaires ;
-5. crée ou importe l’inventaire ;
-6. réalise une campagne de recette.
+1. choisir un nom métier non ambigu ;
+2. désigner un Pilote IRN initial ;
+3. vérifier ses coordonnées et son rôle ;
+4. enrôler explicitement les terminaux nécessaires ;
+5. créer ou importer l'inventaire ;
+6. réaliser une campagne de recette.
 
-La suppression d’un espace est destructive et peut supprimer ses données rattachées. Exporte ce qui doit être conservé, réalise une sauvegarde vérifiée et confirme l’identifiant exact avant l’action.
+La suppression d'un espace est destructive et peut supprimer ses données rattachées. Exporter ce qui doit être conservé, réaliser une sauvegarde vérifiée et confirmer l'identifiant exact avant l'action.
 
 # 14. Référentiel officiel
 
-L’administrateur utilise **Administration → Référentiel officiel aDRI** pour :
+L'administrateur utilise **Administration → Référentiel officiel aDRI** pour :
 
 - vérifier la version distante ;
 - examiner les métadonnées et le rapport de validation ;
 - importer la version courante ;
-- consulter l’historique.
+- consulter l'historique.
 
-Avant une mise à jour, sauvegarde l’instance et teste la version sur une campagne de recette. Ne suppose pas que la version `v1.1` restera toujours la version courante.
+Avant une mise à jour, sauvegarder l'instance et tester la version sur une campagne de recette.
 
 # 15. Capacité et nettoyage
 
-Surveille :
+Surveiller :
 
 ```bash
 df -h
@@ -536,24 +536,24 @@ du -sh /var/lib/openirn-api /var/lib/openirn-api/backups /opt/openirn-releases/*
 journalctl --disk-usage
 ```
 
-Ne supprime pas directement des lignes MariaDB ni des fichiers de sauvegarde sans passer par une procédure approuvée. Pour les anciennes versions API, conserve au minimum la version active et la version de retour arrière validée. Vérifie qu’aucun processus n’utilise une version avant de la retirer.
+Ne pas supprimer directement des lignes MariaDB ni des fichiers de sauvegarde sans passer par une procédure approuvée. Pour les anciennes versions API, conserver au minimum la version active et la version de retour arrière validée. Vérifier qu'aucun processus n'utilise une version avant de la retirer.
 
-# 16. Fiche d’incident
+# 16. Fiche d'incident
 
-Collecte sans secret :
+Collecter sans secret :
 
 - date, heure et fuseau ;
 - espace concerné ;
-- rôle de l’utilisateur ;
-- plateforme et version de l’application ;
+- rôle de l'utilisateur ;
+- plateforme et version de l'application ;
 - action exacte ;
 - code HTTP et message visible ;
 - état des services ;
-- extraits de journaux limités à la fenêtre de l’incident ;
+- extraits de journaux limités à la fenêtre de l'incident ;
 - dernière sauvegarde connue ;
-- changements récents de serveur ou d’application.
+- changements récents de serveur ou d'application.
 
-Ne collecte pas le PIN, le code d’enrôlement, l’en-tête `Authorization`, un fichier `.env`, une clé privée ou un dump complet dans un ticket.
+Ne pas collecter le code PIN, le code d'enrôlement, l'en-tête `Authorization`, un fichier `.env`, une clé privée ou un dump complet dans un ticket.
 
 # 17. Checklist de changement
 
@@ -571,7 +571,7 @@ Après :
 - [ ] services actifs et activés ;
 - [ ] health interne et public en succès ;
 - [ ] aucun redémarrage en boucle ;
-- [ ] connexion et changement d’espace testés ;
+- [ ] connexion et changement d'espace testés ;
 - [ ] lecture et écriture de recette testées ;
 - [ ] synchronisation multi-terminal testée ;
 - [ ] sauvegarde post-changement créée ;
