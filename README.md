@@ -34,6 +34,13 @@ La solution couvre aujourd’hui :
 - la maintenance serveur et les sauvegardes MariaDB signées ;
 - une interface multilingue français / anglais / espagnol / allemand.
 
+## Documentation
+
+- [Guide d'utilisation](./docs/guide-utilisateur.md)
+- [Guide d'administration](./docs/administration-instance.md)
+- [Guide installation sereur API](./docs/installation-serveur-api.md)
+- [Guide de déploiement de l'application](./docs/deploiement-applications.md)
+
 ## Architecture générale
 
 OpenIRN est organisé autour de deux composants principaux.
