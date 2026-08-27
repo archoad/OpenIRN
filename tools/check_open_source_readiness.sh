@@ -114,7 +114,7 @@ fi
 
 legacy_db_term="sql""ite"
 if grep -RIn --exclude-dir=.git --exclude-dir=build --exclude='*.png' --exclude='*.jpg' --exclude='*.svg' \
-  -i "$legacy_db_term" README.md docs api flutter/lib server/openirn-api tools >/tmp/openirn_legacy_db_refs.txt 2>/dev/null; then
+  -i "$legacy_db_term" README.md docs flutter/lib server/openirn-api tools >/tmp/openirn_legacy_db_refs.txt 2>/dev/null; then
   fail "références à l’ancien stockage serveur encore présentes"
   sed 's/^/  - /' /tmp/openirn_legacy_db_refs.txt
 else

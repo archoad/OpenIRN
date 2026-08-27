@@ -1,27 +1,12 @@
 import '../../data/api/openirn_api_client.dart';
-import '../../data/repositories/local_activity_repository.dart';
-import '../../data/repositories/local_assessment_repository.dart';
-import '../../data/repositories/local_campaign_repository.dart';
-import '../../data/repositories/local_criterion_assignment_repository.dart';
-import '../../data/repositories/local_session_repository.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../data/repositories/local_sync_log_repository.dart';
-import '../../data/repositories/local_user_repository.dart';
-import '../models/app_user.dart';
 import '../models/irn_referential.dart';
 import '../models/sync_configuration.dart';
 import '../models/sync_log_event.dart';
 import 'sync_pull_import_service.dart';
-import 'sync_push_payload_service.dart';
 
-enum SyncAutomationOutcome {
-  localOnly,
-  offline,
-  upToDate,
-  pushed,
-  imported,
-  failed,
-}
+enum SyncAutomationOutcome { localOnly, offline, upToDate, imported, failed }
 
 class SyncAutomationResult {
   final SyncAutomationOutcome outcome;
@@ -42,55 +27,20 @@ class SyncAutomationResult {
       outcome != SyncAutomationOutcome.localOnly &&
       outcome != SyncAutomationOutcome.offline;
   bool get importedRemoteSnapshot => outcome == SyncAutomationOutcome.imported;
-  bool get pushedLocalSnapshot => outcome == SyncAutomationOutcome.pushed;
 }
 
 class SyncAutomationService {
   final LocalSyncConfigurationRepository configurationRepository;
-  final LocalCampaignRepository campaignRepository;
-  final LocalAssessmentRepository assessmentRepository;
-  final LocalCriterionAssignmentRepository assignmentRepository;
-  final LocalActivityRepository activityRepository;
-  final LocalUserRepository userRepository;
-  final LocalSessionRepository sessionRepository;
   final LocalSyncLogRepository syncLogRepository;
-  final SyncPushPayloadService payloadService;
   final SyncPullImportService pullImportService;
   final OpenIrnApiClient apiClient;
 
   const SyncAutomationService({
     this.configurationRepository = const LocalSyncConfigurationRepository(),
-    this.campaignRepository = const LocalCampaignRepository(),
-    this.assessmentRepository = const LocalAssessmentRepository(),
-    this.assignmentRepository = const LocalCriterionAssignmentRepository(),
-    this.activityRepository = const LocalActivityRepository(),
-    this.userRepository = const LocalUserRepository(),
-    this.sessionRepository = const LocalSessionRepository(),
     this.syncLogRepository = const LocalSyncLogRepository(),
-    this.payloadService = const SyncPushPayloadService(),
     this.pullImportService = const SyncPullImportService(),
     this.apiClient = const OpenIrnApiClient(),
   });
-
-  Future<SyncAutomationResult> synchronize({
-    required IrnReferential referential,
-    AppUser? activeUser,
-  }) async {
-    final pullResult = await pullLatestIfRemoteNewer(referential: referential);
-    switch (pullResult.outcome) {
-      case SyncAutomationOutcome.imported:
-      case SyncAutomationOutcome.localOnly:
-      case SyncAutomationOutcome.offline:
-      case SyncAutomationOutcome.failed:
-        return pullResult;
-      case SyncAutomationOutcome.upToDate:
-      case SyncAutomationOutcome.pushed:
-        return pushLocalSnapshot(
-          referential: referential,
-          activeUser: activeUser,
-        );
-    }
-  }
 
   Future<SyncAutomationResult> pullLatestIfRemoteNewer({
     required IrnReferential referential,
@@ -146,8 +96,7 @@ class SyncAutomationService {
     final knownLocally = syncEvents.any(
       (event) =>
           event.serverSyncId == latestServerSyncId &&
-          (event.type == SyncLogEventType.pushSucceeded ||
-              event.type == SyncLogEventType.importSucceeded),
+          event.type == SyncLogEventType.importSucceeded,
     );
     final comesFromThisDevice =
         latest.deviceId.trim().isNotEmpty &&
@@ -221,38 +170,6 @@ class SyncAutomationService {
       tenantId: configuration.tenantId,
       apiToken: configuration.apiToken,
       sinceServerSyncId: sinceServerSyncId,
-    );
-  }
-
-  Future<SyncAutomationResult> pushLocalSnapshot({
-    required IrnReferential referential,
-    AppUser? activeUser,
-  }) async {
-    final configuration = await configurationRepository.loadConfiguration();
-    if (!configuration.isConfigured) {
-      return const SyncAutomationResult(
-        outcome: SyncAutomationOutcome.localOnly,
-        title: 'Mode hors ligne uniquement',
-        message: 'La synchronisation automatique est désactivée ou incomplète.',
-      );
-    }
-
-    // Depuis le mode server-only, les écritures métier partent directement vers
-    // l’API au moment de l’action utilisateur. Ce hook reste appelé par certains
-    // écrans historiques, mais il ne doit plus republier un état local.
-    await _appendLog(
-      configuration: configuration,
-      type: SyncLogEventType.pushSucceeded,
-      title: 'Mode serveur uniquement',
-      message:
-          'Aucun push local nécessaire : les campagnes sont déjà écrites directement côté serveur.',
-    );
-
-    return const SyncAutomationResult(
-      outcome: SyncAutomationOutcome.upToDate,
-      title: 'Mode serveur uniquement',
-      message:
-          'Les données métier sont lues et écrites directement sur le serveur OpenIRN.',
     );
   }
 

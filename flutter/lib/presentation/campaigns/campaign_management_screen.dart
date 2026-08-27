@@ -11,7 +11,6 @@ import '../../domain/models/irn_referential.dart';
 import '../../domain/models/local_activity_event.dart';
 import '../../domain/models/local_campaign.dart';
 import '../../domain/services/app_sync_coordinator.dart';
-import '../../domain/services/sync_automation_service.dart';
 import '../../l10n/openirn_localizations.dart';
 import '../common/openirn_app_bar.dart';
 import '../common/responsive_autofocus.dart';
@@ -35,7 +34,6 @@ class CampaignManagementScreen extends StatefulWidget {
 class _CampaignManagementScreenState extends State<CampaignManagementScreen> {
   final _campaignRepository = const LocalCampaignRepository();
   final _activityRepository = const LocalActivityRepository();
-  final _syncAutomationService = const SyncAutomationService();
   final _configurationRepository = const LocalSyncConfigurationRepository();
   final _apiClient = const OpenIrnApiClient();
   final _appSyncCoordinator = AppSyncCoordinator.instance;
@@ -136,16 +134,10 @@ class _CampaignManagementScreenState extends State<CampaignManagementScreen> {
           description: campaign.name,
         ),
       );
-      final syncResult = await _syncAutomationService.pushLocalSnapshot(
-        referential: widget.referential,
-        activeUser: widget.activeUser,
-      );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${syncResult.title} — ${syncResult.message}'),
-          ),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(campaignCreatedTitle)));
       }
       await _refresh();
     } finally {
@@ -176,17 +168,6 @@ class _CampaignManagementScreenState extends State<CampaignManagementScreen> {
         campaignId: campaign.id,
       );
 
-      final syncResult = await _syncAutomationService.pushLocalSnapshot(
-        referential: widget.referential,
-        activeUser: widget.activeUser,
-      );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${syncResult.title} — ${syncResult.message}'),
-          ),
-        );
-      }
       await _refresh();
     } on ServerCampaignStoreException catch (error) {
       if (mounted) {

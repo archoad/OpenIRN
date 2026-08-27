@@ -1,7 +1,5 @@
 enum SyncLogEventType {
   connectionTest,
-  pushSucceeded,
-  pushFailed,
   pullSucceeded,
   pullFailed,
   importSucceeded,
@@ -11,10 +9,6 @@ enum SyncLogEventType {
     switch (this) {
       case SyncLogEventType.connectionTest:
         return 'connection_test';
-      case SyncLogEventType.pushSucceeded:
-        return 'push_succeeded';
-      case SyncLogEventType.pushFailed:
-        return 'push_failed';
       case SyncLogEventType.pullSucceeded:
         return 'pull_succeeded';
       case SyncLogEventType.pullFailed:
@@ -30,10 +24,6 @@ enum SyncLogEventType {
     switch (this) {
       case SyncLogEventType.connectionTest:
         return 'Test de connexion';
-      case SyncLogEventType.pushSucceeded:
-        return 'Push envoyé';
-      case SyncLogEventType.pushFailed:
-        return 'Push en échec';
       case SyncLogEventType.pullSucceeded:
         return 'Pull récupéré';
       case SyncLogEventType.pullFailed:
@@ -48,11 +38,9 @@ enum SyncLogEventType {
   bool get isSuccess {
     switch (this) {
       case SyncLogEventType.connectionTest:
-      case SyncLogEventType.pushSucceeded:
       case SyncLogEventType.pullSucceeded:
       case SyncLogEventType.importSucceeded:
         return true;
-      case SyncLogEventType.pushFailed:
       case SyncLogEventType.pullFailed:
       case SyncLogEventType.importFailed:
         return false;
@@ -65,12 +53,6 @@ enum SyncLogEventType {
       case 'connection_test':
       case 'connectiontest':
         return SyncLogEventType.connectionTest;
-      case 'push_succeeded':
-      case 'pushsucceeded':
-        return SyncLogEventType.pushSucceeded;
-      case 'push_failed':
-      case 'pushfailed':
-        return SyncLogEventType.pushFailed;
       case 'pull_succeeded':
       case 'pullsucceeded':
         return SyncLogEventType.pullSucceeded;

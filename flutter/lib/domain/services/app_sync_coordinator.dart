@@ -4,7 +4,6 @@ import 'package:flutter/widgets.dart';
 
 import '../../data/api/openirn_api_client.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
-import '../models/app_user.dart';
 import '../models/irn_referential.dart';
 import 'sync_automation_service.dart';
 
@@ -14,7 +13,6 @@ enum AppSyncState {
   listening,
   checking,
   imported,
-  pushed,
   offline,
   failed,
 }
@@ -34,16 +32,13 @@ class AppSyncCoordinator extends ChangeNotifier with WidgetsBindingObserver {
            configurationRepository ?? const LocalSyncConfigurationRepository();
 
   IrnReferential? _referential;
-  AppUser? _lastActiveUser;
   Timer? _pollTimer;
-  Timer? _pushDebounceTimer;
   Timer? _remoteEventReconnectTimer;
   StreamSubscription<OpenIrnSyncEvent>? _remoteEventSubscription;
   bool _observingLifecycle = false;
   bool _foregroundLoopsStarted = false;
   bool _syncRunning = false;
   bool _pendingPull = false;
-  bool _pendingPush = false;
   String? _lastRemoteEventServerSyncId;
   int _changeSerial = 0;
   AppSyncState _state = AppSyncState.idle;
@@ -51,7 +46,6 @@ class AppSyncCoordinator extends ChangeNotifier with WidgetsBindingObserver {
   String _message =
       'La synchronisation de fond sera lancée au chargement du référentiel.';
   DateTime? _lastImportedAt;
-  DateTime? _lastPushedAt;
   DateTime? _lastCheckedAt;
 
   AppSyncState get state => _state;
@@ -59,7 +53,6 @@ class AppSyncCoordinator extends ChangeNotifier with WidgetsBindingObserver {
   String get message => _message;
   int get changeSerial => _changeSerial;
   DateTime? get lastImportedAt => _lastImportedAt;
-  DateTime? get lastPushedAt => _lastPushedAt;
   DateTime? get lastCheckedAt => _lastCheckedAt;
   bool get hasImportedRemoteData => _lastImportedAt != null;
 
@@ -75,11 +68,9 @@ class AppSyncCoordinator extends ChangeNotifier with WidgetsBindingObserver {
   void stop() {
     _foregroundLoopsStarted = false;
     _pollTimer?.cancel();
-    _pushDebounceTimer?.cancel();
     _remoteEventReconnectTimer?.cancel();
     _remoteEventSubscription?.cancel();
     _pollTimer = null;
-    _pushDebounceTimer = null;
     _remoteEventReconnectTimer = null;
     _remoteEventSubscription = null;
     _setState(
@@ -87,52 +78,6 @@ class AppSyncCoordinator extends ChangeNotifier with WidgetsBindingObserver {
       title: 'Synchronisation arrêtée',
       message: 'La synchronisation de fond est suspendue.',
     );
-  }
-
-  void schedulePush({AppUser? activeUser}) {
-    _lastActiveUser = activeUser ?? _lastActiveUser;
-    _pushDebounceTimer?.cancel();
-    _pushDebounceTimer = Timer(
-      const Duration(seconds: 3),
-      () => pushNow(activeUser: _lastActiveUser),
-    );
-  }
-
-  Future<void> pushNow({AppUser? activeUser}) async {
-    final referential = _referential;
-    if (referential == null) {
-      return;
-    }
-    _lastActiveUser = activeUser ?? _lastActiveUser;
-
-    if (_syncRunning) {
-      _pendingPush = true;
-      return;
-    }
-
-    _syncRunning = true;
-    _setState(
-      AppSyncState.checking,
-      title: 'Publication en cours',
-      message: 'Publication automatique de ce terminal vers le serveur.',
-    );
-
-    try {
-      final result = await _syncAutomationService.pushLocalSnapshot(
-        referential: referential,
-        activeUser: activeUser ?? _lastActiveUser,
-      );
-      _applyResult(result, fromPush: true);
-    } catch (error) {
-      _setState(
-        AppSyncState.failed,
-        title: 'Publication automatique impossible',
-        message: error.toString(),
-      );
-    } finally {
-      _syncRunning = false;
-      _drainPendingWork();
-    }
   }
 
   Future<void> pullLatestNow() async {
@@ -157,7 +102,7 @@ class AppSyncCoordinator extends ChangeNotifier with WidgetsBindingObserver {
       final result = await _syncAutomationService.pullLatestIfRemoteNewer(
         referential: referential,
       );
-      _applyResult(result, fromPush: false);
+      _applyResult(result);
       if (result.outcome != SyncAutomationOutcome.localOnly) {
         _ensureRealtimeListener();
       }
@@ -204,11 +149,9 @@ class AppSyncCoordinator extends ChangeNotifier with WidgetsBindingObserver {
   void _stopForegroundLoopsOnly() {
     _foregroundLoopsStarted = false;
     _pollTimer?.cancel();
-    _pushDebounceTimer?.cancel();
     _remoteEventReconnectTimer?.cancel();
     _remoteEventSubscription?.cancel();
     _pollTimer = null;
-    _pushDebounceTimer = null;
     _remoteEventReconnectTimer = null;
     _remoteEventSubscription = null;
   }
@@ -276,7 +219,7 @@ class AppSyncCoordinator extends ChangeNotifier with WidgetsBindingObserver {
     );
   }
 
-  void _applyResult(SyncAutomationResult result, {required bool fromPush}) {
+  void _applyResult(SyncAutomationResult result) {
     _lastCheckedAt = DateTime.now().toUtc();
 
     switch (result.outcome) {
@@ -310,18 +253,10 @@ class AppSyncCoordinator extends ChangeNotifier with WidgetsBindingObserver {
           message: result.message,
         );
         break;
-      case SyncAutomationOutcome.pushed:
-        _lastPushedAt = DateTime.now().toUtc();
-        _setState(
-          AppSyncState.pushed,
-          title: result.title,
-          message: result.message,
-        );
-        break;
       case SyncAutomationOutcome.upToDate:
         _setState(
           AppSyncState.listening,
-          title: fromPush ? 'Version locale publiée' : 'Données à jour',
+          title: 'Données à jour',
           message: result.message,
         );
         break;
@@ -329,14 +264,6 @@ class AppSyncCoordinator extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _drainPendingWork() {
-    if (_pendingPush) {
-      _pendingPush = false;
-      Future<void>.delayed(
-        const Duration(seconds: 1),
-        () => pushNow(activeUser: _lastActiveUser),
-      );
-      return;
-    }
     if (_pendingPull) {
       _pendingPull = false;
       Future<void>.delayed(const Duration(seconds: 1), pullLatestNow);

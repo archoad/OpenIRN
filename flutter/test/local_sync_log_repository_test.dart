@@ -16,11 +16,11 @@ void main() {
 
     await repository.appendEvent(
       SyncLogEvent.create(
-        type: SyncLogEventType.pushSucceeded,
+        type: SyncLogEventType.connectionTest,
         tenantId: 'archoad',
         deviceId: 'device-a',
-        title: 'Push OK',
-        message: 'Snapshot envoyé.',
+        title: 'Connexion OK',
+        message: 'Serveur joignable.',
         serverSyncId: 'sync-1',
         campaignCount: 2,
         now: DateTime.utc(2026, 6, 24, 10),
@@ -42,7 +42,7 @@ void main() {
 
     expect(events, hasLength(2));
     expect(events.first.type, SyncLogEventType.pullSucceeded);
-    expect(events.last.type, SyncLogEventType.pushSucceeded);
+    expect(events.last.type, SyncLogEventType.connectionTest);
     expect(events.last.serverSyncId, 'sync-1');
   });
 

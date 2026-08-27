@@ -51,7 +51,6 @@ BACKUP_PROTECTIVE_ENABLED = os.environ.get("OPENIRN_API_BACKUP_PROTECTIVE_ENABLE
 BACKUP_PROTECTIVE_MIN_INTERVAL_MINUTES = int(os.environ.get("OPENIRN_API_BACKUP_PROTECTIVE_MIN_INTERVAL_MINUTES", "30"))
 BACKUP_SIGNATURE_SECRET = os.environ.get("OPENIRN_API_BACKUP_SIGNATURE_SECRET", "").strip()
 MARIADB_SCHEMA_PATH = Path(os.environ.get("OPENIRN_API_MARIADB_SCHEMA", str(Path(__file__).resolve().parents[1] / "sql" / "schema_mariadb.sql")))
-MARIADB_SCHEMA_COMPAT_PATH = Path(os.environ.get("OPENIRN_API_MARIADB_SCHEMA_COMPAT", str(Path(__file__).resolve().parents[1] / "sql" / "165a1_widen_sync_events.sql")))
 MARIADB_DUMP_BIN = os.environ.get("OPENIRN_MARIADB_DUMP_BIN", "").strip()
 TENANT_RE = re.compile(r"[^a-zA-Z0-9_.-]+")
 DEVICE_ID_RE = re.compile(r"[^a-zA-Z0-9_.:-]+")
@@ -76,9 +75,6 @@ AUTH_MAX_FAILED_BY_IP = int(os.environ.get("OPENIRN_AUTH_MAX_FAILED_BY_IP", "20"
 AUTH_ATTEMPT_RETENTION_DAYS = int(os.environ.get("OPENIRN_AUTH_ATTEMPT_RETENTION_DAYS", "30"))
 SESSION_TTL_MINUTES = int(os.environ.get("OPENIRN_SESSION_TTL_MINUTES", "480"))
 SESSION_IDLE_TIMEOUT_MINUTES = int(os.environ.get("OPENIRN_SESSION_IDLE_TIMEOUT_MINUTES", "30"))
-LEGACY_GLOBAL_BEARER_ENABLED = os.environ.get("OPENIRN_LEGACY_GLOBAL_BEARER_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
-
-
 def _positive_int_env(name: str, default: int) -> int:
     raw = os.environ.get(name, str(default)).strip()
     try:
@@ -539,9 +535,8 @@ def _json_sha256(value: Any) -> str:
 
 
 def _backup_signing_secret() -> str:
-    # Backups use their own dedicated secret. OPENIRN_API_TOKEN is deliberately
-    # not reused here: the historical global bearer is deprecated and must not
-    # remain a hidden signing dependency.
+    # Backups use their own dedicated secret and never depend on API
+    # authentication credentials.
     return BACKUP_SIGNATURE_SECRET
 
 
@@ -608,16 +603,6 @@ def _parse_datetime(value: Any) -> datetime:
         return datetime.fromtimestamp(0, timezone.utc)
 
 
-def _raw_configured_api_token() -> str:
-    return os.environ.get("OPENIRN_API_TOKEN", "").strip()
-
-
-def _configured_api_token() -> str:
-    if not LEGACY_GLOBAL_BEARER_ENABLED:
-        return ""
-    return _raw_configured_api_token()
-
-
 def _extract_bearer_token(request: Request) -> str:
     authorization = request.headers.get("authorization", "").strip()
     if not authorization:
@@ -660,24 +645,6 @@ def _enrollment_code_hash(tenant_id: str, code: str) -> str:
         code,
         _enrollment_code_secret(),
     )
-
-
-def _enrollment_code_hash_candidates(tenant_id: str, code: str) -> list[str]:
-    # The public historical peppers are verification-only during the short
-    # lifetime of codes issued before this migration. New codes always use the
-    # deployment secret and never OPENIRN_API_TOKEN.
-    hashes = [
-        _enrollment_code_hash(tenant_id, code),
-        _enrollment_code_hash_with_pepper(tenant_id, code, "openirn-device-enrollment-v2"),
-        _enrollment_code_hash_with_pepper(tenant_id, code, "openirn-device-enrollment-bootstrap-v1"),
-        _enrollment_code_hash_with_pepper(tenant_id, code, "openirn-device-enrollment"),
-    ]
-    legacy_api_token = _raw_configured_api_token()
-    if legacy_api_token:
-        # Compatibility only for already-issued codes created before the
-        # bearer-global deprecation. This does not re-enable API bearer access.
-        hashes.append(_enrollment_code_hash_with_pepper(tenant_id, code, legacy_api_token))
-    return list(dict.fromkeys(hashes))
 
 
 def _normalize_enrollment_code(value: Any) -> str:
@@ -793,10 +760,6 @@ def _session_auth_context(provided_token: str) -> dict[str, Any] | None:
         return None
 
 
-def _is_active_session_token(provided_token: str) -> bool:
-    return _session_auth_context(provided_token) is not None
-
-
 def _device_token_auth_context(provided_token: str) -> dict[str, Any] | None:
     token_hash = _secret_hash(provided_token)
     now = _utc_now().isoformat()
@@ -823,7 +786,7 @@ def _device_token_auth_context(provided_token: str) -> dict[str, Any] | None:
             _touch_terminal(con, str(row["device_id"] or ""), now)
             con.commit()
             return {
-                "authMode": "legacy_device_token",
+                "authMode": "device_token",
                 "tenantId": row["tenant_id"],
                 "deviceId": row["device_id"],
                 "userId": "",
@@ -845,16 +808,6 @@ def _request_auth_context(request: Request) -> dict[str, Any] | None:
     device_context = _device_token_auth_context(provided_token)
     if device_context is not None:
         return device_context
-
-    expected_token = _configured_api_token()
-    if expected_token and hmac.compare_digest(provided_token, expected_token):
-        return {
-            "authMode": "legacy_global_bearer",
-            "tenantId": "",
-            "deviceId": "",
-            "userId": "",
-            "userRole": "",
-        }
 
     return None
 
@@ -878,10 +831,6 @@ def _request_has_solution_admin_authorization(request: Request) -> bool:
     return _is_solution_admin_context(_request_auth_context(request))
 
 
-def _request_has_api_authorization(request: Request) -> bool:
-    return _request_auth_context(request) is not None
-
-
 def _authorization_unavailable_exception() -> HTTPException:
     return HTTPException(status_code=403, detail="Session expirée ou autorisation OpenIRN invalide")
 
@@ -898,15 +847,10 @@ def _require_role_authorization(
         raise _authorization_unavailable_exception()
 
     auth_mode = str(context.get("authMode") or "")
-    if auth_mode == "legacy_device_token":
+    if auth_mode == "device_token":
         raise HTTPException(
             status_code=403,
             detail="Ce terminal n’est pas autorisé pour modifier les données ou administrer OpenIRN",
-        )
-    if auth_mode == "legacy_global_bearer":
-        raise HTTPException(
-            status_code=403,
-            detail="Le bearer global legacy ne donne plus de droits d’écriture ou d’administration",
         )
 
     role = _role_normalize(context.get("userRole"))
@@ -952,12 +896,6 @@ def _require_device_or_authorized_read(request: Request, tenant_id: str) -> dict
     context = _request_auth_context(request)
     if context is None:
         raise _authorization_unavailable_exception()
-    auth_mode = str(context.get("authMode") or "")
-    if auth_mode == "legacy_global_bearer":
-        raise HTTPException(
-            status_code=403,
-            detail="Le bearer global legacy ne donne plus accès aux données OpenIRN",
-        )
     if not tenant_id or str(context.get("tenantId") or "") == tenant_id:
         return context
     if _is_solution_admin_context(context):
@@ -971,7 +909,7 @@ def _require_device_token_authorization(
     payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     context = _request_auth_context(request)
-    if context is None or str(context.get("authMode") or "") != "legacy_device_token":
+    if context is None or str(context.get("authMode") or "") != "device_token":
         raise HTTPException(
             status_code=403,
             detail="Le jeton secret de ce terminal est absent, invalide ou révoqué",
@@ -1316,28 +1254,11 @@ def _create_api_session(
     return session_id, token, expires_at
 
 
-def _is_active_device_token(provided_token: str) -> bool:
-    return _device_token_auth_context(provided_token) is not None
-
-
-def _require_api_token(request: Request) -> None:
-    # Kept for compatibility with transition endpoints.  New endpoint code
-    # should prefer the explicit helpers below:
-    #   _require_admin_authorization
-    #   _require_campaign_manager_authorization
-    #   _require_write_authorization
-    #   _require_sync_read_access
-    if _request_has_api_authorization(request):
-        return
-    raise _authorization_unavailable_exception()
-
-
 def _require_sync_read_access(request: Request, tenant_id: str) -> None:
     """Authorize read-only synchronization endpoints.
 
     Read-only endpoints accept a tenant-bound user session or device bearer.
-    The public terminal id and the deprecated global bearer never grant access
-    to tenant data.
+    The public terminal id never grants access to tenant data.
     """
     _require_device_or_authorized_read(request, tenant_id)
 
@@ -1367,8 +1288,6 @@ def _apply_schema(migration_mysql_url: str) -> None:
         raise RuntimeError(f"OpenIRN MariaDB schema not found: {MARIADB_SCHEMA_PATH}")
     with _db(migration_mysql_url) as con:
         con.executescript(MARIADB_SCHEMA_PATH.read_text(encoding="utf-8"))
-        if MARIADB_SCHEMA_COMPAT_PATH.exists():
-            con.executescript(MARIADB_SCHEMA_COMPAT_PATH.read_text(encoding="utf-8"))
         _migrate_tenants_schema(con)
         _migrate_existing_entity_ids_to_uuid(con)
         _delete_legacy_revoked_authorized_devices(con)
@@ -5803,8 +5722,7 @@ async def devices_enrollment_consume(request: Request) -> dict[str, Any]:
     requested_device_id = _normalize_device_id(payload.get("deviceId"))
     now = _utc_now()
     client_ip = _request_client_ip(request)
-    code_hashes = _enrollment_code_hash_candidates(tenant_id, code)
-    placeholders = ", ".join("?" for _ in code_hashes)
+    code_hash = _enrollment_code_hash(tenant_id, code)
 
     with _db() as con:
         tenant_exists = con.execute("SELECT 1 FROM tenants WHERE id = ?", (tenant_id,)).fetchone()
@@ -5822,14 +5740,14 @@ async def devices_enrollment_consume(request: Request) -> dict[str, Any]:
             con.commit()
             raise HTTPException(status_code=400, detail="Invalid enrollment code")
         enrollment = con.execute(
-            f"""
+            """
             SELECT tenant_id, enrollment_id, created_by_user_id, label,
                    expires_at, consumed_at, consumed_by_device_id, created_at
             FROM device_enrollment_codes
-            WHERE tenant_id = ? AND code_hash IN ({placeholders})
+            WHERE tenant_id = ? AND code_hash = ?
             FOR UPDATE
             """,
-            (tenant_id, *code_hashes),
+            (tenant_id, code_hash),
         ).fetchone()
         if enrollment is None:
             con.commit()
@@ -6047,8 +5965,7 @@ def official_referential_current(
     tenantId: str = Query(default="default", min_length=1, max_length=80),
 ) -> dict[str, Any]:
     tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
-    if not _request_has_api_authorization(request):
-        _require_active_device(request, tenant_id)
+    _require_device_or_authorized_read(request, tenant_id)
     with _db() as con:
         current_row = _load_current_official_referential(con, tenant_id)
         if current_row is None:

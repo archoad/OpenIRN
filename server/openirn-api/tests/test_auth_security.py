@@ -59,6 +59,15 @@ class _PinConnection(_Connection):
 
 
 class DeviceAuthorizationTests(unittest.TestCase):
+    def test_unknown_bearer_is_not_accepted_as_global_token(self):
+        request = _Request()
+        request.headers["authorization"] = "Bearer obsolete-global-token"
+        with (
+            patch.object(api, "_session_auth_context", return_value=None),
+            patch.object(api, "_device_token_auth_context", return_value=None),
+        ):
+            self.assertIsNone(api._request_auth_context(request))
+
     def test_public_device_id_no_longer_grants_tenant_read(self):
         with patch.object(api, "_request_auth_context", return_value=None):
             with self.assertRaises(HTTPException) as raised:
@@ -92,18 +101,10 @@ class DeviceAuthorizationTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status_code, 403)
 
-    def test_global_legacy_bearer_no_longer_grants_tenant_read(self):
-        context = {"authMode": "legacy_global_bearer", "tenantId": ""}
-        with patch.object(api, "_request_auth_context", return_value=context):
-            with self.assertRaises(HTTPException) as raised:
-                api._require_device_or_authorized_read(_Request(), "tenant-a")
-
-        self.assertEqual(raised.exception.status_code, 403)
-
     def test_device_token_is_bound_to_tenant_and_device_id(self):
         request = _Request({"deviceId": "device-b"})
         context = {
-            "authMode": "legacy_device_token",
+            "authMode": "device_token",
             "tenantId": "tenant-a",
             "deviceId": "device-a",
         }

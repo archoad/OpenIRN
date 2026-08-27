@@ -272,7 +272,6 @@ Lors d’une release, ces huit sources Markdown sont converties dans `docs/pdf/`
 
 ```text
 OpenIRN/
-├── api/                 # contrats OpenAPI et brouillons d’API
 ├── docs/                # guides publics et style de génération PDF
 ├── flutter/             # application Flutter multi-plateforme
 ├── server/              # API serveur, SQL, systemd et outils serveur

@@ -170,7 +170,6 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   bool _isLoadingAssignments = true;
   bool _isSavingAnswers = false;
   String? _localStatusMessage;
-  Timer? _autoPushDebounce;
   Timer? _autoPullTimer;
   Timer? _remoteEventReconnectTimer;
   StreamSubscription<dynamic>? _remoteEventSubscription;
@@ -375,7 +374,6 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   @override
   void dispose() {
     _appSyncCoordinator.removeListener(_handleBackgroundSyncUpdate);
-    _autoPushDebounce?.cancel();
     _autoPullTimer?.cancel();
     _remoteEventReconnectTimer?.cancel();
     _remoteEventSubscription?.cancel();
@@ -498,48 +496,6 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     );
   }
 
-  void _scheduleAutomaticPush() {
-    _autoPushDebounce?.cancel();
-    _autoPushDebounce = Timer(
-      const Duration(seconds: 3),
-      () => _pushLocalVersion(),
-    );
-  }
-
-  Future<void> _pushLocalVersion() async {
-    if (_autoSyncRunning) {
-      _autoPushDebounce = Timer(
-        const Duration(seconds: 2),
-        () => _pushLocalVersion(),
-      );
-      return;
-    }
-    _autoSyncRunning = true;
-    try {
-      final result = await _syncAutomationService.pushLocalSnapshot(
-        referential: widget.referential,
-        activeUser: widget.activeUser,
-      );
-      if (!mounted) {
-        return;
-      }
-      if (result.pushedLocalSnapshot) {
-        setState(() {
-          _localStatusMessage =
-              'Synchronisation automatique publiée sur le serveur.';
-        });
-      } else if (result.outcome == SyncAutomationOutcome.offline ||
-          result.outcome == SyncAutomationOutcome.failed) {
-        setState(() {
-          _localStatusMessage =
-              'Synchronisation automatique différée : ${result.title}';
-        });
-      }
-    } finally {
-      _autoSyncRunning = false;
-    }
-  }
-
   Future<void> _pullLatestRemoteVersion() async {
     if (_autoSyncRunning) {
       return;
@@ -636,7 +592,6 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       ),
     );
     await _loadAssignments();
-    _scheduleAutomaticPush();
   }
 
   Future<void> _setAnswer(IrnCriterion criterion, IrnAnswer answer) async {
@@ -861,7 +816,6 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
         toValue: toValue,
       ),
     );
-    _scheduleAutomaticPush();
   }
 
   Map<IrnPillar, List<IrnCriterion>> _visibleCriteriaByPillar(

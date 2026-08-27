@@ -200,7 +200,6 @@ class _UserListScreenState extends State<UserListScreen> {
       }
 
       await _refresh();
-      await _appSyncCoordinator.pushNow();
 
       if (!mounted) {
         return;
