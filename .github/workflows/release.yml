@@ -353,15 +353,26 @@ jobs:
             if ([string]::IsNullOrWhiteSpace($iconPath)) {
               throw "An expected MSIX icon path is missing from AppxManifest.xml"
             }
-            $iconFile = Join-Path $unpack $iconPath
-            if (-not (Test-Path -LiteralPath $iconFile -PathType Leaf)) {
+            $iconDirectory = Join-Path $unpack (Split-Path $iconPath -Parent)
+            $iconBaseName = [System.IO.Path]::GetFileNameWithoutExtension($iconPath)
+            $iconExtension = [System.IO.Path]::GetExtension($iconPath)
+            $qualifiedIconFiles = @(
+              Get-ChildItem -LiteralPath $iconDirectory -File -ErrorAction SilentlyContinue |
+                Where-Object {
+                  $_.Name -eq "${iconBaseName}${iconExtension}" -or
+                  $_.Name -like "${iconBaseName}.scale-*${iconExtension}"
+                }
+            )
+            if ($qualifiedIconFiles.Count -eq 0) {
               throw "Expected MSIX icon is missing: $iconPath"
             }
-            $iconInfo = Get-Item -LiteralPath $iconFile
-            if ($iconInfo.Length -le 0) {
-              throw "Expected MSIX icon is empty: $iconPath"
+            foreach ($iconInfo in $qualifiedIconFiles) {
+              if ($iconInfo.Length -le 0) {
+                throw "Expected MSIX icon is empty: $($iconInfo.FullName)"
+              }
+              $relativeIconPath = $iconInfo.FullName.Substring($unpack.Length + 1)
+              Write-Host "MSIX icon      : $relativeIconPath ($($iconInfo.Length) bytes)"
             }
-            Write-Host "MSIX icon      : $iconPath ($($iconInfo.Length) bytes)"
           }
 
       - name: Sign OpenIRN MSIX
@@ -449,6 +460,7 @@ jobs:
           sudo apt-get install --yes --no-install-recommends \
             lmodern \
             pandoc \
+            texlive-fonts-recommended \
             texlive-xetex \
             texlive-latex-extra
 

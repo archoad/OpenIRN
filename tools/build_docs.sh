@@ -26,10 +26,18 @@ for command_name in pandoc xelatex kpsewhich; do
 	fi
 done
 
-if ! kpsewhich lmodern.sty >/dev/null 2>&1; then
-	echo "Dépendance LaTeX absente : lmodern.sty (paquet Ubuntu : lmodern)" >&2
-	exit 1
-fi
+tex_dependencies=(
+	"lmodern.sty|lmodern"
+	"pzdr.tfm|texlive-fonts-recommended"
+)
+
+for dependency in "${tex_dependencies[@]}"; do
+	IFS='|' read -r tex_file ubuntu_package <<< "${dependency}"
+	if ! kpsewhich "${tex_file}" >/dev/null 2>&1; then
+		echo "Dépendance LaTeX absente : ${tex_file} (paquet Ubuntu : ${ubuntu_package})" >&2
+		exit 1
+	fi
+done
 
 test -f "${logo_path}"
 test -f "${header_path}"

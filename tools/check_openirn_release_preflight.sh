@@ -218,6 +218,7 @@ require_grep 'environment:[[:space:]]*artifact-signing' .github/workflows/releas
 require_grep 'openirnsign' .github/workflows/release.yml 'compte Artifact Signing configuré'
 require_grep 'openirn-public' .github/workflows/release.yml 'profil Public Trust configuré'
 require_grep '^[[:space:]]*lmodern[[:space:]]*\\' .github/workflows/release.yml 'dépendance LaTeX lmodern configurée pour les PDF'
+require_grep '^[[:space:]]*texlive-fonts-recommended[[:space:]]*\\' .github/workflows/release.yml 'polices TeX recommandées configurées pour les PDF'
 forbidden_grep 'WINDOWS_CERTIFICATE_BASE64|WINDOWS_CERTIFICATE_PASSWORD|openirn-windows-codesign\.pfx' .github/workflows/release.yml 'ancienne chaîne Windows PFX'
 forbidden_grep 'MACOS_CERTIFICATE_BASE64|notarytool|flutter build macos' .github/workflows/release.yml 'release macOS Apple dans le profil courant'
 forbidden_grep 'IOS_CERTIFICATE_BASE64|IOS_PROVISIONING_PROFILE_BASE64|flutter build ipa' .github/workflows/release.yml 'release iOS Apple dans le profil courant'
@@ -242,6 +243,7 @@ require_grep 'msix:create' .github/workflows/release.yml 'construction MSIX conf
 require_grep 'MSIX_LOGO_PATH:.*Icon-App-1024x1024@1x\.png' .github/workflows/release.yml 'source de l icône OpenIRN MSIX configurée'
 require_grep '[[:space:]]--logo-path.*MSIX_LOGO_PATH' .github/workflows/release.yml 'injection de l icône OpenIRN dans le MSIX configurée'
 require_grep 'Square44x44Logo\.targetsize-256\.png' .github/workflows/release.yml 'contrôle des ressources d icône MSIX configuré'
+require_grep 'qualifiedIconFiles' .github/workflows/release.yml 'contrôle des ressources MSIX qualifiées par échelle configuré'
 
 printf '\n== Apple optionnel ==\n'
 if [[ "$WITH_APPLE" == true ]]; then
