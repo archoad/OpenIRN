@@ -5,6 +5,7 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 output_dir="${project_root}/docs/pdf"
 logo_path="${project_root}/flutter/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-App-1024x1024@1x.png"
 header_path="${project_root}/docs/pdf/openirn-header.tex"
+archive_path="${output_dir}/openirn-documentation-fr-en.zip"
 
 cd "${project_root}"
 
@@ -19,7 +20,7 @@ documents=(
 	"docs/en/instance-administration.md|openirn-instance-administration-en.pdf|en-US"
 )
 
-for command_name in pandoc xelatex kpsewhich; do
+for command_name in pandoc xelatex kpsewhich zip; do
 	if ! command -v "${command_name}" >/dev/null 2>&1; then
 		echo "Commande requise absente : ${command_name}" >&2
 		exit 1
@@ -42,6 +43,7 @@ done
 test -f "${logo_path}"
 test -f "${header_path}"
 mkdir -p "${output_dir}"
+generated_pdfs=()
 
 for document in "${documents[@]}"; do
 	IFS='|' read -r source_relative output_name document_language <<< "${document}"
@@ -69,5 +71,11 @@ for document in "${documents[@]}"; do
 		--variable="papersize:a4" \
 		--variable="geometry:margin=22mm" \
 		--output="${output_path}"
+	generated_pdfs+=("${output_path}")
 	echo "PDF créé : ${output_path}"
 done
+
+rm -f "${archive_path}"
+zip -j "${archive_path}" "${generated_pdfs[@]}"
+zip -T "${archive_path}"
+echo "Archive documentaire créée : ${archive_path}"

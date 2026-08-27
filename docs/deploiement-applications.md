@@ -11,7 +11,7 @@ Les releases GitHub OpenIRN publient actuellement des applications signées pour
 | Plateforme | Artefact actuellement publié | Déploiement depuis GitHub Release |
 |---|---|---|
 | Android | `openirn-android.apk`, `openirn-android.aab` | oui |
-| Windows x64 | `openirn-windows-x64.msix`, `openirn-windows-signed.zip` | oui |
+| Windows x64 | `openirn-windows-x64.msix`, `openirn-windows-signed.zip`, ou Microsoft Store | oui |
 | macOS | aucun artefact signé/notarizé | non |
 | iOS/iPadOS | aucun IPA/TestFlight | non |
 
@@ -120,6 +120,50 @@ Get-AppxPackage -Name Archoad.OpenIRN |
 ```
 
 Une mise à jour MSIX doit utiliser la même identité et un numéro de version supérieur. Tester d'abord la mise à jour sur un terminal pilote déjà enrôlé.
+
+## Installation depuis le Microsoft Store
+
+Le workflow de release construit deux packages Windows distincts :
+
+- `openirn-windows-x64.msix`, signé par Azure Artifact Signing, reste destiné au téléchargement direct depuis la GitHub Release ;
+- `OpenIRN-Store.msix` utilise l'identité attribuée par Partner Center. Ce fichier de soumission n'est pas joint à la GitHub Release et ne doit pas être installé directement. Microsoft Store le signe après certification et distribue le package final.
+
+Lorsque la fiche OpenIRN est publiée dans le Store, rechercher **OpenIRN** dans Microsoft Store, vérifier que l'éditeur affiché est **archoad FR**, puis cliquer sur **Installer**. Les mises à jour suivantes sont distribuées par le Store.
+
+Contrôler le package installé :
+
+```powershell
+Get-AppxPackage -Name archoadFR.OpenIRN |
+  Select-Object Name,PackageFamilyName,PackageFullName,Version,Publisher
+```
+
+L'identité Store est différente de celle du MSIX distribué directement. Windows ne peut donc pas mettre l'un à jour avec l'autre. Choisir un canal de distribution par poste et désinstaller l'ancien package avant de changer de canal, après avoir vérifié que les données nécessaires sont synchronisées avec le serveur.
+
+## Publication automatique sur le Microsoft Store
+
+Cette section concerne le mainteneur de la release. Partner Center a attribué les valeurs suivantes à OpenIRN :
+
+| Propriété | Valeur |
+|---|---|
+| `Package/Identity/Name` | `archoadFR.OpenIRN` |
+| `Package/Identity/Publisher` | `CN=0C16A5BC-1E9E-4174-A14C-FD52C54BD219` |
+| `Package/Properties/PublisherDisplayName` | `archoad FR` |
+| Package Family Name | `archoadFR.OpenIRN_40n6zg9mmw8te` |
+| Package SID | `S-1-15-2-1093717781-299261422-2075608443-880705312-3180602753-3190663317-2185964278` |
+
+Avant d'activer l'automatisation :
+
+1. vérifier que le produit est gratuit : Microsoft limite actuellement cette automatisation GitHub Actions aux produits gratuits ;
+2. terminer une première soumission manuelle dans Partner Center et attendre que l'application soit publiée ;
+3. enregistrer une application Microsoft Entra et l'ajouter aux utilisateurs Partner Center avec le rôle **Manager** ;
+4. créer dans le dépôt GitHub l'environnement `microsoft-store` ;
+5. ajouter à cet environnement les secrets `PARTNER_CENTER_TENANT_ID`, `PARTNER_CENTER_SELLER_ID`, `PARTNER_CENTER_CLIENT_ID` et `PARTNER_CENTER_CLIENT_SECRET` ;
+6. ajouter la variable `MICROSOFT_STORE_PRODUCT_ID` avec l'identifiant produit affiché par Partner Center. Cet identifiant n'est pas `archoadFR.OpenIRN` ;
+7. laisser `MICROSOFT_STORE_PUBLISH_ENABLED` absente ou égale à `false` pendant l'amorçage ;
+8. lancer une release et télécharger l'artefact GitHub Actions `openirn-windows-store-submission` si le package de la première soumission est nécessaire ;
+9. une fois la première version publiée, définir `MICROSOFT_STORE_PUBLISH_ENABLED=true` dans l'environnement `microsoft-store`.
+
+À chaque tag `vX.Y.Z`, le workflow vérifie l'identité et la version du MSIX Store, puis exécute la soumission automatique si cette variable vaut exactement `true`. La version Flutter `X.Y.Z+build` produit un MSIX direct `X.Y.Z.build` et un MSIX Store `X.Y.Z.0` : le quatrième composant reste à zéro car il est réservé par Microsoft Store. Une version déjà soumise ou inférieure à celle du Store sera refusée. Une règle d'approbation obligatoire sur l'environnement GitHub mettra le job en attente ; ne pas en configurer si la publication doit être entièrement automatique.
 
 ## Option portable : ZIP signé
 

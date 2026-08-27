@@ -51,6 +51,7 @@ AGENTS.md
 
 # Generated release documentation
 /docs/pdf/*.pdf
+/docs/pdf/*.zip
 
 # Release signing material — never commit private signing assets
 /secrets/

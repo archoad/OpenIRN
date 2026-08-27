@@ -30,6 +30,11 @@ env:
   APP_BUNDLE_ID: io.github.archoad.openirn
   PUBLISHER_SUBJECT: 'CN=Archoad, O=Archoad, L=Noyen-sur-Sarthe, S=Sarthe, C=FR'
   MSIX_IDENTITY_NAME: Archoad.OpenIRN
+  STORE_MSIX_IDENTITY_NAME: archoadFR.OpenIRN
+  STORE_MSIX_PUBLISHER: 'CN=0C16A5BC-1E9E-4174-A14C-FD52C54BD219'
+  STORE_MSIX_PUBLISHER_DISPLAY_NAME: 'archoad FR'
+  STORE_MSIX_PFN: archoadFR.OpenIRN_40n6zg9mmw8te
+  STORE_MSIX_PACKAGE_SID: S-1-15-2-1093717781-299261422-2075608443-880705312-3180602753-3190663317-2185964278
   MSIX_LOGO_PATH: 'ios\Runner\Assets.xcassets\AppIcon.appiconset\Icon-App-1024x1024@1x.png'
   ARTIFACT_SIGNING_ENDPOINT: https://neu.codesigning.azure.net/
   ARTIFACT_SIGNING_ACCOUNT: openirnsign
@@ -263,8 +268,11 @@ jobs:
             }
           }
           $msixVersion = "$major.$minor.$patch.$build"
-          Write-Host "MSIX version: $msixVersion"
+          $storeMsixVersion = "$major.$minor.$patch.0"
+          Write-Host "Direct MSIX version         : $msixVersion"
+          Write-Host "Microsoft Store MSIX version: $storeMsixVersion"
           "MSIX_VERSION=$msixVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "STORE_MSIX_VERSION=$storeMsixVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Create unsigned MSIX
         working-directory: flutter
@@ -417,6 +425,86 @@ jobs:
             throw "MSIX signature verification failed with exit code $LASTEXITCODE"
           }
 
+      - name: Create Microsoft Store MSIX
+        working-directory: flutter
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "build\windows\msix-store" | Out-Null
+          if (-not (Test-Path -LiteralPath $env:MSIX_LOGO_PATH -PathType Leaf)) {
+            throw "OpenIRN Microsoft Store logo not found: $env:MSIX_LOGO_PATH"
+          }
+          dart run msix:create `
+            --build-windows false `
+            --sign-msix false `
+            --install-certificate false `
+            --store `
+            --architecture x64 `
+            --display-name "OpenIRN" `
+            --publisher-display-name "$env:STORE_MSIX_PUBLISHER_DISPLAY_NAME" `
+            --identity-name "$env:STORE_MSIX_IDENTITY_NAME" `
+            --publisher "$env:STORE_MSIX_PUBLISHER" `
+            --version "$env:STORE_MSIX_VERSION" `
+            --logo-path "$env:MSIX_LOGO_PATH" `
+            --output-path "build\windows\msix-store" `
+            --output-name "OpenIRN-Store"
+          $storeMsix = "build\windows\msix-store\OpenIRN-Store.msix"
+          if (-not (Test-Path -LiteralPath $storeMsix -PathType Leaf)) {
+            Get-ChildItem "build\windows\msix-store" -Recurse | Format-Table FullName, Length
+            throw "Expected Microsoft Store MSIX not found: $storeMsix"
+          }
+          Get-Item -LiteralPath $storeMsix | Format-List FullName, Length, LastWriteTime
+
+      - name: Inspect Microsoft Store MSIX identity
+        shell: pwsh
+        run: |
+          $storeMsix = "${{ github.workspace }}\flutter\build\windows\msix-store\OpenIRN-Store.msix"
+          $unpack = Join-Path $env:RUNNER_TEMP "openirn-store-msix-unpacked"
+          if (Test-Path $unpack) {
+            Remove-Item $unpack -Recurse -Force
+          }
+          $makeAppx = Get-ChildItem `
+            "${env:ProgramFiles(x86)}\Windows Kits\10\bin" `
+            -Recurse `
+            -Filter makeappx.exe `
+            -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\x64\\makeappx\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $makeAppx) {
+            throw "makeappx.exe not found on runner"
+          }
+          & $makeAppx.FullName unpack /p $storeMsix /d $unpack /o
+          if ($LASTEXITCODE -ne 0) {
+            throw "Microsoft Store MSIX unpack failed with exit code $LASTEXITCODE"
+          }
+          [xml]$manifest = Get-Content (Join-Path $unpack "AppxManifest.xml")
+          $identity = $manifest.Package.Identity
+          $publisherDisplayName = $manifest.SelectSingleNode(
+            "/*[local-name()='Package']/*[local-name()='Properties']/*[local-name()='PublisherDisplayName']"
+          )
+          Write-Host "Identity Name         :" $identity.Name
+          Write-Host "Publisher             :" $identity.Publisher
+          Write-Host "Publisher display name:" $publisherDisplayName.InnerText
+          Write-Host "Version               :" $identity.Version
+          Write-Host "Architecture          :" $identity.ProcessorArchitecture
+          Write-Host "Expected PFN          :" $env:STORE_MSIX_PFN
+          Write-Host "Expected package SID  :" $env:STORE_MSIX_PACKAGE_SID
+          if ($identity.Name -ne $env:STORE_MSIX_IDENTITY_NAME) {
+            throw "Unexpected Microsoft Store identity name: $($identity.Name)"
+          }
+          if ($identity.Publisher -ne $env:STORE_MSIX_PUBLISHER) {
+            throw "Unexpected Microsoft Store publisher: $($identity.Publisher)"
+          }
+          if (-not $publisherDisplayName -or $publisherDisplayName.InnerText -ne $env:STORE_MSIX_PUBLISHER_DISPLAY_NAME) {
+            throw "Unexpected Microsoft Store publisher display name"
+          }
+          if ($identity.Version -ne $env:STORE_MSIX_VERSION) {
+            throw "Unexpected Microsoft Store MSIX version: $($identity.Version)"
+          }
+          if (Test-Path (Join-Path $unpack "AppxSignature.p7x")) {
+            throw "The Microsoft Store submission package must be unsigned; the Store signs it after certification"
+          }
+
       - name: Prepare Windows release artifacts
         shell: pwsh
         run: |
@@ -444,6 +532,114 @@ jobs:
             release_artifacts/openirn-windows-x64.msix
           if-no-files-found: error
 
+      - name: Upload Microsoft Store submission package
+        uses: actions/upload-artifact@v4
+        with:
+          name: openirn-windows-store-submission
+          path: flutter/build/windows/msix-store/OpenIRN-Store.msix
+          if-no-files-found: error
+          retention-days: 14
+
+  microsoft_store:
+    name: Soumission Microsoft Store
+    needs: windows
+    runs-on: windows-2025
+    environment: microsoft-store
+    permissions:
+      contents: read
+    steps:
+      - name: Download Microsoft Store submission package
+        uses: actions/download-artifact@v4
+        with:
+          name: openirn-windows-store-submission
+          path: store_submission
+
+      - name: Validate Microsoft Store publication settings
+        if: ${{ vars.MICROSOFT_STORE_PUBLISH_ENABLED == 'true' }}
+        shell: pwsh
+        env:
+          PARTNER_CENTER_TENANT_ID: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
+          PARTNER_CENTER_SELLER_ID: ${{ secrets.PARTNER_CENTER_SELLER_ID }}
+          PARTNER_CENTER_CLIENT_ID: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
+          PARTNER_CENTER_CLIENT_SECRET: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
+          MICROSOFT_STORE_PRODUCT_ID: ${{ vars.MICROSOFT_STORE_PRODUCT_ID }}
+        run: |
+          $required = @{
+            PARTNER_CENTER_TENANT_ID = $env:PARTNER_CENTER_TENANT_ID
+            PARTNER_CENTER_SELLER_ID = $env:PARTNER_CENTER_SELLER_ID
+            PARTNER_CENTER_CLIENT_ID = $env:PARTNER_CENTER_CLIENT_ID
+            PARTNER_CENTER_CLIENT_SECRET = $env:PARTNER_CENTER_CLIENT_SECRET
+            MICROSOFT_STORE_PRODUCT_ID = $env:MICROSOFT_STORE_PRODUCT_ID
+          }
+          $missing = @(
+            $required.GetEnumerator() |
+              Where-Object { [string]::IsNullOrWhiteSpace([string]$_.Value) } |
+              ForEach-Object { $_.Key }
+          )
+          if ($missing.Count -gt 0) {
+            throw "Microsoft Store configuration missing: $($missing -join ', ')"
+          }
+          $storeMsix = Get-ChildItem store_submission -Recurse -Filter *.msix |
+            Select-Object -First 1
+          if (-not $storeMsix) {
+            throw "Microsoft Store MSIX artifact not found"
+          }
+          Write-Host "Microsoft Store package ready:" $storeMsix.Name
+
+      - name: Setup Microsoft Store Developer CLI
+        if: ${{ vars.MICROSOFT_STORE_PUBLISH_ENABLED == 'true' }}
+        uses: microsoft/microsoft-store-apppublisher@v1.1
+
+      - name: Configure Microsoft Store Developer CLI
+        if: ${{ vars.MICROSOFT_STORE_PUBLISH_ENABLED == 'true' }}
+        shell: pwsh
+        env:
+          PARTNER_CENTER_TENANT_ID: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
+          PARTNER_CENTER_SELLER_ID: ${{ secrets.PARTNER_CENTER_SELLER_ID }}
+          PARTNER_CENTER_CLIENT_ID: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
+          PARTNER_CENTER_CLIENT_SECRET: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
+        run: |
+          msstore reconfigure `
+            --tenantId "$env:PARTNER_CENTER_TENANT_ID" `
+            --sellerId "$env:PARTNER_CENTER_SELLER_ID" `
+            --clientId "$env:PARTNER_CENTER_CLIENT_ID" `
+            --clientSecret "$env:PARTNER_CENTER_CLIENT_SECRET"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Microsoft Store Developer CLI configuration failed with exit code $LASTEXITCODE"
+          }
+          msstore settings --enableTelemetry false
+          if ($LASTEXITCODE -ne 0) {
+            throw "Microsoft Store Developer CLI settings failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Publish package to Microsoft Store
+        if: ${{ vars.MICROSOFT_STORE_PUBLISH_ENABLED == 'true' }}
+        shell: pwsh
+        env:
+          MICROSOFT_STORE_PRODUCT_ID: ${{ vars.MICROSOFT_STORE_PRODUCT_ID }}
+        run: |
+          $storeMsix = Get-ChildItem store_submission -Recurse -Filter *.msix |
+            Select-Object -First 1
+          if (-not $storeMsix) {
+            throw "Microsoft Store MSIX artifact not found"
+          }
+          msstore publish "$($storeMsix.FullName)" -id "$env:MICROSOFT_STORE_PRODUCT_ID"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Microsoft Store submission failed with exit code $LASTEXITCODE"
+          }
+          "Microsoft Store submission committed for product $env:MICROSOFT_STORE_PRODUCT_ID." |
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+      - name: Report Microsoft Store bootstrap mode
+        if: ${{ vars.MICROSOFT_STORE_PUBLISH_ENABLED != 'true' }}
+        shell: pwsh
+        run: |
+          @"
+          Microsoft Store automatic publication is disabled.
+          The Store-ready MSIX is available in the openirn-windows-store-submission workflow artifact.
+          Complete the first submission manually in Partner Center, then set MICROSOFT_STORE_PUBLISH_ENABLED=true.
+          "@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
   documentation:
     name: Documentation PDF OpenIRN
     needs: validate
@@ -462,7 +658,8 @@ jobs:
             pandoc \
             texlive-fonts-recommended \
             texlive-xetex \
-            texlive-latex-extra
+            texlive-latex-extra \
+            zip
 
       - name: Build OpenIRN documentation
         env:
@@ -471,11 +668,11 @@ jobs:
           chmod +x tools/build_docs.sh
           ./tools/build_docs.sh
 
-      - name: Upload PDF documentation
+      - name: Upload bilingual documentation archive
         uses: actions/upload-artifact@v4
         with:
           name: openirn-documentation-fr-en
-          path: docs/pdf/*.pdf
+          path: docs/pdf/openirn-documentation-fr-en.zip
           if-no-files-found: error
 
   publish:
@@ -484,6 +681,7 @@ jobs:
       - validate
       - android
       - windows
+      - microsoft_store
       - documentation
     runs-on: ubuntu-latest
     permissions:
@@ -508,10 +706,23 @@ jobs:
           echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
           echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
 
-      - name: Download build artifacts
+      - name: Download Android artifacts
         uses: actions/download-artifact@v4
         with:
-          path: downloaded_artifacts
+          name: openirn-android-signed
+          path: downloaded_artifacts/android
+
+      - name: Download direct Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: openirn-windows-signed
+          path: downloaded_artifacts/windows
+
+      - name: Download documentation artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: openirn-documentation-fr-en
+          path: downloaded_artifacts/documentation
 
       - name: Flatten artifacts
         run: |
@@ -539,14 +750,7 @@ jobs:
           - `openirn-android.aab` : Android App Bundle signé pour Google Play.
           - `openirn-windows-signed.zip` : distribution Windows portable avec `OpenIRN.exe` signé.
           - `openirn-windows-x64.msix` : package MSIX x64 signé et horodaté.
-          - `openirn-installation-serveur-api.pdf` : recette d’installation du serveur API.
-          - `openirn-deploiement-applications.pdf` : guide de déploiement des applications.
-          - `openirn-guide-utilisateur.pdf` : mode d’emploi par rôle.
-          - `openirn-administration-instance.pdf` : guide d’exploitation quotidienne.
-          - `openirn-server-api-installation-en.pdf` : API server installation and initialization guide.
-          - `openirn-application-deployment-en.pdf` : application deployment guide.
-          - `openirn-user-guide-en.pdf` : user guide organized by role.
-          - `openirn-instance-administration-en.pdf` : day-to-day instance administration guide.
+          - `openirn-documentation-fr-en.zip` : les quatre guides français et leurs quatre versions anglaises au format PDF.
           - `LICENSE.txt` : licence du code correspondant au tag publié.
           - `SHA256SUMS.txt` : empreintes SHA-256 des artefacts.
 
@@ -554,13 +758,15 @@ jobs:
 
           Les artefacts Windows sont signés avec Azure Artifact Signing, profil Public Trust `openirn-public`, au nom de `Archoad`. Les signatures utilisent SHA-256 et le service d'horodatage Microsoft.
 
+          Un second MSIX est construit avec l’identité Partner Center `archoadFR.OpenIRN`. Il est conservé comme artefact GitHub Actions pour l’amorçage et, lorsque l’automatisation Microsoft Store est activée, soumis automatiquement à Partner Center. Après certification, Microsoft Store signe lui-même ce package avant sa distribution.
+
           ## macOS et iOS
 
           Les artefacts macOS et iOS ne sont pas produits dans ce profil de release. Ils seront ajoutés ultérieurement lorsque les certificats Apple Developer et la notarisation seront disponibles.
 
           ## Sécurité
 
-          La clé privée de signature Windows n'est ni exportée ni stockée dans GitHub. GitHub Actions s'authentifie auprès de Microsoft Entra par OIDC avec un jeton de courte durée. Les secrets GitHub Android restent utilisés pour la signature Android.
+          La clé privée de signature Windows n'est ni exportée ni stockée dans GitHub. GitHub Actions s'authentifie auprès de Microsoft Entra par OIDC avec un jeton de courte durée. Les secrets Android et les identifiants d'automatisation Partner Center restent protégés dans leurs environnements GitHub respectifs.
           EOF_NOTES
 
       - name: Create or update GitHub release

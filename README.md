@@ -237,7 +237,8 @@ Le dépôt contient des workflows GitHub Actions pour :
 - vérifier la préparation open source du dépôt ;
 - exécuter un préflight de release ;
 - produire des artefacts Android signés ;
-- produire des artefacts Windows signés ;
+- produire le ZIP et le MSIX Windows signés destinés à la distribution directe ;
+- produire un second MSIX avec l’identité Partner Center et le soumettre au Microsoft Store lorsque l’automatisation est activée ;
 - convertir les guides Markdown français et anglais en PDF ;
 - publier les empreintes SHA-256 des artefacts.
 
@@ -249,6 +250,8 @@ Les artefacts signés actuellement visés sont :
 - `openirn-windows-x64.msix` ;
 - les huit guides OpenIRN français et anglais au format PDF ;
 - `SHA256SUMS.txt`.
+
+Le MSIX de soumission Microsoft Store utilise l’identité `archoadFR.OpenIRN`. Il n’est pas joint à la GitHub Release et ne doit pas être installé directement : Microsoft le signe après certification. La procédure d’amorçage et la configuration Partner Center sont décrites dans le [guide de déploiement](docs/deploiement-applications.md#publication-automatique-sur-le-microsoft-store).
 
 macOS et iOS restent présents dans le projet Flutter, mais ne font pas encore partie du profil de release signé principal tant qu’un circuit Apple Developer n’est pas configuré.
 
@@ -266,7 +269,7 @@ English documentation:
 - [User guide by role](docs/en/user-guide.md)
 - [Day-to-day instance administration](docs/en/instance-administration.md)
 
-Lors d’une release, ces huit sources Markdown sont converties dans `docs/pdf/` puis jointes à la GitHub Release. Le répertoire local `devsteps/`, qui contient l’historique de travail du développement, est volontairement ignoré par Git.
+Lors d’une release, ces huit sources Markdown sont converties en PDF dans `docs/pdf/`, regroupées dans `openirn-documentation-fr-en.zip`, puis jointes à la GitHub Release sous cette archive unique. Le répertoire local `devsteps/`, qui contient l’historique de travail du développement, est volontairement ignoré par Git.
 
 ## Structure du dépôt
 

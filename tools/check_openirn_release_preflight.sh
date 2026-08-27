@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# OpenIRN release preflight — profil courant : Android signé + Windows signé.
+# OpenIRN release preflight — Android signé + Windows direct et Microsoft Store.
 # Ce script ne lit ni n'affiche les secrets.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -87,14 +87,14 @@ require_grep() {
   local pattern="$1"
   local path="$2"
   local label="$3"
-  if [[ -f "$path" ]] && grep -Eq "$pattern" "$path"; then ok "$label"; else fail "$label introuvable dans $path"; fi
+  if [[ -f "$path" ]] && grep -Eq -- "$pattern" "$path"; then ok "$label"; else fail "$label introuvable dans $path"; fi
 }
 
 forbidden_grep() {
   local pattern="$1"
   local path="$2"
   local label="$3"
-  if [[ -f "$path" ]] && grep -Eq "$pattern" "$path"; then fail "$label détecté dans $path"; else ok "$label absent"; fi
+  if [[ -f "$path" ]] && grep -Eq -- "$pattern" "$path"; then fail "$label détecté dans $path"; else ok "$label absent"; fi
 }
 
 GITHUB_SECRET_NAMES_CACHE=""
@@ -165,6 +165,7 @@ require_file .github/workflows/release.yml 'workflow release signé Android / Wi
 require_file .github/workflows/build_artifacts.yml 'workflow artefacts manuel'
 require_file tools/check_release_signing_setup.sh 'contrôle de la chaîne de signature'
 require_file tools/check_open_source_readiness.sh 'contrôle publication open source'
+require_file tools/build_docs.sh 'génération de la documentation PDF'
 require_grep 'GPL-3\.0-or-later' README.md 'licence GPL-3.0-or-later déclarée dans le README'
 require_grep 'assets/legal/GPL-3\.0\.txt' flutter/pubspec.yaml 'licence GPLv3 embarquée dans l application'
 require_grep 'LICENSE\.txt' .github/workflows/release.yml 'licence applicative incluse dans les artefacts de release'
@@ -217,8 +218,27 @@ require_grep 'id-token:[[:space:]]*write' .github/workflows/release.yml 'permiss
 require_grep 'environment:[[:space:]]*artifact-signing' .github/workflows/release.yml 'environnement GitHub de signature configuré'
 require_grep 'openirnsign' .github/workflows/release.yml 'compte Artifact Signing configuré'
 require_grep 'openirn-public' .github/workflows/release.yml 'profil Public Trust configuré'
+require_grep 'STORE_MSIX_IDENTITY_NAME:[[:space:]]*archoadFR\.OpenIRN' .github/workflows/release.yml 'identité MSIX Microsoft Store configurée'
+require_grep 'STORE_MSIX_PUBLISHER:.*0C16A5BC-1E9E-4174-A14C-FD52C54BD219' .github/workflows/release.yml 'éditeur MSIX Microsoft Store configuré'
+require_grep 'STORE_MSIX_PUBLISHER_DISPLAY_NAME:.*archoad FR' .github/workflows/release.yml 'nom d éditeur Microsoft Store configuré'
+require_grep '[[:space:]]+--store[[:space:]]' .github/workflows/release.yml 'construction du package de soumission Microsoft Store configurée'
+require_grep 'STORE_MSIX_VERSION=.*storeMsixVersion' .github/workflows/release.yml 'version MSIX Microsoft Store dédiée configurée'
+require_grep 'name:[[:space:]]*openirn-windows-store-submission' .github/workflows/release.yml 'artefact de soumission Microsoft Store isolé'
+require_grep 'name:[[:space:]]*Download direct Windows artifacts' .github/workflows/release.yml 'téléchargement explicite des seuls artefacts Windows directs configuré'
+require_grep 'environment:[[:space:]]*microsoft-store' .github/workflows/release.yml 'environnement GitHub Microsoft Store configuré'
+require_grep 'microsoft/microsoft-store-apppublisher@v1\.1' .github/workflows/release.yml 'Microsoft Store Developer CLI configuré'
+require_grep 'PARTNER_CENTER_TENANT_ID' .github/workflows/release.yml 'secret Partner Center Tenant ID référencé'
+require_grep 'PARTNER_CENTER_SELLER_ID' .github/workflows/release.yml 'secret Partner Center Seller ID référencé'
+require_grep 'PARTNER_CENTER_CLIENT_ID' .github/workflows/release.yml 'secret Partner Center Client ID référencé'
+require_grep 'PARTNER_CENTER_CLIENT_SECRET' .github/workflows/release.yml 'secret Partner Center Client Secret référencé'
+require_grep 'MICROSOFT_STORE_PRODUCT_ID' .github/workflows/release.yml 'identifiant produit Microsoft Store référencé'
+require_grep 'MICROSOFT_STORE_PUBLISH_ENABLED' .github/workflows/release.yml 'garde d activation Microsoft Store configurée'
+require_grep 'msstore publish' .github/workflows/release.yml 'soumission automatique Microsoft Store configurée'
+forbidden_grep 'name:[[:space:]]*Download build artifacts' .github/workflows/release.yml 'téléchargement global incluant le package Microsoft Store'
 require_grep '^[[:space:]]*lmodern[[:space:]]*\\' .github/workflows/release.yml 'dépendance LaTeX lmodern configurée pour les PDF'
 require_grep '^[[:space:]]*texlive-fonts-recommended[[:space:]]*\\' .github/workflows/release.yml 'polices TeX recommandées configurées pour les PDF'
+require_grep 'path:[[:space:]]*docs/pdf/openirn-documentation-fr-en\.zip' .github/workflows/release.yml 'archive documentaire bilingue publiée comme artefact unique'
+require_grep 'archive_path=.*openirn-documentation-fr-en\.zip' tools/build_docs.sh 'archive documentaire bilingue générée localement'
 forbidden_grep 'WINDOWS_CERTIFICATE_BASE64|WINDOWS_CERTIFICATE_PASSWORD|openirn-windows-codesign\.pfx' .github/workflows/release.yml 'ancienne chaîne Windows PFX'
 forbidden_grep 'MACOS_CERTIFICATE_BASE64|notarytool|flutter build macos' .github/workflows/release.yml 'release macOS Apple dans le profil courant'
 forbidden_grep 'IOS_CERTIFICATE_BASE64|IOS_PROVISIONING_PROFILE_BASE64|flutter build ipa' .github/workflows/release.yml 'release iOS Apple dans le profil courant'
@@ -244,6 +264,9 @@ require_grep 'MSIX_LOGO_PATH:.*Icon-App-1024x1024@1x\.png' .github/workflows/rel
 require_grep '[[:space:]]--logo-path.*MSIX_LOGO_PATH' .github/workflows/release.yml 'injection de l icône OpenIRN dans le MSIX configurée'
 require_grep 'Square44x44Logo\.targetsize-256\.png' .github/workflows/release.yml 'contrôle des ressources d icône MSIX configuré'
 require_grep 'qualifiedIconFiles' .github/workflows/release.yml 'contrôle des ressources MSIX qualifiées par échelle configuré'
+require_grep 'Get-AppxPackage -Name archoadFR\.OpenIRN' docs/deploiement-applications.md 'contrôle du package Microsoft Store documenté en français'
+require_grep 'MICROSOFT_STORE_PUBLISH_ENABLED=true' docs/deploiement-applications.md 'activation Microsoft Store documentée en français'
+require_grep 'MICROSOFT_STORE_PUBLISH_ENABLED=true' docs/en/application-deployment.md 'activation Microsoft Store documentée en anglais'
 
 printf '\n== Apple optionnel ==\n'
 if [[ "$WITH_APPLE" == true ]]; then
