@@ -19,12 +19,17 @@ documents=(
 	"docs/en/instance-administration.md|openirn-instance-administration-en.pdf|en-US"
 )
 
-for command_name in pandoc xelatex; do
+for command_name in pandoc xelatex kpsewhich; do
 	if ! command -v "${command_name}" >/dev/null 2>&1; then
 		echo "Commande requise absente : ${command_name}" >&2
 		exit 1
 	fi
 done
+
+if ! kpsewhich lmodern.sty >/dev/null 2>&1; then
+	echo "Dépendance LaTeX absente : lmodern.sty (paquet Ubuntu : lmodern)" >&2
+	exit 1
+fi
 
 test -f "${logo_path}"
 test -f "${header_path}"

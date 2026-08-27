@@ -23,6 +23,7 @@ required_files=(
   "SECURITY.md"
   "CODE_OF_CONDUCT.md"
   ".gitignore"
+  "flutter/assets/legal/GPL-3.0.txt"
 )
 
 for file in "${required_files[@]}"; do
@@ -32,6 +33,26 @@ for file in "${required_files[@]}"; do
     fail "$file manquant"
   fi
 done
+
+if grep -Fq 'GPL-3.0-or-later' README.md && \
+  grep -Fq 'GNU GENERAL PUBLIC LICENSE' LICENSE && \
+  grep -Fq 'Version 3, 29 June 2007' LICENSE; then
+  ok "licence applicative GPL-3.0-or-later déclarée"
+else
+  fail "déclaration GPL-3.0-or-later ou texte officiel GPLv3 incomplet"
+fi
+
+if cmp -s LICENSE flutter/assets/legal/GPL-3.0.txt; then
+  ok "copie GPLv3 embarquée identique au fichier LICENSE"
+else
+  fail "la copie GPLv3 embarquée diffère du fichier LICENSE"
+fi
+
+if grep -Eqi 'Le code OpenIRN est publié sous licence MIT|^MIT License$' README.md LICENSE NOTICE.md CONTRIBUTING.md; then
+  fail "ancienne licence MIT encore déclarée comme licence courante"
+else
+  ok "ancienne licence MIT absente des déclarations courantes"
+fi
 
 check_absent_find() {
   local description="$1"

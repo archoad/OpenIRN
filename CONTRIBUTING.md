@@ -38,6 +38,16 @@ flutter test
 - UI : français pour l’instant.
 - Tests : obligatoires pour les services métier.
 
+## Licence des contributions
+
+En proposant une contribution à OpenIRN, vous acceptez qu’elle soit distribuée
+sous la licence GNU General Public License version 3 ou ultérieure
+(`GPL-3.0-or-later`), conformément au fichier [`LICENSE`](LICENSE).
+
+Ne soumettez que du code ou du contenu que vous êtes autorisé à distribuer sous
+ces conditions. Conservez les mentions de droit d’auteur et de licence des
+composants tiers.
+
 ## Ce qu’il ne faut pas commiter
 
 Ne pas commiter :

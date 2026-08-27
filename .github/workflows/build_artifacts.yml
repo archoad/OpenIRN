@@ -100,6 +100,7 @@ jobs:
       - name: Package Windows app
         shell: pwsh
         run: |
+          Copy-Item LICENSE flutter\build\windows\x64\runner\Release\LICENSE.txt -Force
           Compress-Archive -Path flutter\build\windows\x64\runner\Release\* -DestinationPath openirn-windows.zip -Force
 
       - name: Upload Windows app

@@ -155,6 +155,7 @@ printf '\n== OpenIRN — préflight release Android / Windows ==\n\n'
 printf '== Structure du dépôt ==\n'
 require_file README.md README
 require_file LICENSE Licence
+require_file flutter/assets/legal/GPL-3.0.txt 'licence GPLv3 embarquée'
 require_file NOTICE.md Notice
 require_file SECURITY.md Sécurité
 require_file flutter/pubspec.yaml 'pubspec Flutter'
@@ -164,6 +165,9 @@ require_file .github/workflows/release.yml 'workflow release signé Android / Wi
 require_file .github/workflows/build_artifacts.yml 'workflow artefacts manuel'
 require_file tools/check_release_signing_setup.sh 'contrôle de la chaîne de signature'
 require_file tools/check_open_source_readiness.sh 'contrôle publication open source'
+require_grep 'GPL-3\.0-or-later' README.md 'licence GPL-3.0-or-later déclarée dans le README'
+require_grep 'assets/legal/GPL-3\.0\.txt' flutter/pubspec.yaml 'licence GPLv3 embarquée dans l application'
+require_grep 'LICENSE\.txt' .github/workflows/release.yml 'licence applicative incluse dans les artefacts de release'
 
 printf '\n== Version et tag ==\n'
 PUBLIC_VERSION="$(public_version_from_pubspec)"
@@ -181,7 +185,22 @@ fi
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   if [[ -n "$(git status --porcelain --untracked-files=no 2>/dev/null || true)" ]]; then warn "des modifications suivies ne sont pas encore commitée(s)"; else ok "aucune modification suivie non commitée"; fi
   if [[ -n "$EXPECTED_TAG" ]]; then
-    if git rev-parse -q --verify "refs/tags/${EXPECTED_TAG}" >/dev/null; then ok "tag local ${EXPECTED_TAG} présent"; else warn "tag local ${EXPECTED_TAG} absent ; il sera nécessaire avant git push origin ${EXPECTED_TAG}"; fi
+    if git rev-parse -q --verify "refs/tags/${EXPECTED_TAG}" >/dev/null; then
+      ok "tag local ${EXPECTED_TAG} présent"
+      if git show "${EXPECTED_TAG}:README.md" 2>/dev/null | grep -Fq 'GPL-3.0-or-later' && \
+        git show "${EXPECTED_TAG}:LICENSE" 2>/dev/null | grep -Fq 'GNU GENERAL PUBLIC LICENSE'; then
+        ok "tag local ${EXPECTED_TAG} contient la licence GPL-3.0-or-later"
+      else
+        fail "tag local ${EXPECTED_TAG} ne contient pas la licence GPL-3.0-or-later"
+      fi
+      if [[ "$(git rev-list -n 1 "$EXPECTED_TAG")" == "$(git rev-parse HEAD)" ]]; then
+        ok "tag local ${EXPECTED_TAG} aligné sur HEAD"
+      else
+        fail "tag local ${EXPECTED_TAG} attaché à un autre commit que HEAD"
+      fi
+    else
+      warn "tag local ${EXPECTED_TAG} absent ; il sera nécessaire avant git push origin ${EXPECTED_TAG}"
+    fi
   fi
 else
   warn "dépôt Git non détecté ; contrôle tag/statut ignoré"
@@ -198,6 +217,7 @@ require_grep 'id-token:[[:space:]]*write' .github/workflows/release.yml 'permiss
 require_grep 'environment:[[:space:]]*artifact-signing' .github/workflows/release.yml 'environnement GitHub de signature configuré'
 require_grep 'openirnsign' .github/workflows/release.yml 'compte Artifact Signing configuré'
 require_grep 'openirn-public' .github/workflows/release.yml 'profil Public Trust configuré'
+require_grep '^[[:space:]]*lmodern[[:space:]]*\\' .github/workflows/release.yml 'dépendance LaTeX lmodern configurée pour les PDF'
 forbidden_grep 'WINDOWS_CERTIFICATE_BASE64|WINDOWS_CERTIFICATE_PASSWORD|openirn-windows-codesign\.pfx' .github/workflows/release.yml 'ancienne chaîne Windows PFX'
 forbidden_grep 'MACOS_CERTIFICATE_BASE64|notarytool|flutter build macos' .github/workflows/release.yml 'release macOS Apple dans le profil courant'
 forbidden_grep 'IOS_CERTIFICATE_BASE64|IOS_PROVISIONING_PROFILE_BASE64|flutter build ipa' .github/workflows/release.yml 'release iOS Apple dans le profil courant'

@@ -1,5 +1,8 @@
 {
   "about.description": "Open-Source-Anwendung zur Erkundung und Bewertung des Index der digitalen Resilienz.",
+  "about.application_license": "Anwendungscode unter GNU GPL v3 oder höher",
+  "about.application_license_action": "Vollständige Lizenz lesen",
+  "about.application_license_title": "GNU-GPL-Lizenz von OpenIRN",
   "about.referential_license": "Referenzlizenz",
   "about.referential_used": "Referenz im Gebrauch",
   "about.referential_version": "Referenz {version}",

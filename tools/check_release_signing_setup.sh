@@ -54,6 +54,8 @@ require_pattern '[[:space:]]--logo-path.*MSIX_LOGO_PATH' 'injection de l icône 
 require_pattern 'Square44x44Logo\.targetsize-256\.png' 'contrôle des ressources d icône MSIX configuré'
 require_pattern 'openirn-windows-x64\.msix' 'artefact MSIX de release configuré'
 require_pattern 'signtool' 'vérification MSIX par SignTool configurée'
+require_pattern '^[[:space:]]*lmodern[[:space:]]*\\' 'dépendance LaTeX lmodern configurée pour les PDF'
+require_pattern 'LICENSE\.txt' 'licence applicative incluse dans les artefacts de release'
 
 if grep -Eq 'WINDOWS_CERTIFICATE_BASE64|WINDOWS_CERTIFICATE_PASSWORD|openirn-windows-codesign\.pfx' .github/workflows/release.yml; then
   echo "[ERREUR] ancienne chaîne Windows PFX encore référencée dans release.yml" >&2

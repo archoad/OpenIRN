@@ -106,6 +106,17 @@ class _ApplicationCard extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             const Text('Copyright © Michel Dubois 2026'),
+            const SizedBox(height: 4),
+            Text(context.tr('about.application_license')),
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => _showApplicationLicense(context),
+                icon: const Icon(Icons.description_outlined),
+                label: Text(context.tr('about.application_license_action')),
+              ),
+            ),
           ],
         ),
       ),
@@ -191,4 +202,32 @@ class _InfoRow extends StatelessWidget {
 String _formatPackageVersion(BuildContext context, PackageInfo info) {
   final version = info.version.trim();
   return version.isEmpty ? context.tr('about.version.unknown') : version;
+}
+
+Future<void> _showApplicationLicense(BuildContext context) async {
+  final licenseText = await DefaultAssetBundle.of(
+    context,
+  ).loadString('assets/legal/GPL-3.0.txt');
+  if (!context.mounted) {
+    return;
+  }
+
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text(context.tr('about.application_license_title')),
+      content: SizedBox(
+        width: 720,
+        child: Scrollbar(
+          child: SingleChildScrollView(child: SelectableText(licenseText)),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: Text(context.tr('common.close')),
+        ),
+      ],
+    ),
+  );
 }

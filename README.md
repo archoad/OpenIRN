@@ -330,9 +330,15 @@ server/openirn-api/sql/create_mariadb_database.example.sql
 
 ## Licence
 
-Le code OpenIRN est publié sous licence MIT. Voir [`LICENSE`](LICENSE).
+Le code et la documentation propres à OpenIRN sont publiés sous licence
+**GNU General Public License version 3 ou ultérieure**
+(`GPL-3.0-or-later`). Voir [`LICENSE`](LICENSE).
 
-Cette licence couvre le code applicatif OpenIRN. Elle ne couvre pas le référentiel IRN officiel, qui reste soumis à sa propre licence et à ses propres conditions d’utilisation.
+Les versions d’OpenIRN précédemment distribuées sous licence MIT restent
+soumises à la licence qui accompagnait ces versions.
+
+La licence GPL d’OpenIRN ne couvre pas le référentiel IRN officiel, qui reste
+soumis à sa propre licence et à ses propres conditions d’utilisation.
 
 ## Sécurité et signalement
 
