@@ -36,6 +36,8 @@ Common directories and units:
 | Migration environment | `/etc/openirn-api-migration.env` |
 | Data and referentials | `/var/lib/openirn-api` |
 | Backups | `/var/lib/openirn-api/backups` |
+| ECS/NDJSON API log | `/var/lib/openirn-api/logs/api-access.ndjson` |
+| ECS/NDJSON security log | `/var/lib/openirn-api/logs/security.ndjson` |
 | API | `openirn-api.service` |
 | Backup | `openirn-api-backup.service` |
 | Schedule | `openirn-api-backup.timer` |
@@ -90,6 +92,44 @@ tail -n 100 /var/log/apache2/openirn-api-error.log
 ```
 
 Look for repeated restarts, MariaDB rejections, missing migrations, backup errors, `AH01084`, `AH01097`, `Broken pipe`, `502`, and `503`.
+
+## API traffic and latency
+
+The structured API log produces exactly one event per request and adds the `X-Request-ID` header to responses handled by the middleware. Inspect recent events without modifying the file:
+
+```bash
+tail -n 20 /var/lib/openirn-api/logs/api-access.ndjson | jq -c \
+	'{timestamp:."@timestamp", route:.url.path, status:.http.response.status_code, duration_ms:(.event.duration / 1000000), trace_id:.trace.id}'
+```
+
+Prioritize `5xx` statuses, rising `4xx` rates, and routes whose duration increases. `event.duration` is expressed in nanoseconds. `url.path` contains the FastAPI route template, such as `/campaigns/{campaign_id}`, never the actual identifier. An unrecognized path becomes `/__unmatched__`. The log contains no body, query string, header, client address, or raw business identifier.
+
+## Security events
+
+The security log is separate from the access log. Display recent events without exposing pseudonyms in the output:
+
+```bash
+tail -n 50 /var/lib/openirn-api/logs/security.ndjson | jq -c \
+	'{timestamp:."@timestamp", action:.event.action, outcome:.event.outcome, severity:.event.severity, reason:.openirn.security.reason, trace_id:.trace.id}'
+```
+
+Prioritize `authorization.denied`, `auth.failed`, rate or capacity limits, enrollment code creation or consumption, session or device revocation, and privilege changes. Use `trace.id` to find the corresponding request in `api-access.ndjson` or Kibana. `organization.id`, `user.id`, `device.id`, and fields under `openirn.security` are HMAC pseudonyms, never raw business values. Do not rotate `OPENIRN_API_OBSERVABILITY_HASH_SECRET` during routine maintenance: rotation prevents correlation of the same actor before and after the change.
+
+## OpenIRN Kibana dashboard
+
+The **OpenIRN — Santé API et sécurité** dashboard combines synthetic availability, HTTP traffic and statuses, p50/p95 latency, security events, resources from the OpenIRN host selected during installation, and the current MariaDB state. Its initial time range is 24 hours, with automatic refresh every minute.
+
+Prioritize the objectives shown in its header:
+
+- synthetic availability at or above 99.9%;
+- API p95 latency below 250 ms;
+- no HTTP `5xx` response;
+- CPU below 85%, memory below 90%, and root filesystem below 85%;
+- no sustained rise in MariaDB connections, running threads, or aborted connections.
+
+Expected denials, such as requests without a session, increase both the `403` and `authorization.denied` counters and do not constitute an incident on their own. Correlate an increase with security reasons, source pseudonyms, and `trace.id`. These pseudonyms are intended only for technical grouping and must not be used to attempt to re-identify a user.
+
+The reproducible dashboard definition is stored in `monitoring/kibana/openirn-api-health-security.json`. Its portable deployment procedure is documented in `monitoring/kibana/README.md`. It requires the ECS `host.name` value of the host to monitor and accepts all Fleet namespaces matching `logs-openirn.*-*`, `synthetics-http-*`, `metrics-system.*-*`, and `metrics-mysql.status-*`. The `PUT` operation fully replaces the dashboard whose identifier is `openirn-api-health-security`; review the JSON diff before every redeployment.
 
 # 3. Weekly checks
 
@@ -498,7 +538,7 @@ Under **Administration → Server sessions**, revoke unknown, old, or incident-r
 
 ## Security log
 
-Look for repeated failures, rate limits, code creation, enrollments, revocations, PIN changes, restores, and maintenance operations. The log must contain neither PINs nor complete tokens.
+Look for repeated failures, rate limits, code creation, enrollments, revocations, PIN changes, role changes, and user directory replacements. The log must contain no raw business identifier, raw source address, PIN, token, enrollment code, name, or email address. A transactional operation missing from the log may have been rolled back by MariaDB; inspect API errors before treating it as an audit gap.
 
 # 13. Manage workspaces
 

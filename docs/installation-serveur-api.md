@@ -118,6 +118,7 @@ Créer les répertoires :
 install -d -o root -g root -m 755 /opt/openirn-releases
 install -d -o www-data -g www-data -m 750 /var/lib/openirn-api
 install -d -o www-data -g www-data -m 750 /var/lib/openirn-api/backups
+install -d -o www-data -g www-data -m 750 /var/lib/openirn-api/logs
 ```
 
 Télécharger l'archive source correspondant au tag :
@@ -212,14 +213,15 @@ Le compte runtime ne doit posséder ni `CREATE`, ni `ALTER`, ni `DROP`, ni `INDE
 
 # 7. Créer les secrets de déploiement
 
-Générer séparément :
+Générer séparément trois valeurs :
 
 ```bash
 openssl rand -hex 32
 openssl rand -hex 32
+openssl rand -hex 32
 ```
 
-La première valeur servira à signer les manifestes de sauvegarde et la seconde à hacher les codes d'enrôlement. Une rotation du secret d'enrôlement invalide les codes temporaires non consommés.
+La première valeur servira à signer les manifestes de sauvegarde, la seconde à hacher les codes d'enrôlement et la troisième à pseudonymiser les identifiants du journal de sécurité. Une rotation du secret d'enrôlement invalide les codes temporaires non consommés. Une rotation du secret d'observabilité change tous les pseudonymes et rompt leur continuité historique dans Kibana ; conserver donc cette troisième valeur tant qu'une rupture de corrélation n'est pas souhaitée.
 
 Créer le fichier runtime, lisible uniquement par `root` :
 
@@ -238,6 +240,13 @@ OPENIRN_API_BACKUP_KEEP=30
 OPENIRN_API_BACKUP_AUTO_ENABLED=true
 OPENIRN_API_BACKUP_PROTECTIVE_ENABLED=true
 OPENIRN_API_BACKUP_SIGNATURE_SECRET=SECRET_SAUVEGARDE_À_REMPLACER
+OPENIRN_API_ACCESS_LOG_PATH=/var/lib/openirn-api/logs/api-access.ndjson
+OPENIRN_API_ACCESS_LOG_MAX_BYTES=10485760
+OPENIRN_API_ACCESS_LOG_BACKUP_COUNT=7
+OPENIRN_API_SECURITY_LOG_PATH=/var/lib/openirn-api/logs/security.ndjson
+OPENIRN_API_SECURITY_LOG_MAX_BYTES=10485760
+OPENIRN_API_SECURITY_LOG_BACKUP_COUNT=7
+OPENIRN_API_OBSERVABILITY_HASH_SECRET=SECRET_OBSERVABILITE_À_REMPLACER
 OPENIRN_ENROLLMENT_CODE_SECRET=SECRET_ENROLEMENT_À_REMPLACER
 OPENIRN_SOLUTION_ADMIN_TENANT_ID=openirn-admin
 OPENIRN_TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128
@@ -265,6 +274,10 @@ stat -c '%U %G %a %n' /etc/openirn-api.env /etc/openirn-api-migration.env
 ```
 
 Résultat attendu : `root root 600` pour les deux fichiers.
+
+Le journal `api-access.ndjson` contient un événement ECS par requête. Il conserve la méthode, le modèle de route FastAPI, le statut, la durée, la taille de la réponse, la version du service et un identifiant de corrélation. Il exclut les corps, paramètres de requête, en-têtes, adresses clientes, PIN et jetons.
+
+Le journal `security.ndjson` contient les authentifications, refus d'autorisation, sessions, enrôlements et opérations d'administration sensibles. Les identifiants d'espace, d'utilisateur, de terminal, de session, de demande et les adresses sources y sont pseudonymisés par HMAC. Aucun identifiant brut, PIN, jeton, code d'enrôlement, nom ou adresse électronique n'y est écrit. Les mutations sont journalisées seulement après le commit MariaDB correspondant. Les deux journaux sont automatiquement limités à 10 Mio et sept rotations avec la configuration ci-dessus.
 
 # 8. Appliquer le schéma MariaDB
 

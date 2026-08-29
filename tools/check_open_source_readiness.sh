@@ -173,6 +173,17 @@ else
   ok "pubspec.yaml ne déclare pas assets/referentials"
 fi
 
+if [[ -x "monitoring/kibana/validate-monitoring.sh" ]]; then
+  if monitoring_validation_output=$(monitoring/kibana/validate-monitoring.sh 2>&1); then
+    ok "monitoring portable et sans secret évident"
+  else
+    fail "validation du monitoring en échec"
+    echo "${monitoring_validation_output}" | sed 's/^/  - /'
+  fi
+else
+  fail "validateur du monitoring absent ou non exécutable"
+fi
+
 echo
 if [[ $status -eq 0 ]]; then
   echo "OpenIRN semble prêt pour publication : aucun artefact local évident détecté."

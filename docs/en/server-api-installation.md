@@ -118,6 +118,7 @@ Create the directories:
 install -d -o root -g root -m 755 /opt/openirn-releases
 install -d -o www-data -g www-data -m 750 /var/lib/openirn-api
 install -d -o www-data -g www-data -m 750 /var/lib/openirn-api/backups
+install -d -o www-data -g www-data -m 750 /var/lib/openirn-api/logs
 ```
 
 Download the source archive for the selected tag:
@@ -212,14 +213,15 @@ The runtime account must not have `CREATE`, `ALTER`, `DROP`, `INDEX`, or `GRANT 
 
 # 7. Create the deployment secrets
 
-Generate two separate values:
+Generate three separate values:
 
 ```bash
 openssl rand -hex 32
 openssl rand -hex 32
+openssl rand -hex 32
 ```
 
-The first value signs backup manifests and the second hashes enrollment codes. Rotating the enrollment secret invalidates unconsumed temporary codes.
+The first value signs backup manifests, the second hashes enrollment codes, and the third pseudonymizes identifiers in the security log. Rotating the enrollment secret invalidates unconsumed temporary codes. Rotating the observability secret changes every pseudonym and breaks historical correlation in Kibana; keep this third value unchanged unless that correlation break is intentional.
 
 Create the runtime file, readable only by `root`:
 
@@ -238,6 +240,13 @@ OPENIRN_API_BACKUP_KEEP=30
 OPENIRN_API_BACKUP_AUTO_ENABLED=true
 OPENIRN_API_BACKUP_PROTECTIVE_ENABLED=true
 OPENIRN_API_BACKUP_SIGNATURE_SECRET=BACKUP_SECRET_TO_REPLACE
+OPENIRN_API_ACCESS_LOG_PATH=/var/lib/openirn-api/logs/api-access.ndjson
+OPENIRN_API_ACCESS_LOG_MAX_BYTES=10485760
+OPENIRN_API_ACCESS_LOG_BACKUP_COUNT=7
+OPENIRN_API_SECURITY_LOG_PATH=/var/lib/openirn-api/logs/security.ndjson
+OPENIRN_API_SECURITY_LOG_MAX_BYTES=10485760
+OPENIRN_API_SECURITY_LOG_BACKUP_COUNT=7
+OPENIRN_API_OBSERVABILITY_HASH_SECRET=OBSERVABILITY_SECRET_TO_REPLACE
 OPENIRN_ENROLLMENT_CODE_SECRET=ENROLLMENT_SECRET_TO_REPLACE
 OPENIRN_SOLUTION_ADMIN_TENANT_ID=openirn-admin
 OPENIRN_TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128
@@ -265,6 +274,10 @@ stat -c '%U %G %a %n' /etc/openirn-api.env /etc/openirn-api-migration.env
 ```
 
 Expected result: `root root 600` for both files.
+
+The `api-access.ndjson` log contains one ECS event per request. It retains the method, FastAPI route template, status, duration, response size, service version, and a correlation identifier. It excludes bodies, query parameters, headers, client addresses, PINs, and tokens.
+
+The `security.ndjson` log contains authentication, authorization denial, session, enrollment, and sensitive administration events. Workspace, user, device, session, request identifiers, and source addresses are pseudonymized with HMAC. No raw identifier, PIN, token, enrollment code, name, or email address is written. Mutation events are logged only after their corresponding MariaDB commit. With the configuration above, both logs are automatically limited to 10 MiB with seven rotations.
 
 # 8. Apply the MariaDB schema
 

@@ -33,12 +33,22 @@ if __package__:
         RUNTIME_FORBIDDEN_PRIVILEGES,
         RUNTIME_REQUIRED_PRIVILEGES,
     )
+    from .observability import (
+        ApiAccessLogMiddleware,
+        build_security_event,
+        emit_security_event,
+    )
 else:
     from database_contract import (
         REQUIRED_MIGRATIONS,
         REQUIRED_TABLES,
         RUNTIME_FORBIDDEN_PRIVILEGES,
         RUNTIME_REQUIRED_PRIVILEGES,
+    )
+    from observability import (
+        ApiAccessLogMiddleware,
+        build_security_event,
+        emit_security_event,
     )
 
 APP_VERSION = "0.10.0"
@@ -136,6 +146,16 @@ API_ROLE_ADMIN = {"administrator"}
 API_ROLE_CAMPAIGN_MANAGER = {"administrator", "campaign_manager"}
 API_ROLE_WRITE = {"administrator", "campaign_manager", "evaluator", "reviewer"}
 API_ROLE_READ = {"administrator", "campaign_manager", "evaluator", "reviewer", "reader"}
+SECURITY_AUDIT_EVENT_PREFIXES = (
+    "auth.",
+    "authorization.",
+    "device.",
+    "enrollment.",
+    "enrollment_request.",
+    "session.",
+    "tenant.",
+    "user.",
+)
 
 
 def _db_backend() -> str:
@@ -246,6 +266,7 @@ class DbError(RuntimeError):
 
 class _MySQLConnection:
     def __init__(self, mysql_url: str | None = None):
+        self._pending_security_events: list[dict[str, Any]] = []
         pymysql = _load_pymysql()
         config = _parse_mysql_url(mysql_url)
         try:
@@ -268,7 +289,7 @@ class _MySQLConnection:
             cursor.execute(translated, parameters or None)
         except Exception as exc:
             try:
-                self._con.rollback()
+                self.rollback()
             except Exception:
                 pass
             raise DbError(f"Erreur MariaDB: {exc}; SQL={translated}") from exc
@@ -281,12 +302,23 @@ class _MySQLConnection:
 
     def commit(self) -> None:
         self._con.commit()
+        pending_events = list(self._pending_security_events)
+        self._pending_security_events.clear()
+        for event in pending_events:
+            emit_security_event(event)
 
     def rollback(self) -> None:
-        self._con.rollback()
+        try:
+            self._con.rollback()
+        finally:
+            self._pending_security_events.clear()
 
     def close(self) -> None:
+        self._pending_security_events.clear()
         self._con.close()
+
+    def queue_security_event(self, event: dict[str, Any]) -> None:
+        self._pending_security_events.append(dict(event))
 
     def __enter__(self) -> "_MySQLConnection":
         return self
@@ -482,6 +514,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept"],
 )
+app.add_middleware(ApiAccessLogMiddleware, service_version=APP_VERSION)
 
 
 def _utc_now() -> datetime:
@@ -844,10 +877,21 @@ def _require_role_authorization(
 ) -> dict[str, Any]:
     context = _request_auth_context(request)
     if context is None:
+        _emit_authorization_denied(
+            request,
+            "missing_or_invalid_authorization",
+            tenant_id=tenant_id,
+        )
         raise _authorization_unavailable_exception()
 
     auth_mode = str(context.get("authMode") or "")
     if auth_mode == "device_token":
+        _emit_authorization_denied(
+            request,
+            "device_token_write_forbidden",
+            tenant_id=tenant_id,
+            context=context,
+        )
         raise HTTPException(
             status_code=403,
             detail="Ce terminal n’est pas autorisé pour modifier les données ou administrer OpenIRN",
@@ -855,11 +899,23 @@ def _require_role_authorization(
 
     role = _role_normalize(context.get("userRole"))
     if role not in allowed_roles:
+        _emit_authorization_denied(
+            request,
+            "insufficient_role",
+            tenant_id=tenant_id,
+            context=context,
+        )
         raise HTTPException(status_code=403, detail=detail)
 
     if tenant_id and str(context.get("tenantId") or "") != tenant_id:
         if _is_solution_admin_context(context):
             return context
+        _emit_authorization_denied(
+            request,
+            "tenant_mismatch",
+            tenant_id=tenant_id,
+            context=context,
+        )
         raise HTTPException(status_code=403, detail="La session ne correspond pas à l’espace de travail demandé")
 
     return context
@@ -895,11 +951,22 @@ def _require_write_authorization(request: Request, tenant_id: str) -> dict[str, 
 def _require_device_or_authorized_read(request: Request, tenant_id: str) -> dict[str, Any] | None:
     context = _request_auth_context(request)
     if context is None:
+        _emit_authorization_denied(
+            request,
+            "missing_or_invalid_authorization",
+            tenant_id=tenant_id,
+        )
         raise _authorization_unavailable_exception()
     if not tenant_id or str(context.get("tenantId") or "") == tenant_id:
         return context
     if _is_solution_admin_context(context):
         return context
+    _emit_authorization_denied(
+        request,
+        "tenant_mismatch",
+        tenant_id=tenant_id,
+        context=context,
+    )
     raise HTTPException(status_code=403, detail="L’autorisation ne correspond pas à l’espace de travail demandé")
 
 
@@ -910,11 +977,23 @@ def _require_device_token_authorization(
 ) -> dict[str, Any]:
     context = _request_auth_context(request)
     if context is None or str(context.get("authMode") or "") != "device_token":
+        _emit_authorization_denied(
+            request,
+            "device_token_required",
+            tenant_id=tenant_id,
+            context=context,
+        )
         raise HTTPException(
             status_code=403,
             detail="Le jeton secret de ce terminal est absent, invalide ou révoqué",
         )
     if str(context.get("tenantId") or "") != tenant_id:
+        _emit_authorization_denied(
+            request,
+            "device_tenant_mismatch",
+            tenant_id=tenant_id,
+            context=context,
+        )
         raise HTTPException(
             status_code=403,
             detail="Le terminal n’est pas autorisé dans cet espace de travail",
@@ -922,6 +1001,12 @@ def _require_device_token_authorization(
     requested_device_id = _request_device_id(request, payload)
     authorized_device_id = str(context.get("deviceId") or "").strip()
     if requested_device_id and requested_device_id != authorized_device_id:
+        _emit_authorization_denied(
+            request,
+            "device_id_mismatch",
+            tenant_id=tenant_id,
+            context=context,
+        )
         raise HTTPException(
             status_code=403,
             detail="Le jeton terminal ne correspond pas à l’identifiant présenté",
@@ -987,6 +1072,91 @@ def _request_client_ip(request: Request) -> str:
     return "unknown"
 
 
+def _queue_committed_security_event(
+    con: Any,
+    event_type: str,
+    *,
+    timestamp: str,
+    tenant_id: str = "",
+    device_id: str = "",
+    payload: dict[str, Any] | None = None,
+    successful: bool | None = None,
+) -> None:
+    queue_event = getattr(con, "queue_security_event", None)
+    if not callable(queue_event):
+        return
+    safe_payload = payload or {}
+    actor_user_id = str(
+        safe_payload.get("actorUserId")
+        or safe_payload.get("createdByUserId")
+        or safe_payload.get("invitedByUserId")
+        or ""
+    )
+    target_user_id = str(
+        safe_payload.get("userId") or safe_payload.get("pilotUserId") or ""
+    )
+    queue_event(
+        build_security_event(
+            event_type,
+            service_version=APP_VERSION,
+            timestamp=timestamp,
+            tenant_id=tenant_id,
+            target_tenant_id=str(
+                safe_payload.get("tenantId")
+                or safe_payload.get("requestedTenantId")
+                or ""
+            ),
+            actor_user_id=actor_user_id,
+            target_user_id=target_user_id,
+            device_id=str(
+                device_id
+                or safe_payload.get("deviceId")
+                or safe_payload.get("requestedDeviceId")
+                or ""
+            ),
+            session_id=str(safe_payload.get("sessionId") or ""),
+            enrollment_id=str(safe_payload.get("enrollmentId") or ""),
+            request_id=str(safe_payload.get("requestId") or ""),
+            source_address=str(safe_payload.get("ipAddress") or ""),
+            successful=successful,
+            reason=str(safe_payload.get("reason") or ""),
+            attributes=safe_payload,
+        )
+    )
+
+
+def _emit_authorization_denied(
+    request: Request,
+    reason: str,
+    *,
+    tenant_id: str = "",
+    context: dict[str, Any] | None = None,
+) -> None:
+    auth_context = context or {}
+    context_tenant_id = str(auth_context.get("tenantId") or "")
+    emit_security_event(
+        build_security_event(
+            "authorization.denied",
+            service_version=APP_VERSION,
+            tenant_id=context_tenant_id or tenant_id,
+            target_tenant_id=(
+                tenant_id
+                if context_tenant_id and tenant_id and context_tenant_id != tenant_id
+                else ""
+            ),
+            actor_user_id=str(auth_context.get("userId") or ""),
+            device_id=str(auth_context.get("deviceId") or ""),
+            source_address=_request_client_ip(request),
+            successful=False,
+            reason=reason,
+            attributes={
+                "authMode": str(auth_context.get("authMode") or "none"),
+                "userRole": str(auth_context.get("userRole") or ""),
+            },
+        )
+    )
+
+
 def _record_auth_attempt(
     con: Any,
     tenant_id: str,
@@ -998,6 +1168,7 @@ def _record_auth_attempt(
     reason: str,
 ) -> None:
     now = _utc_now()
+    attempt_id = "auth-" + secrets.token_urlsafe(18)
     retention_start = now - timedelta(days=max(1, AUTH_ATTEMPT_RETENTION_DAYS))
     con.execute(
         """
@@ -1015,7 +1186,7 @@ def _record_auth_attempt(
         """,
         (
             tenant_id,
-            "auth-" + secrets.token_urlsafe(18),
+            attempt_id,
             device_id[:160],
             user_id[:160],
             ip_address[:80],
@@ -1023,6 +1194,20 @@ def _record_auth_attempt(
             reason[:120],
             now.isoformat(),
         ),
+    )
+    _queue_committed_security_event(
+        con,
+        "auth.success" if successful else "auth.failed",
+        timestamp=now.isoformat(),
+        tenant_id=tenant_id,
+        device_id=device_id,
+        payload={
+            "userId": user_id,
+            "requestId": attempt_id,
+            "ipAddress": ip_address,
+            "reason": reason,
+        },
+        successful=successful,
     )
 
 
@@ -2621,6 +2806,7 @@ def _record_device_audit(
     device_id: str | None = None,
     payload: dict[str, Any] | None = None,
 ) -> None:
+    created_at = _utc_now().isoformat()
     con.execute(
         """
         INSERT INTO device_audit_log(tenant_id, device_id, event_type, created_at, payload_json)
@@ -2630,10 +2816,19 @@ def _record_device_audit(
             tenant_id,
             device_id,
             event_type,
-            _utc_now().isoformat(),
+            created_at,
             _canonical_json(payload or {}),
         ),
     )
+    if event_type.startswith(SECURITY_AUDIT_EVENT_PREFIXES) and event_type != "auth.failed":
+        _queue_committed_security_event(
+            con,
+            event_type,
+            timestamp=created_at,
+            tenant_id=tenant_id,
+            device_id=device_id or "",
+            payload=payload,
+        )
 
 
 class _ExistingDeviceAuthorization(HTTPException):
@@ -3922,6 +4117,77 @@ def _load_central_users(con: Any, tenant_id: str) -> list[dict[str, Any]]:
     for user in users:
         user["tenantDisplayName"] = tenant_label
     return _sort_users(users)
+
+
+def _user_directory_change_summary(
+    existing_users: list[dict[str, Any]],
+    replacement_users: list[dict[str, Any]],
+) -> dict[str, int]:
+    existing_by_id = {
+        str(user.get("id") or "").strip(): user
+        for user in existing_users
+        if str(user.get("id") or "").strip()
+    }
+    replacement_by_id = {
+        str(user.get("id") or "").strip(): user
+        for user in replacement_users
+        if str(user.get("id") or "").strip()
+    }
+    existing_ids = set(existing_by_id)
+    replacement_ids = set(replacement_by_id)
+    shared_ids = existing_ids & replacement_ids
+    compared_fields = ("firstName", "lastName", "email", "role", "active")
+
+    def is_active_administrator(user: dict[str, Any] | None) -> bool:
+        return bool(user) and user.get("active") is True and _role_normalize(
+            user.get("role")
+        ) == "administrator"
+
+    updated_ids = {
+        user_id
+        for user_id in shared_ids
+        if any(
+            existing_by_id[user_id].get(field) != replacement_by_id[user_id].get(field)
+            for field in compared_fields
+        )
+    }
+    role_changed_ids = {
+        user_id
+        for user_id in shared_ids
+        if _role_normalize(existing_by_id[user_id].get("role"))
+        != _role_normalize(replacement_by_id[user_id].get("role"))
+    }
+    activation_changed_ids = {
+        user_id
+        for user_id in shared_ids
+        if bool(existing_by_id[user_id].get("active"))
+        != bool(replacement_by_id[user_id].get("active"))
+    }
+    administrator_granted_ids = {
+        user_id
+        for user_id in replacement_ids
+        if is_active_administrator(replacement_by_id[user_id])
+        and not is_active_administrator(existing_by_id.get(user_id))
+    }
+    administrator_revoked_ids = {
+        user_id
+        for user_id in existing_ids
+        if is_active_administrator(existing_by_id[user_id])
+        and not is_active_administrator(replacement_by_id.get(user_id))
+    }
+
+    return {
+        "createdCount": len(replacement_ids - existing_ids),
+        "updatedCount": len(updated_ids),
+        "deletedCount": len(existing_ids - replacement_ids),
+        "roleChangedCount": len(role_changed_ids),
+        "activationChangedCount": len(activation_changed_ids),
+        "administratorCount": sum(
+            1 for user in replacement_by_id.values() if is_active_administrator(user)
+        ),
+        "administratorGrantedCount": len(administrator_granted_ids),
+        "administratorRevokedCount": len(administrator_revoked_ids),
+    }
 
 
 def _save_user(con: Any, tenant_id: str, user: dict[str, Any]) -> None:
@@ -7762,6 +8028,7 @@ async def users_replace(request: Request) -> dict[str, Any]:
     with _db() as con:
         with con:
             _ensure_tenant(con, tenant_id)
+            existing_users = _load_central_users(con, tenant_id)
             source_tenant_id = _resolve_tenant_id(
                 con,
                 SOLUTION_ADMIN_TENANT_ID,
@@ -7819,6 +8086,16 @@ async def users_replace(request: Request) -> dict[str, Any]:
                 con.execute("DELETE FROM users WHERE tenant_id = ?", (tenant_id,))
             _ensure_user_credentials(con, tenant_id, users_to_save)
             _sync_solution_administrators_to_all_tenants(con)
+            _record_device_audit(
+                con,
+                tenant_id,
+                "user.directory_replaced",
+                device_id=str(auth_context.get("deviceId") or ""),
+                payload={
+                    "actorUserId": triggered_by_user_id,
+                    **_user_directory_change_summary(existing_users, users_to_save),
+                },
+            )
 
     return {
         "status": "accepted",

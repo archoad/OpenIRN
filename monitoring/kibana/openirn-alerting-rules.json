@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "dashboardId": "openirn-api-health-security",
+  "connector": {
+    "type": ".server-log",
+    "name": "OpenIRN monitoring - Kibana log",
+    "createIfMissing": true
+  },
+  "rules": [
+    {
+      "id": "openirn-synthetic-down",
+      "name": "[OpenIRN] API indisponible depuis le moniteur synthétique",
+      "severity": "critical",
+      "category": "availability",
+      "schedule": "1m",
+      "timeWindow": {"size": 3, "unit": "m"},
+      "alertDelay": 1,
+      "query": "FROM synthetics-http-*\n| WHERE service.name == \"openirn-api\" AND monitor.status != \"up\"\n| STATS failed_checks = COUNT(*), last_failure = MAX(@timestamp)\n| WHERE failed_checks >= 2\n| KEEP failed_checks, last_failure"
+    },
+    {
+      "id": "openirn-synthetic-no-data",
+      "name": "[OpenIRN] Moniteur synthétique silencieux",
+      "severity": "critical",
+      "category": "availability",
+      "schedule": "1m",
+      "timeWindow": {"size": 5, "unit": "m"},
+      "alertDelay": 2,
+      "query": "FROM synthetics-http-*\n| WHERE service.name == \"openirn-api\"\n| STATS checks = COUNT(*)\n| WHERE checks == 0\n| KEEP checks"
+    },
+    {
+      "id": "openirn-api-access-no-data",
+      "name": "[OpenIRN] Journal d'accès API silencieux",
+      "severity": "critical",
+      "category": "ingestion",
+      "schedule": "1m",
+      "timeWindow": {"size": 5, "unit": "m"},
+      "alertDelay": 2,
+      "query": "FROM logs-openirn.api-*\n| STATS events = COUNT(*)\n| WHERE events == 0\n| KEEP events"
+    },
+    {
+      "id": "openirn-api-5xx-burst",
+      "name": "[OpenIRN] Rafale d'erreurs HTTP 5xx",
+      "severity": "critical",
+      "category": "api",
+      "schedule": "1m",
+      "timeWindow": {"size": 5, "unit": "m"},
+      "alertDelay": 1,
+      "query": "FROM logs-openirn.api-*\n| WHERE http.response.status_code >= 500\n| STATS errors_5xx = COUNT(*)\n| WHERE errors_5xx >= 3\n| KEEP errors_5xx"
+    },
+    {
+      "id": "openirn-api-latency-p95",
+      "name": "[OpenIRN] Latence API p95 élevée",
+      "severity": "warning",
+      "category": "api",
+      "schedule": "1m",
+      "timeWindow": {"size": 10, "unit": "m"},
+      "alertDelay": 2,
+      "query": "FROM logs-openirn.api-*\n| STATS requests = COUNT(*), p95_ns = PERCENTILE(event.duration, 95)\n| EVAL p95_ms = p95_ns / 1000000.0\n| WHERE requests >= 5 AND p95_ms >= 500\n| KEEP requests, p95_ms"
+    },
+    {
+      "id": "openirn-security-auth-abuse",
+      "name": "[OpenIRN] Échecs d'authentification ou d'autorisation répétés",
+      "severity": "critical",
+      "category": "security",
+      "schedule": "1m",
+      "timeWindow": {"size": 5, "unit": "m"},
+      "alertDelay": 1,
+      "query": "FROM logs-openirn.security-*\n| WHERE event.action IN (\"auth.failed\", \"auth.rate_limited\", \"authorization.denied\")\n| STATS events = COUNT(*) BY source_hash = openirn.security.source_address_hash\n| WHERE events >= 10\n| KEEP events, source_hash\n| SORT events DESC\n| LIMIT 20"
+    },
+    {
+      "id": "openirn-security-high-severity",
+      "name": "[OpenIRN] Événement de sécurité de sévérité haute",
+      "severity": "critical",
+      "category": "security",
+      "schedule": "1m",
+      "timeWindow": {"size": 5, "unit": "m"},
+      "alertDelay": 1,
+      "query": "FROM logs-openirn.security-*\n| WHERE event.severity >= 7\n| STATS events = COUNT(*), last_event = MAX(@timestamp) BY action = event.action\n| WHERE events >= 1\n| KEEP action, events, last_event\n| SORT events DESC"
+    },
+    {
+      "id": "openirn-host-cpu-high",
+      "name": "[OpenIRN] CPU élevé sur l'hôte OpenIRN",
+      "severity": "warning",
+      "category": "system",
+      "schedule": "1m",
+      "timeWindow": {"size": 10, "unit": "m"},
+      "alertDelay": 2,
+      "query": "FROM metrics-system.cpu-*\n| WHERE host.name == \"__OPENIRN_MONITORED_HOST__\"\n| STATS samples = COUNT(*), cpu_avg_pct = AVG(system.cpu.total.norm.pct) * 100\n| WHERE samples >= 5 AND cpu_avg_pct >= 85\n| KEEP samples, cpu_avg_pct"
+    },
+    {
+      "id": "openirn-host-memory-high",
+      "name": "[OpenIRN] Mémoire élevée sur l'hôte OpenIRN",
+      "severity": "warning",
+      "category": "system",
+      "schedule": "1m",
+      "timeWindow": {"size": 10, "unit": "m"},
+      "alertDelay": 2,
+      "query": "FROM metrics-system.memory-*\n| WHERE host.name == \"__OPENIRN_MONITORED_HOST__\"\n| STATS samples = COUNT(*), memory_avg_pct = AVG(system.memory.actual.used.pct) * 100\n| WHERE samples >= 5 AND memory_avg_pct >= 90\n| KEEP samples, memory_avg_pct"
+    },
+    {
+      "id": "openirn-host-disk-high",
+      "name": "[OpenIRN] Disque racine presque plein sur l'hôte OpenIRN",
+      "severity": "critical",
+      "category": "system",
+      "schedule": "1m",
+      "timeWindow": {"size": 10, "unit": "m"},
+      "alertDelay": 1,
+      "query": "FROM metrics-system.filesystem-*\n| WHERE host.name == \"__OPENIRN_MONITORED_HOST__\" AND system.filesystem.mount_point == \"/\"\n| SORT @timestamp DESC\n| LIMIT 1\n| EVAL disk_pct = system.filesystem.used.pct * 100\n| WHERE disk_pct >= 85\n| KEEP disk_pct"
+    },
+    {
+      "id": "openirn-mysql-aborted-connections",
+      "name": "[OpenIRN] Connexions MariaDB avortées en hausse",
+      "severity": "warning",
+      "category": "database",
+      "schedule": "1m",
+      "timeWindow": {"size": 10, "unit": "m"},
+      "alertDelay": 1,
+      "query": "FROM metrics-mysql.status-*\n| WHERE host.name == \"__OPENIRN_MONITORED_HOST__\"\n| EVAL aborted_connects = TO_LONG(mysql.status.aborted.connects)\n| STATS samples = COUNT(*), aborted_min = MIN(aborted_connects), aborted_max = MAX(aborted_connects)\n| EVAL aborted_delta = aborted_max - aborted_min\n| WHERE samples >= 2 AND aborted_delta >= 5\n| KEEP samples, aborted_delta"
+    }
+  ]
+}
