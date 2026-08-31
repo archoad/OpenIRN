@@ -53,13 +53,16 @@ if [[ -z ${KIBANA_API_KEY:-} || ! ${KIBANA_API_KEY} =~ ^[A-Za-z0-9_+/=-]+$ ]]; t
 	exit 1
 fi
 
+auth_config="${tmp_dir}/curl-auth.conf"
+(umask 077; printf 'header = "Authorization: ApiKey %s"\n' "${KIBANA_API_KEY}" > "${auth_config}")
+
 kibana_request() {
 	local method=$1
 	local path=$2
 	local body=${3:-}
 	local -a args=(
 		--fail-with-body --silent --show-error
-		--config <(printf 'header = "Authorization: ApiKey %s"\n' "${KIBANA_API_KEY}")
+		--config "${auth_config}"
 		-X "${method}"
 		-H 'Accept: application/json'
 		-H 'kbn-xsrf: openirn-alerting'
@@ -77,7 +80,7 @@ kibana_status() {
 	local path=$1
 	local output=$2
 	curl --silent --show-error \
-		--config <(printf 'header = "Authorization: ApiKey %s"\n' "${KIBANA_API_KEY}") \
+		--config "${auth_config}" \
 		-H 'Accept: application/json' \
 		-H 'kbn-xsrf: openirn-alerting' \
 		-o "${output}" \

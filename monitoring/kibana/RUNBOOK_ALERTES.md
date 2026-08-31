@@ -1,7 +1,7 @@
 # Runbook des alertes OpenIRN
 
 Ce runbook accompagne le dashboard Kibana
-`OpenIRN — Santé API et sécurité` et les règles définies dans
+`OpenIRN — Supervision opérationnelle` et les règles définies dans
 `openirn-alerting-rules.json`.
 
 Les règles écrivent leurs changements d'état dans le journal de Kibana avec les
@@ -48,7 +48,7 @@ journalctl -u kibana --since '-30 minutes' --no-pager \
 | Règle | Condition | Première intervention |
 |---|---|---|
 | API indisponible | au moins 2 contrôles synthétiques en échec sur 3 min | vérifier le health public, Apache, puis `openirn-api` |
-| Moniteur synthétique silencieux | aucune mesure sur 5 min, confirmée deux fois | vérifier l'agent et le moniteur sur `ia`, puis l'ingestion Synthetics |
+| Moniteur synthétique silencieux | aucune mesure sur 5 min, confirmée deux fois | vérifier l'agent qui exécute le moniteur, puis l'ingestion Synthetics |
 | Journal d'accès API silencieux | aucun événement sur 5 min, confirmé deux fois | vérifier `openirn-api`, le fichier d'accès et Elastic Agent sur l'hôte API |
 
 Pour une indisponibilité publique alors que le health local fonctionne :
@@ -122,8 +122,10 @@ niveau du frontal ou du filtrage réseau selon la procédure d'exploitation.
 |---|---|---|
 | CPU élevé | moyenne au moins 85 % sur 10 min, confirmée deux fois | identifier les processus et vérifier la latence API |
 | Mémoire élevée | moyenne au moins 90 % sur 10 min, confirmée deux fois | contrôler mémoire, swap et principaux consommateurs |
+| Swap élevé | moyenne au moins 50 % sur 10 min, confirmée deux fois | rechercher une pression mémoire durable et les processus concernés |
 | Disque racine presque plein | occupation au moins 85 % | trouver la croissance sans supprimer de données à l'aveugle |
 | Connexions MariaDB avortées | hausse d'au moins 5 sur 10 min | vérifier MariaDB, l'API et les erreurs de connexion |
+| Service systemd inactif | une unité supervisée n'est plus `active`, confirmé deux fois | vérifier l'unité concernée et son journal avant tout redémarrage |
 
 Commandes de diagnostic non destructrices sur l'hôte API :
 
@@ -141,6 +143,31 @@ Avant tout nettoyage de disque, résoudre le chemin exact, mesurer son volume et
 identifier sa politique de rétention. Ne jamais supprimer un data stream, une
 sauvegarde MariaDB ou un journal OpenIRN uniquement pour faire repasser la jauge
 sous le seuil.
+
+## Apache et exploitation
+
+| Règle | Condition | Première intervention |
+|---|---|---|
+| Erreurs proxy Apache | au moins une erreur proxy sur 5 min | comparer le health local, le journal Apache et l'état Uvicorn |
+| Workers Apache saturés | au moins 90 % des workers occupés sur 5 min, confirmé deux fois | mesurer le trafic, les requêtes lentes et la capacité Apache |
+| Sauvegarde absente | aucune sauvegarde réussie sur 26 h | vérifier le timer et le journal de sauvegarde sans lancer immédiatement une seconde sauvegarde |
+| Échec de sauvegarde | au moins un échec sur 15 min | contrôler l'espace disque, MariaDB et `openirn-api-backup.service` |
+| Certificat TLS à renouveler | expiration dans 30 jours ou moins | vérifier la date puis appliquer la procédure de renouvellement |
+| Redémarrages répétés | au moins 3 démarrages API sur 15 min | rechercher un crash, un échec de dépendance ou une action d'exploitation |
+
+```bash
+systemctl status apache2 openirn-api openirn-api-backup.timer --no-pager
+journalctl -u apache2 -u openirn-api -u openirn-api-backup.service \
+	--since '-30 minutes' --no-pager
+tail -n 20 /var/lib/openirn-api/logs/operations.ndjson | jq -c \
+	'{timestamp:."@timestamp", action:.event.action, outcome:.event.outcome, version:.service.version}'
+curl --fail --silent --show-error http://127.0.0.1:8092/server-status?auto \
+	| grep -E 'BusyWorkers|IdleWorkers'
+```
+
+Le journal d'exploitation ne doit contenir ni chemin de sauvegarde, ni nom de
+fichier, ni empreinte, ni secret. Pour TLS, vérifier également la date depuis un
+poste extérieur afin de contrôler la chaîne réellement publiée.
 
 ## Rétablissement et ajustement
 

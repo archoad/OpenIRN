@@ -17,10 +17,18 @@ l'installation, les flux suivants doivent exister :
   `event.dataset: openirn.api` et `service.name: openirn-api` ;
 - `logs-openirn.security-*`, alimenté par `security.ndjson` avec
   `event.dataset: openirn.security` et `service.name: openirn-api` ;
+- `logs-openirn.operations-*`, alimenté par `operations.ndjson` avec
+  `event.dataset: openirn.operations` et `service.name: openirn-api` ;
+- `logs-apache.access-*` et `logs-apache.error-*`, alimentés par
+  l'intégration Apache ;
 - `synthetics-http-*`, avec un moniteur HTTP portant
   `service.name: openirn-api` ;
 - `metrics-system.cpu-*`, `metrics-system.memory-*` et
   `metrics-system.filesystem-*` ;
+- `metrics-apache.status-*`, avec Apache `mod_status` accessible uniquement
+  depuis l'Elastic Agent ;
+- `metrics-linux.service-*`, avec le jeu de données `service` de l'intégration
+  Linux pour les unités systemd ;
 - `metrics-mysql.status-*`.
 
 Les suffixes sont des jokers afin de ne dépendre d'aucun namespace Fleet. Les
@@ -30,9 +38,11 @@ métriques System et MySQL de l'instance doivent partager la même valeur ECS
 Vérifier les prérequis dans Dev Tools :
 
 ```text
-FROM logs-openirn.api-*, logs-openirn.security-*, synthetics-http-*,
+FROM logs-openirn.api-*, logs-openirn.security-*, logs-openirn.operations-*,
+     logs-apache.access-*, logs-apache.error-*, synthetics-http-*,
      metrics-system.cpu-*, metrics-system.memory-*,
-     metrics-system.filesystem-*, metrics-mysql.status-*
+     metrics-system.filesystem-*, metrics-apache.status-*,
+     metrics-linux.service-*, metrics-mysql.status-*
 | STATS documents = COUNT(*) BY data_stream = CONCAT(data_stream.type, "/", data_stream.dataset, "/", data_stream.namespace)
 | SORT data_stream
 ```
@@ -44,6 +54,29 @@ FROM metrics-system.cpu-*
 | STATS documents = COUNT(*) BY host.name
 | SORT documents DESC
 ```
+
+## Collecte Fleet à activer
+
+Dans la politique de l'Elastic Agent installé sur le serveur OpenIRN, activer :
+
+- l'intégration **System** avec les jeux de données CPU, mémoire et filesystem ;
+- l'intégration **Apache** avec access logs, error logs et status ; son URL de
+  statut doit viser `http://127.0.0.1:8092/server-status?auto` ;
+- l'intégration **MySQL** avec le jeu de données status, configurée avec un
+  compte MariaDB de supervision en lecture minimale ;
+- l'intégration **Linux** avec le jeu de données service, limitée si possible à
+  `openirn-api.service`, `openirn-api-backup.timer`, `apache2.service` et
+  `mariadb.service` ;
+- trois entrées Custom Logs pour `api-access.ndjson`, `security.ndjson` et
+  `operations.ndjson`, dirigées respectivement vers les datasets
+  `openirn.api`, `openirn.security` et `openirn.operations` ;
+- un moniteur Synthetics HTTP vers le health public, avec
+  `service.name: openirn-api` et la collecte TLS activée.
+
+Les scripts de ce répertoire ne modifient pas Fleet : les noms de politiques,
+les identifiants d'intégration et les credentials MariaDB dépendent de
+l'infrastructure cible et ne doivent pas être versionnés. Vérifier chaque flux
+avec la requête précédente avant de déployer le dashboard.
 
 ## Installation complète
 
@@ -75,7 +108,26 @@ de commande ou à l'historique du shell.
 ## Dashboard
 
 `openirn-api-health-security.json` est la source de vérité générique du
-dashboard `OpenIRN — Santé API et sécurité`. Le jeton
+dashboard `OpenIRN — Supervision opérationnelle`. Ses 45 panneaux sont répartis
+en six sections qui reprennent la matrice de supervision :
+
+| Section | Indicateurs | Sources |
+|---|---|---|
+| Synthèse | disponibilité, état courant, requêtes/min, taux de 5xx, latence p95, âge de la dernière sauvegarde | Synthetics, Apache, OpenIRN |
+| Usage | trafic par route, codes HTTP, clients et tenants actifs pseudonymisés, plateformes | Apache et journaux OpenIRN |
+| Performance | latences p50/p95/p99, routes lentes, erreurs proxy, saturation Apache | journaux OpenIRN, Apache access/error et Apache Status |
+| Sécurité | authentifications, rate limiting, enrôlements, révocations | audit OpenIRN |
+| Infrastructure | CPU, mémoire, swap, disque, MariaDB, services systemd | intégrations System, MariaDB et Linux |
+| Exploitation | sauvegardes, redémarrages, certificat TLS, version déployée | opérations OpenIRN et Synthetics |
+
+Les champs d'usage sont initialisés avec une valeur vide afin que leur mapping
+existe dès la première requête. Les compteurs de clients et de tenants ignorent
+ces valeurs vides et utilisent uniquement les pseudonymes HMAC `device.id` et
+`organization.id` ajoutés après une authentification réussie. La plateforme
+provient du terminal enregistré par le serveur, pas du contenu libre d'un
+en-tête client.
+
+Le jeton
 `__OPENIRN_MONITORED_HOST__` est remplacé uniquement dans un fichier temporaire
 par `deploy-dashboard.sh`.
 
@@ -97,7 +149,10 @@ Exporter son état courant avant de redéployer après une modification manuelle
 
 ## Règles d'alerte
 
-`openirn-alerting-rules.json` définit onze règles ES|QL. Le script
+`openirn-alerting-rules.json` définit 19 règles ES|QL. Elles couvrent notamment
+la disponibilité et l'absence de données, les 5xx et la latence, les événements
+de sécurité, les ressources système et MariaDB, l'âge et les échecs de
+sauvegarde, Apache, systemd, le swap, TLS et les redémarrages répétés. Le script
 `deploy-alerting-rules.sh` crée les règles absentes et met à jour les règles
 existantes sans réactiver une règle volontairement désactivée.
 

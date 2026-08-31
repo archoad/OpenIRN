@@ -5,16 +5,15 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 enum OpenIrnLanguage {
-  fr('fr', 'Français', '🇫🇷'),
-  en('en', 'English', '🇬🇧'),
-  es('es', 'Español', '🇪🇸'),
-  de('de', 'Deutsch', '🇩🇪');
+  fr('fr', 'Français'),
+  en('en', 'English'),
+  es('es', 'Español'),
+  de('de', 'Deutsch');
 
   final String code;
   final String label;
-  final String flag;
 
-  const OpenIrnLanguage(this.code, this.label, this.flag);
+  const OpenIrnLanguage(this.code, this.label);
 
   static OpenIrnLanguage fromCode(String code) {
     return OpenIrnLanguage.values.firstWhere(

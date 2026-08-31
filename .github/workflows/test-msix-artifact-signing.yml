@@ -13,7 +13,7 @@ env:
   MSIX_IDENTITY_NAME: "Archoad.OpenIRN"
   MSIX_OUTPUT_DIR: "flutter\\build\\windows\\msix"
   MSIX_FILE: "OpenIRN.msix"
-  MSIX_LOGO_PATH: 'ios\Runner\Assets.xcassets\AppIcon.appiconset\Icon-App-1024x1024@1x.png'
+  MSIX_LOGO_PATH: 'windows\runner\resources\msix_logo.png'
 
 jobs:
   build-package-and-sign:
@@ -205,35 +205,7 @@ jobs:
           if ($identity.Version -ne $env:MSIX_VERSION) {
             throw "Unexpected MSIX version: $($identity.Version)"
           }
-          $storeLogo = $manifest.SelectSingleNode(
-            "/*[local-name()='Package']/*[local-name()='Properties']/*[local-name()='Logo']"
-          )
-          $visualElements = $manifest.SelectSingleNode(
-            "/*[local-name()='Package']/*[local-name()='Applications']/*[local-name()='Application']/*[local-name()='VisualElements']"
-          )
-          if (-not $storeLogo -or -not $visualElements) {
-            throw "Expected MSIX logo declarations are missing from AppxManifest.xml"
-          }
-          $requiredIconPaths = @(
-            [string]$storeLogo.InnerText,
-            [string]$visualElements.GetAttribute("Square150x150Logo"),
-            [string]$visualElements.GetAttribute("Square44x44Logo"),
-            "Images\Square44x44Logo.targetsize-256.png"
-          )
-          foreach ($iconPath in $requiredIconPaths) {
-            if ([string]::IsNullOrWhiteSpace($iconPath)) {
-              throw "An expected MSIX icon path is missing from AppxManifest.xml"
-            }
-            $iconFile = Join-Path $unpack $iconPath
-            if (-not (Test-Path -LiteralPath $iconFile -PathType Leaf)) {
-              throw "Expected MSIX icon is missing: $iconPath"
-            }
-            $iconInfo = Get-Item -LiteralPath $iconFile
-            if ($iconInfo.Length -le 0) {
-              throw "Expected MSIX icon is empty: $iconPath"
-            }
-            Write-Host "MSIX icon      : $iconPath ($($iconInfo.Length) bytes)"
-          }
+          & "${{ github.workspace }}\tools\Test-MsixIconTransparency.ps1" -PackageRoot $unpack
 
       - name: Sign OpenIRN MSIX
         uses: azure/artifact-signing-action@v2

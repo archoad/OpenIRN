@@ -38,6 +38,7 @@ Common directories and units:
 | Backups | `/var/lib/openirn-api/backups` |
 | ECS/NDJSON API log | `/var/lib/openirn-api/logs/api-access.ndjson` |
 | ECS/NDJSON security log | `/var/lib/openirn-api/logs/security.ndjson` |
+| ECS/NDJSON operations log | `/var/lib/openirn-api/logs/operations.ndjson` |
 | API | `openirn-api.service` |
 | Backup | `openirn-api-backup.service` |
 | Schedule | `openirn-api-backup.timer` |
@@ -104,6 +105,11 @@ tail -n 20 /var/lib/openirn-api/logs/api-access.ndjson | jq -c \
 
 Prioritize `5xx` statuses, rising `4xx` rates, and routes whose duration increases. `event.duration` is expressed in nanoseconds. `url.path` contains the FastAPI route template, such as `/campaigns/{campaign_id}`, never the actual identifier. An unrecognized path becomes `/__unmatched__`. The log contains no body, query string, header, client address, or raw business identifier.
 
+After authentication, `device.id` and `organization.id` are HMAC pseudonyms
+that can count active clients and tenants without recording their real
+identifiers. `openirn.client.platform` is the platform stored for the device by
+the server.
+
 ## Security events
 
 The security log is separate from the access log. Display recent events without exposing pseudonyms in the output:
@@ -115,21 +121,36 @@ tail -n 50 /var/lib/openirn-api/logs/security.ndjson | jq -c \
 
 Prioritize `authorization.denied`, `auth.failed`, rate or capacity limits, enrollment code creation or consumption, session or device revocation, and privilege changes. Use `trace.id` to find the corresponding request in `api-access.ndjson` or Kibana. `organization.id`, `user.id`, `device.id`, and fields under `openirn.security` are HMAC pseudonyms, never raw business values. Do not rotate `OPENIRN_API_OBSERVABILITY_HASH_SECRET` during routine maintenance: rotation prevents correlation of the same actor before and after the change.
 
+## Operations events
+
+Inspect API starts and backups without displaying sensitive metadata:
+
+```bash
+tail -n 50 /var/lib/openirn-api/logs/operations.ndjson | jq -c \
+	'{timestamp:."@timestamp", action:.event.action, outcome:.event.outcome, version:.service.version, automatic:.openirn.operation.automatic}'
+```
+
+Expected actions are `service.started`, `backup.created`, and `backup.failed`.
+The log contains no backup path, file name, file hash, or signing secret.
+
 ## OpenIRN Kibana dashboard
 
-The **OpenIRN — Santé API et sécurité** dashboard combines synthetic availability, HTTP traffic and statuses, p50/p95 latency, security events, resources from the OpenIRN host selected during installation, and the current MariaDB state. Its initial time range is 24 hours, with automatic refresh every minute.
+The **OpenIRN — Supervision opérationnelle** dashboard is organized into six sections: **Summary**, **Usage**, **Performance**, **Security**, **Infrastructure**, and **Operations**. It covers availability and backups, pseudonymous usage, p50/p95/p99 latency, Apache, OpenIRN audit events, system resources, MariaDB, systemd, TLS, and the deployed version. Its initial time range is 24 hours, with automatic refresh every minute.
 
 Prioritize the objectives shown in its header:
 
 - synthetic availability at or above 99.9%;
 - API p95 latency below 250 ms;
 - no HTTP `5xx` response;
+- latest successful backup less than 26 hours old and no recent failure;
 - CPU below 85%, memory below 90%, and root filesystem below 85%;
+- swap below 50%, active systemd services, and Apache workers below 90%;
+- TLS certificate valid for more than 30 days;
 - no sustained rise in MariaDB connections, running threads, or aborted connections.
 
 Expected denials, such as requests without a session, increase both the `403` and `authorization.denied` counters and do not constitute an incident on their own. Correlate an increase with security reasons, source pseudonyms, and `trace.id`. These pseudonyms are intended only for technical grouping and must not be used to attempt to re-identify a user.
 
-The reproducible dashboard definition is stored in `monitoring/kibana/openirn-api-health-security.json`. Its portable deployment procedure is documented in `monitoring/kibana/README.md`. It requires the ECS `host.name` value of the host to monitor and accepts all Fleet namespaces matching `logs-openirn.*-*`, `synthetics-http-*`, `metrics-system.*-*`, and `metrics-mysql.status-*`. The `PUT` operation fully replaces the dashboard whose identifier is `openirn-api-health-security`; review the JSON diff before every redeployment.
+The reproducible dashboard definition is stored in `monitoring/kibana/openirn-api-health-security.json`. Its portable deployment procedure is documented in `monitoring/kibana/README.md`. It requires the ECS `host.name` value of the host to monitor and accepts all Fleet namespaces matching the documented patterns: OpenIRN and Apache logs, Synthetics, System metrics, Apache Status, Linux systemd, and MariaDB. The `PUT` operation fully replaces the dashboard whose identifier is `openirn-api-health-security`; review the JSON diff before every redeployment.
 
 # 3. Weekly checks
 
@@ -351,6 +372,7 @@ python3 -m venv "$release_dir/.venv"
 	--requirement "$release_dir/requirements-mariadb.txt"
 "$release_dir/.venv/bin/python" -m py_compile \
 	"$release_dir/app/database_contract.py" \
+	"$release_dir/app/version.py" \
 	"$release_dir/app/main.py" \
 	"$release_dir/tools/"*.py
 ```
@@ -443,7 +465,7 @@ Then check:
 readlink -f /opt/openirn-api
 stat -c '%U %G %a %n' /etc/openirn-api.env
 cd /opt/openirn-api
-.venv/bin/python -m py_compile app/main.py app/database_contract.py
+.venv/bin/python -m py_compile app/version.py app/main.py app/database_contract.py
 ```
 
 Common causes: missing dependency, incorrect MariaDB URL, missing migration, excessive runtime privileges, or missing environment file.

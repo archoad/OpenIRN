@@ -68,6 +68,27 @@ class DeviceAuthorizationTests(unittest.TestCase):
         ):
             self.assertIsNone(api._request_auth_context(request))
 
+    def test_validated_auth_context_is_cached_in_request_scope(self):
+        request = _Request()
+        request.headers["authorization"] = "Bearer valid-session-token"
+        request.scope = {"state": {}}
+        context = {
+            "authMode": "session",
+            "tenantId": "tenant-a",
+            "deviceId": "device-a",
+            "devicePlatform": "windows",
+        }
+        with (
+            patch.object(api, "_session_auth_context", return_value=context) as session,
+            patch.object(api, "_device_token_auth_context") as device,
+        ):
+            self.assertEqual(api._request_auth_context(request), context)
+            self.assertEqual(api._request_auth_context(request), context)
+
+        session.assert_called_once_with("valid-session-token")
+        device.assert_not_called()
+        self.assertEqual(request.scope["state"]["openirn_auth_context"], context)
+
     def test_public_device_id_no_longer_grants_tenant_read(self):
         with patch.object(api, "_request_auth_context", return_value=None):
             with self.assertRaises(HTTPException) as raised:
@@ -113,6 +134,31 @@ class DeviceAuthorizationTests(unittest.TestCase):
                 api._require_device_token_authorization(request, "tenant-a", request._payload)
 
         self.assertEqual(raised.exception.status_code, 403)
+
+
+class BackupOperationEventTests(unittest.TestCase):
+    def test_failed_api_backup_emits_sanitized_operation_event(self):
+        with (
+            patch.object(
+                api,
+                "_create_mariadb_backup",
+                side_effect=RuntimeError("password=private"),
+            ),
+            patch.object(api, "emit_operation_event") as emit,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "password=private"):
+                api._create_database_backup(
+                    tenant_id="tenant-a",
+                    reason="manual",
+                    automatic=False,
+                )
+
+        emit.assert_called_once()
+        event = emit.call_args.args[0]
+        self.assertEqual(event["event"]["action"], "backup.failed")
+        self.assertEqual(event["event"]["outcome"], "failure")
+        self.assertEqual(event["openirn"]["operation"]["reason"], "RuntimeError")
+        self.assertNotIn("private", str(event))
 
 
 class PinPolicyTests(unittest.TestCase):

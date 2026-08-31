@@ -1,7 +1,7 @@
 # OpenIRN alert runbook
 
 This runbook accompanies the Kibana dashboard
-`OpenIRN — Santé API et sécurité` and the rules defined in
+`OpenIRN — Supervision opérationnelle` and the rules defined in
 `openirn-alerting-rules.json`.
 
 Rules write state changes to the Kibana log with the `[OpenIRN][ALERTE]` and
@@ -48,7 +48,7 @@ journalctl -u kibana --since '-30 minutes' --no-pager \
 | Rule | Condition | First response |
 |---|---|---|
 | API unavailable | at least 2 failed synthetic checks in 3 min | check public health, Apache, then `openirn-api` |
-| Synthetic monitor silent | no measurement for 5 min, confirmed twice | check the agent and monitor on `ia`, then Synthetics ingestion |
+| Synthetic monitor silent | no measurement for 5 min, confirmed twice | check the agent running the monitor, then Synthetics ingestion |
 | API access log silent | no event for 5 min, confirmed twice | check `openirn-api`, the access file, and Elastic Agent on the API host |
 
 If the public endpoint is unavailable while local health works:
@@ -120,8 +120,10 @@ according to the operating procedure.
 |---|---|---|
 | High CPU | average at least 85% over 10 min, confirmed twice | identify processes and check API latency |
 | High memory | average at least 90% over 10 min, confirmed twice | check memory, swap, and top consumers |
+| High swap usage | average at least 50% over 10 min, confirmed twice | investigate sustained memory pressure and affected processes |
 | Root disk nearly full | usage at least 85% | locate growth without blindly deleting data |
 | Aborted MariaDB connections | increase of at least 5 over 10 min | check MariaDB, the API, and connection errors |
+| systemd service inactive | a monitored unit is no longer `active`, confirmed twice | inspect the unit and its journal before restarting it |
 
 Non-destructive diagnostics on the API host:
 
@@ -138,6 +140,31 @@ journalctl -u mariadb -u openirn-api --since '-30 minutes' --no-pager
 Before cleaning disk space, resolve the exact path, measure its size, and
 identify its retention policy. Never delete a data stream, MariaDB backup, or
 OpenIRN log solely to bring the gauge below the threshold.
+
+## Apache and operations
+
+| Rule | Condition | First response |
+|---|---|---|
+| Apache proxy errors | at least one proxy error over 5 min | compare local health, Apache logs, and Uvicorn status |
+| Apache workers saturated | at least 90% busy workers over 5 min, confirmed twice | measure traffic, slow requests, and Apache capacity |
+| Backup stale | no successful backup over 26 h | inspect the timer and backup log before starting another backup |
+| Backup failed | at least one failure over 15 min | check disk space, MariaDB, and `openirn-api-backup.service` |
+| TLS certificate expiring | 30 days or less remaining | confirm the date and follow the certificate renewal procedure |
+| Repeated API restarts | at least 3 API starts over 15 min | investigate crashes, dependency failures, or operator actions |
+
+```bash
+systemctl status apache2 openirn-api openirn-api-backup.timer --no-pager
+journalctl -u apache2 -u openirn-api -u openirn-api-backup.service \
+	--since '-30 minutes' --no-pager
+tail -n 20 /var/lib/openirn-api/logs/operations.ndjson | jq -c \
+	'{timestamp:."@timestamp", action:.event.action, outcome:.event.outcome, version:.service.version}'
+curl --fail --silent --show-error http://127.0.0.1:8092/server-status?auto \
+	| grep -E 'BusyWorkers|IdleWorkers'
+```
+
+The operations log must not contain backup paths, file names, hashes, or
+secrets. For TLS, also check the date externally to verify the certificate chain
+actually served to clients.
 
 ## Recovery and tuning
 

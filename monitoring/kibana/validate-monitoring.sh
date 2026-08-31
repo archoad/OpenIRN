@@ -38,15 +38,17 @@ bash -n \
 	"${script_dir}/tests/test-portable-installation.sh"
 
 jq -e '
-	.title == "OpenIRN — Santé API et sécurité" and
-	(.panels | length == 20) and
+	.title == "OpenIRN — Supervision opérationnelle" and
+	(.panels | length == 45) and
+	([.panels[] | select(.type == "markdown" and (.config.content | startswith("## ")))] | length == 6) and
+	([.panels[] | select(.type == "markdown" and (.config.content | startswith("## "))) | (.config.content | split("\n")[0])] == ["## Synthèse", "## Usage", "## Performance", "## Sécurité", "## Infrastructure", "## Exploitation"]) and
 	([paths(scalars) as $path | select($path[-1] == "id")] | length == 0)
 ' "${dashboard}" >/dev/null
 
 jq -e '
 	.schemaVersion == 1 and
-	(.rules | length == 11) and
-	([.rules[].id] | unique | length == 11) and
+	(.rules | length == 19) and
+	([.rules[].id] | unique | length == 19) and
 	(.connector.type == ".server-log") and
 	(.connector | has("id") | not)
 ' "${rules}" >/dev/null
@@ -56,11 +58,13 @@ OPENIRN_MONITORED_HOST="${portable_host}" \
 OPENIRN_MONITORED_HOST="${portable_host}" \
 	"${script_dir}/deploy-alerting-rules.sh" --render > "${tmp_dir}/rules.json"
 
-jq -e --arg host "${portable_host}" \
-	'[paths(scalars) as $path | getpath($path) | strings | select(contains($host))] | length == 6' \
+dashboard_host_parameters=$(grep -o '__OPENIRN_MONITORED_HOST__' "${dashboard}" | wc -l | tr -d ' ')
+rules_host_parameters=$(grep -o '__OPENIRN_MONITORED_HOST__' "${rules}" | wc -l | tr -d ' ')
+jq -e --arg host "${portable_host}" --argjson expected "${dashboard_host_parameters}" \
+	'[paths(scalars) as $path | getpath($path) | strings | select(contains($host))] | length == $expected' \
 	"${tmp_dir}/dashboard.json" >/dev/null
-jq -e --arg host "${portable_host}" \
-	'[.rules[].query | select(contains($host))] | length == 4' \
+jq -e --arg host "${portable_host}" --argjson expected "${rules_host_parameters}" \
+	'[.rules[].query | select(contains($host))] | length == $expected' \
 	"${tmp_dir}/rules.json" >/dev/null
 
 if grep -ERq '__OPENIRN_[A-Z0-9_]+__' "${tmp_dir}"; then
@@ -75,7 +79,7 @@ if grep -Eni \
 	-e 'codex@srv' \
 	-e 'ssh[[:space:]]+-p[[:space:]]+42' \
 	-e 'host\.name[[:space:]]*==[[:space:]]*\\"srv\\"' \
-	-e '\(logs-openirn\.\(api\|security\)\|synthetics-http\|metrics-system\.\(cpu\|memory\|filesystem\)\|metrics-mysql\.status\)-default' \
+	-e '\(logs-openirn\.\(api\|security\|operations\)\|logs-apache\.\(access\|error\)\|synthetics-http\|metrics-system\.\(cpu\|memory\|filesystem\)\|metrics-apache\.status\|metrics-linux\.service\|metrics-mysql\.status\)-default' \
 	"${audit_files[@]}"; then
 	echo 'Une référence propre à l’infrastructure de développement subsiste.' >&2
 	exit 1
@@ -96,10 +100,15 @@ fi
 for source_pattern in \
 	'logs-openirn.api-*' \
 	'logs-openirn.security-*' \
+	'logs-openirn.operations-*' \
+	'logs-apache.access-*' \
+	'logs-apache.error-*' \
 	'synthetics-http-*' \
 	'metrics-system.cpu-*' \
 	'metrics-system.memory-*' \
 	'metrics-system.filesystem-*' \
+	'metrics-apache.status-*' \
+	'metrics-linux.service-*' \
 	'metrics-mysql.status-*'; do
 	if ! grep -Fq "${source_pattern}" "${tmp_dir}/dashboard.json"; then
 		echo "Source portable absente du dashboard : ${source_pattern}" >&2

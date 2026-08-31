@@ -58,9 +58,13 @@ void main() {
     expect(find.text('locale:fr'), findsOneWidget);
     expect(find.text('back:Retour'), findsOneWidget);
 
-    await tester.tap(find.text(OpenIrnLanguage.fr.flag));
+    await tester.tap(
+      find.byKey(const ValueKey<String>('openirn-language-flag-current-fr')),
+    );
     await tester.pumpAndSettle();
-    await tester.tap(find.text(OpenIrnLanguage.es.flag));
+    await tester.tap(
+      find.byKey(const ValueKey<String>('openirn-language-flag-menu-es')),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('locale:es'), findsOneWidget);

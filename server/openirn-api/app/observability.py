@@ -21,6 +21,9 @@ ACCESS_LOG_BACKUP_COUNT_ENV = "OPENIRN_API_ACCESS_LOG_BACKUP_COUNT"
 SECURITY_LOG_PATH_ENV = "OPENIRN_API_SECURITY_LOG_PATH"
 SECURITY_LOG_MAX_BYTES_ENV = "OPENIRN_API_SECURITY_LOG_MAX_BYTES"
 SECURITY_LOG_BACKUP_COUNT_ENV = "OPENIRN_API_SECURITY_LOG_BACKUP_COUNT"
+OPERATIONS_LOG_PATH_ENV = "OPENIRN_API_OPERATIONS_LOG_PATH"
+OPERATIONS_LOG_MAX_BYTES_ENV = "OPENIRN_API_OPERATIONS_LOG_MAX_BYTES"
+OPERATIONS_LOG_BACKUP_COUNT_ENV = "OPENIRN_API_OPERATIONS_LOG_BACKUP_COUNT"
 OBSERVABILITY_HASH_SECRET_ENV = "OPENIRN_API_OBSERVABILITY_HASH_SECRET"
 
 DEFAULT_ACCESS_LOG_MAX_BYTES = 10 * 1024 * 1024
@@ -142,6 +145,38 @@ def _security_logger() -> logging.Logger:
     return logger
 
 
+def _operations_logger() -> logging.Logger:
+    logger = logging.getLogger("openirn.api.operations")
+    if getattr(logger, "_openirn_configured", False):
+        return logger
+
+    path = os.environ.get(OPERATIONS_LOG_PATH_ENV, "-").strip() or "-"
+    if path == "-":
+        handler: logging.Handler = logging.StreamHandler(sys.stdout)
+    else:
+        log_path = Path(path)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler(
+            log_path,
+            maxBytes=_positive_int_env(
+                OPERATIONS_LOG_MAX_BYTES_ENV,
+                DEFAULT_ACCESS_LOG_MAX_BYTES,
+            ),
+            backupCount=_positive_int_env(
+                OPERATIONS_LOG_BACKUP_COUNT_ENV,
+                DEFAULT_ACCESS_LOG_BACKUP_COUNT,
+            ),
+            encoding="utf-8",
+        )
+
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    setattr(logger, "_openirn_configured", True)
+    return logger
+
+
 def emit_access_event(event: dict[str, Any]) -> None:
     _access_logger().info(
         json.dumps(
@@ -169,6 +204,22 @@ def emit_security_event(event: dict[str, Any]) -> None:
         )
 
 
+def emit_operation_event(event: dict[str, Any]) -> None:
+    try:
+        _operations_logger().info(
+            json.dumps(
+                event,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "Impossible d'écrire l'événement d'exploitation OpenIRN"
+        )
+
+
 def current_trace_id() -> str:
     return _REQUEST_TRACE_ID.get()
 
@@ -185,9 +236,9 @@ def _pseudonymize_identity(kind: str, value: Any) -> str:
     ).hexdigest()
 
 
-def _safe_event_type(value: Any) -> str:
+def _safe_event_type(value: Any, fallback: str = "security.event") -> str:
     raw = str(value or "").strip().lower()
-    return raw if _SAFE_EVENT_TYPE_RE.fullmatch(raw) else "security.event"
+    return raw if _SAFE_EVENT_TYPE_RE.fullmatch(raw) else fallback
 
 
 def _safe_keyword(value: Any, fallback: str = "") -> str:
@@ -250,6 +301,57 @@ def _safe_security_attributes(attributes: dict[str, Any] | None) -> dict[str, An
         if value:
             safe[target_name] = value
     return safe
+
+
+def build_operation_event(
+    event_type: str,
+    *,
+    service_version: str,
+    successful: bool = True,
+    automatic: bool | None = None,
+    reason: str = "",
+    size_bytes: int | None = None,
+    signature_status: str = "",
+) -> dict[str, Any]:
+    safe_type = _safe_event_type(event_type, "operation.event")
+    outcome = "success" if successful else "failure"
+    event_types = ["start"] if safe_type == "service.started" else ["creation"]
+    if not successful:
+        event_types = ["error"]
+
+    event: dict[str, Any] = {
+        "@timestamp": _event_timestamp(),
+        "event": {
+            "action": safe_type,
+            "category": ["process"] if safe_type == "service.started" else ["database"],
+            "dataset": "openirn.operations",
+            "kind": "event",
+            "outcome": outcome,
+            "provider": "openirn-api",
+            "type": event_types,
+        },
+        "message": f"OpenIRN operation: {safe_type}",
+        "service": {
+            "name": "openirn-api",
+            "type": "openirn",
+            "version": service_version,
+        },
+    }
+
+    operation: dict[str, Any] = {}
+    if isinstance(automatic, bool):
+        operation["automatic"] = automatic
+    safe_reason = _safe_keyword(reason)
+    if safe_reason:
+        operation["reason"] = safe_reason
+    if isinstance(size_bytes, int) and size_bytes >= 0:
+        operation["size_bytes"] = size_bytes
+    safe_signature_status = _safe_keyword(signature_status)
+    if safe_signature_status:
+        operation["signature_status"] = safe_signature_status
+    if operation:
+        event["openirn"] = {"operation": operation}
+    return event
 
 
 def build_security_event(
@@ -463,6 +565,14 @@ class ApiAccessLogMiddleware:
                     "version": str(scope.get("http_version") or ""),
                 },
                 "message": f"{method} {route} {status_code}",
+                "device": {"id": ""},
+                "openirn": {
+                    "client": {
+                        "auth_mode": "",
+                        "platform": "",
+                    }
+                },
+                "organization": {"id": ""},
                 "service": {
                     "name": "openirn-api",
                     "type": "openirn",
@@ -473,6 +583,30 @@ class ApiAccessLogMiddleware:
             }
             if error_type:
                 event["error"] = {"type": error_type}
+            auth_context = state.get("openirn_auth_context")
+            if isinstance(auth_context, dict):
+                tenant_hash = _pseudonymize_identity(
+                    "tenant", auth_context.get("tenantId")
+                )
+                device_hash = _pseudonymize_identity(
+                    "device", auth_context.get("deviceId")
+                )
+                platform = _safe_keyword(auth_context.get("devicePlatform"))
+                auth_mode = _safe_keyword(auth_context.get("authMode"))
+                if tenant_hash:
+                    event["organization"] = {"id": tenant_hash}
+                if device_hash:
+                    event["device"] = {"id": device_hash}
+                client_fields = {
+                    key: value
+                    for key, value in {
+                        "auth_mode": auth_mode,
+                        "platform": platform,
+                    }.items()
+                    if value
+                }
+                if client_fields:
+                    event["openirn"] = {"client": client_fields}
             try:
                 self.emit(event)
             except Exception:

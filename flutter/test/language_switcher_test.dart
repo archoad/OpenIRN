@@ -23,7 +23,7 @@ void main() {
     );
   });
 
-  testWidgets('shows one current flag and switches among all languages', (
+  testWidgets('shows vector flags and switches among all languages', (
     tester,
   ) async {
     final i18n = OpenIrnLocalizations.instance;
@@ -39,12 +39,21 @@ void main() {
       ),
     );
 
-    expect(find.text(OpenIrnLanguage.fr.flag), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('openirn-language-flag-current-fr')),
+      findsOneWidget,
+    );
     for (final language in OpenIrnLanguage.values.where(
       (language) => language != OpenIrnLanguage.fr,
     )) {
-      expect(find.text(language.flag), findsNothing);
+      expect(
+        find.byKey(
+          ValueKey<String>('openirn-language-flag-current-${language.code}'),
+        ),
+        findsNothing,
+      );
     }
+    expect(find.text('🇫🇷'), findsNothing);
     expect(
       find.descendant(
         of: find.byType(OpenIrnLanguageSwitcher),
@@ -53,32 +62,54 @@ void main() {
       findsNothing,
     );
 
-    await tester.tap(find.text(OpenIrnLanguage.fr.flag));
+    await tester.tap(
+      find.byKey(const ValueKey<String>('openirn-language-flag-current-fr')),
+    );
     await tester.pumpAndSettle();
 
     for (final language in OpenIrnLanguage.values) {
       expect(
-        find.text(language.flag),
-        language == OpenIrnLanguage.fr ? findsNWidgets(2) : findsOneWidget,
+        find.byKey(
+          ValueKey<String>('openirn-language-flag-menu-${language.code}'),
+        ),
+        findsOneWidget,
       );
       expect(find.text(language.label), findsOneWidget);
     }
 
-    await tester.tap(find.text(OpenIrnLanguage.es.flag));
+    await tester.tap(
+      find.byKey(const ValueKey<String>('openirn-language-flag-menu-es')),
+    );
     await tester.pumpAndSettle();
 
     expect(i18n.language, OpenIrnLanguage.es);
     expect(find.byType(OpenIrnLanguageSwitcher), findsOneWidget);
-    expect(find.text(OpenIrnLanguage.es.flag), findsOneWidget);
-    expect(find.text(OpenIrnLanguage.fr.flag), findsNothing);
+    expect(
+      find.byKey(const ValueKey<String>('openirn-language-flag-current-es')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('openirn-language-flag-current-fr')),
+      findsNothing,
+    );
 
-    await tester.tap(find.text(OpenIrnLanguage.es.flag));
+    await tester.tap(
+      find.byKey(const ValueKey<String>('openirn-language-flag-current-es')),
+    );
     await tester.pumpAndSettle();
-    await tester.tap(find.text(OpenIrnLanguage.de.flag));
+    await tester.tap(
+      find.byKey(const ValueKey<String>('openirn-language-flag-menu-de')),
+    );
     await tester.pumpAndSettle();
 
     expect(i18n.language, OpenIrnLanguage.de);
-    expect(find.text(OpenIrnLanguage.de.flag), findsOneWidget);
-    expect(find.text(OpenIrnLanguage.es.flag), findsNothing);
+    expect(
+      find.byKey(const ValueKey<String>('openirn-language-flag-current-de')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('openirn-language-flag-current-es')),
+      findsNothing,
+    );
   });
 }

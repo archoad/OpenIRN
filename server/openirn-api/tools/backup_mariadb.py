@@ -21,6 +21,11 @@ APP_DIR = Path(__file__).resolve().parents[1] / "app"
 sys.path.insert(0, str(APP_DIR))
 
 from database_contract import REQUIRED_MIGRATIONS, REQUIRED_TABLES  # noqa: E402
+from observability import (  # noqa: E402
+    build_operation_event,
+    emit_operation_event,
+)
+from version import APP_VERSION  # noqa: E402
 
 
 def utc_now() -> datetime:
@@ -365,7 +370,35 @@ def main() -> int:
     parser.add_argument("--manual", action="store_true", help="Mark the backup as manual instead of scheduled.")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
-    create_backup(Path(args.backup_dir), max(1, args.keep), args.reason, automatic=not args.manual, verbose=args.verbose)
+    try:
+        metadata = create_backup(
+            Path(args.backup_dir),
+            max(1, args.keep),
+            args.reason,
+            automatic=not args.manual,
+            verbose=args.verbose,
+        )
+    except BaseException as exc:
+        emit_operation_event(
+            build_operation_event(
+                "backup.failed",
+                service_version=APP_VERSION,
+                successful=False,
+                automatic=not args.manual,
+                reason=type(exc).__name__,
+            )
+        )
+        raise
+    emit_operation_event(
+        build_operation_event(
+            "backup.created",
+            service_version=APP_VERSION,
+            automatic=not args.manual,
+            reason=args.reason,
+            size_bytes=int(metadata.get("sizeBytes") or 0),
+            signature_status=str(metadata.get("signatureStatus") or ""),
+        )
+    )
     return 0
 
 

@@ -23,10 +23,10 @@ grep -Fq $'POST\thttps://kibana.other-infra.example/api/actions/connector' "${FA
 
 rule_gets=$(grep -Fc $'GET\thttps://kibana.other-infra.example/api/alerting/rule/' "${FAKE_CURL_LOG}")
 rule_creates=$(grep -Fc $'POST\thttps://kibana.other-infra.example/api/alerting/rule/' "${FAKE_CURL_LOG}")
-if [[ ${rule_gets} -ne 11 || ${rule_creates} -ne 11 ]]; then
+if [[ ${rule_gets} -ne 19 || ${rule_creates} -ne 19 ]]; then
 	echo "Cycle de règles incomplet : GET=${rule_gets}, POST=${rule_creates}" >&2
 	exit 1
 fi
 
 grep -Fq 'Installation du monitoring OpenIRN terminée.' "${tmp_dir}/install.log"
-echo 'Installation portable simulée : dashboard, connecteur local et 11 règles créés.'
+echo 'Installation portable simulée : dashboard, connecteur local et 19 règles créés.'

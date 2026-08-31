@@ -35,9 +35,12 @@ if __package__:
     )
     from .observability import (
         ApiAccessLogMiddleware,
+        build_operation_event,
         build_security_event,
+        emit_operation_event,
         emit_security_event,
     )
+    from .version import APP_VERSION
 else:
     from database_contract import (
         REQUIRED_MIGRATIONS,
@@ -47,11 +50,13 @@ else:
     )
     from observability import (
         ApiAccessLogMiddleware,
+        build_operation_event,
         build_security_event,
+        emit_operation_event,
         emit_security_event,
     )
+    from version import APP_VERSION
 
-APP_VERSION = "0.10.0"
 DATA_DIR = Path(os.environ.get("OPENIRN_API_DATA_DIR", "/var/lib/openirn-api"))
 MYSQL_URL = os.environ.get("OPENIRN_API_MYSQL_URL", "").strip()
 BACKUP_DIR = Path(os.environ.get("OPENIRN_API_BACKUP_DIR", str(DATA_DIR / "backups")))
@@ -746,10 +751,11 @@ def _session_auth_context(provided_token: str) -> dict[str, Any] | None:
                 return None
             device = con.execute(
                 """
-                SELECT 1
-                FROM authorized_devices
-                WHERE tenant_id = ? AND device_id = ?
-                  AND status = 'active' AND revoked_at IS NULL
+                SELECT COALESCE(NULLIF(t.platform, ''), d.platform) AS platform
+                FROM authorized_devices d
+                LEFT JOIN terminals t ON t.device_id = d.device_id
+                WHERE d.tenant_id = ? AND d.device_id = ?
+                  AND d.status = 'active' AND d.revoked_at IS NULL
                 """,
                 (row["tenant_id"], row["device_id"]),
             ).fetchone()
@@ -787,6 +793,7 @@ def _session_auth_context(provided_token: str) -> dict[str, Any] | None:
                 "deviceId": row["device_id"],
                 "userId": row["user_id"],
                 "userRole": _role_normalize(row["user_role"]),
+                "devicePlatform": str(device["platform"] or "").strip()[:80],
                 "solutionAdministrator": solution_administrator,
             }
     except DbError:
@@ -800,9 +807,11 @@ def _device_token_auth_context(provided_token: str) -> dict[str, Any] | None:
         with _db() as con:
             row = con.execute(
                 """
-                SELECT tenant_id, device_id
-                FROM authorized_devices
-                WHERE token_hash = ? AND status = 'active' AND revoked_at IS NULL
+                SELECT d.tenant_id, d.device_id,
+                       COALESCE(NULLIF(t.platform, ''), d.platform) AS platform
+                FROM authorized_devices d
+                LEFT JOIN terminals t ON t.device_id = d.device_id
+                WHERE d.token_hash = ? AND d.status = 'active' AND d.revoked_at IS NULL
                 """,
                 (token_hash,),
             ).fetchone()
@@ -822,6 +831,7 @@ def _device_token_auth_context(provided_token: str) -> dict[str, Any] | None:
                 "authMode": "device_token",
                 "tenantId": row["tenant_id"],
                 "deviceId": row["device_id"],
+                "devicePlatform": str(row["platform"] or "").strip()[:80],
                 "userId": "",
                 "userRole": "",
             }
@@ -830,18 +840,34 @@ def _device_token_auth_context(provided_token: str) -> dict[str, Any] | None:
 
 
 def _request_auth_context(request: Request) -> dict[str, Any] | None:
+    scope = getattr(request, "scope", None)
+    state = scope.setdefault("state", {}) if isinstance(scope, dict) else None
+    if isinstance(state, dict) and state.get("openirn_auth_context_checked") is True:
+        cached = state.get("openirn_auth_context")
+        return cached if isinstance(cached, dict) else None
+
     provided_token = _extract_bearer_token(request)
     if not provided_token:
+        if isinstance(state, dict):
+            state["openirn_auth_context_checked"] = True
         return None
 
     session_context = _session_auth_context(provided_token)
     if session_context is not None:
+        if isinstance(state, dict):
+            state["openirn_auth_context_checked"] = True
+            state["openirn_auth_context"] = session_context
         return session_context
 
     device_context = _device_token_auth_context(provided_token)
     if device_context is not None:
+        if isinstance(state, dict):
+            state["openirn_auth_context_checked"] = True
+            state["openirn_auth_context"] = device_context
         return device_context
 
+    if isinstance(state, dict):
+        state["openirn_auth_context_checked"] = True
     return None
 
 
@@ -1559,6 +1585,12 @@ def _startup() -> None:
     with _db() as con:
         with con:
             _sync_solution_administrators_to_all_tenants(con)
+    emit_operation_event(
+        build_operation_event(
+            "service.started",
+            service_version=APP_VERSION,
+        )
+    )
 
 
 
@@ -5059,6 +5091,17 @@ def _create_mariadb_backup(
                 },
             )
 
+    emit_operation_event(
+        build_operation_event(
+            "backup.created",
+            service_version=APP_VERSION,
+            automatic=automatic,
+            reason=reason,
+            size_bytes=int(metadata["sizeBytes"]),
+            signature_status=str(metadata["signatureStatus"]),
+        )
+    )
+
     return {**metadata, "name": backup_path.name, "removedOldBackups": removed}
 
 
@@ -5070,13 +5113,25 @@ def _create_database_backup(
     reason: str = "manual",
     automatic: bool = False,
 ) -> dict[str, Any]:
-    return _create_mariadb_backup(
-        tenant_id=tenant_id,
-        triggered_by_user_id=triggered_by_user_id,
-        protected_names=protected_names,
-        reason=reason,
-        automatic=automatic,
-    )
+    try:
+        return _create_mariadb_backup(
+            tenant_id=tenant_id,
+            triggered_by_user_id=triggered_by_user_id,
+            protected_names=protected_names,
+            reason=reason,
+            automatic=automatic,
+        )
+    except Exception as exc:
+        emit_operation_event(
+            build_operation_event(
+                "backup.failed",
+                service_version=APP_VERSION,
+                successful=False,
+                automatic=automatic,
+                reason=type(exc).__name__,
+            )
+        )
+        raise
 
 
 def _create_protective_backup(

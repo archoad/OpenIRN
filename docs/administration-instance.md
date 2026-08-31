@@ -38,6 +38,7 @@ Répertoires et unités usuels :
 | Sauvegardes | `/var/lib/openirn-api/backups` |
 | Journal API ECS/NDJSON | `/var/lib/openirn-api/logs/api-access.ndjson` |
 | Journal sécurité ECS/NDJSON | `/var/lib/openirn-api/logs/security.ndjson` |
+| Journal exploitation ECS/NDJSON | `/var/lib/openirn-api/logs/operations.ndjson` |
 | API | `openirn-api.service` |
 | Sauvegarde | `openirn-api-backup.service` |
 | Planification | `openirn-api-backup.timer` |
@@ -104,6 +105,11 @@ tail -n 20 /var/lib/openirn-api/logs/api-access.ndjson | jq -c \
 
 Contrôler en priorité les statuts `5xx`, la hausse des `4xx` et les routes dont la durée augmente. `event.duration` est exprimé en nanosecondes. `url.path` contient le modèle de route FastAPI, par exemple `/campaigns/{campaign_id}`, jamais l'identifiant réel. Un chemin non reconnu devient `/__unmatched__`. Le journal ne contient ni corps, ni query string, ni en-tête, ni adresse cliente, ni identifiant métier brut.
 
+Après authentification, `device.id` et `organization.id` sont des pseudonymes
+HMAC utilisables pour compter les clients et tenants actifs sans journaliser
+leurs identifiants réels. `openirn.client.platform` est la plateforme du terminal
+enregistrée côté serveur.
+
 ## Événements de sécurité
 
 Le journal de sécurité est séparé du journal d'accès. Afficher ses derniers événements sans exposer les pseudonymes dans la sortie :
@@ -115,21 +121,37 @@ tail -n 50 /var/lib/openirn-api/logs/security.ndjson | jq -c \
 
 Surveiller en priorité `authorization.denied`, `auth.failed`, les limitations, créations ou consommations de codes d'enrôlement, révocations de sessions ou terminaux et changements de privilèges. `trace.id` permet de retrouver la requête correspondante dans `api-access.ndjson` ou Kibana. Les champs `organization.id`, `user.id`, `device.id` et les champs sous `openirn.security` sont des pseudonymes HMAC, jamais les valeurs métier brutes. Ne pas faire tourner `OPENIRN_API_OBSERVABILITY_HASH_SECRET` lors d'une maintenance courante : sa rotation empêche de corréler un même acteur avant et après la rotation.
 
+## Événements d'exploitation
+
+Vérifier les démarrages et les sauvegardes sans afficher de métadonnée sensible :
+
+```bash
+tail -n 50 /var/lib/openirn-api/logs/operations.ndjson | jq -c \
+	'{timestamp:."@timestamp", action:.event.action, outcome:.event.outcome, version:.service.version, automatic:.openirn.operation.automatic}'
+```
+
+Les actions attendues sont `service.started`, `backup.created` et
+`backup.failed`. Le journal ne contient ni chemin, ni nom, ni empreinte de
+fichier, ni secret de signature.
+
 ## Dashboard Kibana OpenIRN
 
-Le dashboard **OpenIRN — Santé API et sécurité** regroupe la disponibilité synthétique, le trafic et les statuts HTTP, les latences p50/p95, les événements de sécurité, les ressources de l'hôte OpenIRN sélectionné à l'installation et l'état courant de MariaDB. Sa période initiale est de 24 heures et son actualisation automatique d'une minute.
+Le dashboard **OpenIRN — Supervision opérationnelle** est organisé en six sections : **Synthèse**, **Usage**, **Performance**, **Sécurité**, **Infrastructure** et **Exploitation**. Il couvre la disponibilité et les sauvegardes, les usages pseudonymisés, les latences p50/p95/p99, Apache, l'audit OpenIRN, les ressources système, MariaDB, systemd, TLS et la version déployée. Sa période initiale est de 24 heures et son actualisation automatique d'une minute.
 
 Interpréter en priorité les objectifs affichés dans son bandeau :
 
 - disponibilité synthétique supérieure ou égale à 99,9 % ;
 - latence API p95 inférieure à 250 ms ;
 - aucune réponse HTTP `5xx` ;
+- dernière sauvegarde réussie depuis moins de 26 heures et aucun échec récent ;
 - CPU inférieur à 85 %, mémoire et partition racine inférieures à 90 % et 85 % ;
+- swap inférieur à 50 %, services systemd actifs et workers Apache sous 90 % ;
+- certificat TLS valide plus de 30 jours ;
 - absence de hausse durable des connexions, threads actifs ou connexions avortées MariaDB.
 
 Les refus attendus, comme une requête sans session, augmentent les compteurs `403` et `authorization.denied` sans constituer seuls un incident. Corréler une hausse avec les motifs de sécurité, les pseudonymes de source et `trace.id`. Ces pseudonymes servent uniquement au regroupement technique et ne doivent pas être utilisés pour tenter de réidentifier un utilisateur.
 
-La définition reproductible du dashboard se trouve dans `monitoring/kibana/openirn-api-health-security.json`. La procédure de déploiement portable est documentée dans `monitoring/kibana/README.md`. Elle exige la valeur ECS `host.name` de l'hôte à superviser et accepte tous les namespaces Fleet correspondant aux motifs `logs-openirn.*-*`, `synthetics-http-*`, `metrics-system.*-*` et `metrics-mysql.status-*`. L'opération `PUT` remplace entièrement le dashboard portant l'identifiant `openirn-api-health-security` : relire le diff JSON avant chaque redéploiement.
+La définition reproductible du dashboard se trouve dans `monitoring/kibana/openirn-api-health-security.json`. La procédure de déploiement portable est documentée dans `monitoring/kibana/README.md`. Elle exige la valeur ECS `host.name` de l'hôte à superviser et accepte tous les namespaces Fleet correspondant aux motifs documentés : journaux OpenIRN et Apache, Synthetics, métriques System, Apache Status, Linux systemd et MariaDB. L'opération `PUT` remplace entièrement le dashboard portant l'identifiant `openirn-api-health-security` : relire le diff JSON avant chaque redéploiement.
 
 # 3. Contrôle hebdomadaire
 
@@ -351,6 +373,7 @@ python3 -m venv "$release_dir/.venv"
 	--requirement "$release_dir/requirements-mariadb.txt"
 "$release_dir/.venv/bin/python" -m py_compile \
 	"$release_dir/app/database_contract.py" \
+	"$release_dir/app/version.py" \
 	"$release_dir/app/main.py" \
 	"$release_dir/tools/"*.py
 ```
@@ -443,7 +466,7 @@ Vérifier ensuite :
 readlink -f /opt/openirn-api
 stat -c '%U %G %a %n' /etc/openirn-api.env
 cd /opt/openirn-api
-.venv/bin/python -m py_compile app/main.py app/database_contract.py
+.venv/bin/python -m py_compile app/version.py app/main.py app/database_contract.py
 ```
 
 Causes courantes : dépendance absente, URL MariaDB incorrecte, migration manquante, privilèges runtime trop larges ou fichier d'environnement absent.

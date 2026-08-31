@@ -132,6 +132,7 @@ tar --extract --gzip --file "$install_root/openirn.tar.gz" --directory "$install
 source_root="$(find "$install_root" -mindepth 1 -maxdepth 1 -type d -name 'OpenIRN-*' -print -quit)"
 test -n "$source_root"
 test -f "$source_root/server/openirn-api/app/main.py"
+test -f "$source_root/server/openirn-api/app/version.py"
 ```
 
 Deploy only the server component:
@@ -168,7 +169,7 @@ Check imports without starting the API:
 
 ```bash
 cd /opt/openirn-api
-.venv/bin/python -m py_compile app/database_contract.py app/main.py tools/*.py
+.venv/bin/python -m py_compile app/database_contract.py app/version.py app/main.py tools/*.py
 .venv/bin/python -c 'import fastapi, pymysql, uvicorn; print("Python dependencies OK")'
 ```
 
@@ -246,6 +247,9 @@ OPENIRN_API_ACCESS_LOG_BACKUP_COUNT=7
 OPENIRN_API_SECURITY_LOG_PATH=/var/lib/openirn-api/logs/security.ndjson
 OPENIRN_API_SECURITY_LOG_MAX_BYTES=10485760
 OPENIRN_API_SECURITY_LOG_BACKUP_COUNT=7
+OPENIRN_API_OPERATIONS_LOG_PATH=/var/lib/openirn-api/logs/operations.ndjson
+OPENIRN_API_OPERATIONS_LOG_MAX_BYTES=10485760
+OPENIRN_API_OPERATIONS_LOG_BACKUP_COUNT=7
 OPENIRN_API_OBSERVABILITY_HASH_SECRET=OBSERVABILITY_SECRET_TO_REPLACE
 OPENIRN_ENROLLMENT_CODE_SECRET=ENROLLMENT_SECRET_TO_REPLACE
 OPENIRN_SOLUTION_ADMIN_TENANT_ID=openirn-admin
@@ -275,9 +279,11 @@ stat -c '%U %G %a %n' /etc/openirn-api.env /etc/openirn-api-migration.env
 
 Expected result: `root root 600` for both files.
 
-The `api-access.ndjson` log contains one ECS event per request. It retains the method, FastAPI route template, status, duration, response size, service version, and a correlation identifier. It excludes bodies, query parameters, headers, client addresses, PINs, and tokens.
+The `api-access.ndjson` log contains one ECS event per request. It retains the method, FastAPI route template, status, duration, response size, service version, and a correlation identifier. After successful authentication, it adds HMAC pseudonyms for the tenant and device, the authentication mode, and the canonical device platform stored by the server. It excludes bodies, query parameters, headers, client addresses, PINs, tokens, and raw business identifiers.
 
-The `security.ndjson` log contains authentication, authorization denial, session, enrollment, and sensitive administration events. Workspace, user, device, session, request identifiers, and source addresses are pseudonymized with HMAC. No raw identifier, PIN, token, enrollment code, name, or email address is written. Mutation events are logged only after their corresponding MariaDB commit. With the configuration above, both logs are automatically limited to 10 MiB with seven rotations.
+The `security.ndjson` log contains authentication, authorization denial, session, enrollment, and sensitive administration events. Workspace, user, device, session, request identifiers, and source addresses are pseudonymized with HMAC. No raw identifier, PIN, token, enrollment code, name, or email address is written. Mutation events are logged only after their corresponding MariaDB commit.
+
+The `operations.ndjson` log records API starts and successful or failed backups. It contains the service version and bounded operational attributes, never a backup path, file name, hash, or contents. With the configuration above, all three logs are automatically limited to 10 MiB with seven rotations.
 
 # 8. Apply the MariaDB schema
 
@@ -349,7 +355,7 @@ journalctl -u openirn-api.service -n 100 --no-pager
 Enable the required modules:
 
 ```bash
-a2enmod headers proxy proxy_http ssl
+a2enmod headers proxy proxy_http ssl status
 ```
 
 First install a valid TLS certificate for `$OPENIRN_HOST` according to your organization's procedure. Adapt the example paths below.
@@ -384,14 +390,43 @@ Content:
 </VirtualHost>
 ```
 
-Replace the DNS name and certificate paths, then check and enable the site:
+Replace the DNS name and certificate paths. Then create a separate,
+strictly-local listener for Apache Status:
+
+```bash
+vim /etc/apache2/conf-available/openirn-status.conf
+```
+
+```apache
+Listen 127.0.0.1:8092
+ExtendedStatus On
+
+<VirtualHost 127.0.0.1:8092>
+    <Location /server-status>
+        SetHandler server-status
+        Require local
+    </Location>
+</VirtualHost>
+```
+
+Check and enable the site and this configuration:
 
 ```bash
 apache2ctl configtest
 a2ensite openirn-api.conf
+a2enconf openirn-status.conf
 systemctl reload apache2
 systemctl is-active apache2
 ```
+
+Check the Apache metrics source locally without exposing it to the Internet:
+
+```bash
+curl --fail --silent --show-error http://127.0.0.1:8092/server-status?auto | head
+```
+
+The response should contain `BusyWorkers` and `IdleWorkers`. A public request
+to `/server-status` must instead be denied.
 
 Check from a workstation that resolves the DNS name:
 

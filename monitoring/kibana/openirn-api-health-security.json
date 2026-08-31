@@ -1,6 +1,6 @@
 {
-  "title": "OpenIRN — Santé API et sécurité",
-  "description": "Disponibilité, trafic, latence, sécurité et ressources de l'instance OpenIRN supervisée.",
+  "title": "OpenIRN — Supervision opérationnelle",
+  "description": "Synthèse, usage, performance, sécurité, infrastructure et exploitation de l'instance OpenIRN supervisée.",
   "time_range": {
     "from": "now-24h",
     "to": "now"
@@ -11,14 +11,36 @@
   },
   "panels": [
     {
-      "grid": {"x": 0, "y": 0, "w": 48, "h": 4},
+      "grid": {
+        "x": 0,
+        "y": 0,
+        "w": 48,
+        "h": 4
+      },
       "type": "markdown",
       "config": {
-        "content": "# OpenIRN — Santé API et sécurité\n\nVue opérationnelle sur 24 h, actualisée chaque minute. Cibles : disponibilité synthétique ≥ **99,9 %**, latence API p95 < **250 ms**, aucune réponse **5xx**. Les identités et adresses du flux sécurité sont exclusivement des pseudonymes HMAC."
+        "content": "# OpenIRN — Supervision opérationnelle\n\nVue sur 24 h, actualisée chaque minute. Les identifiants d'usage et de sécurité sont exclusivement des pseudonymes HMAC."
       }
     },
     {
-      "grid": {"x": 0, "y": 4, "w": 8, "h": 6},
+      "grid": {
+        "x": 0,
+        "y": 4,
+        "w": 48,
+        "h": 3
+      },
+      "type": "markdown",
+      "config": {
+        "content": "## Synthèse\n\nDisponibilité, état courant, requêtes/min, taux de 5xx, latence p95 et âge de la dernière sauvegarde."
+      }
+    },
+    {
+      "grid": {
+        "x": 0,
+        "y": 7,
+        "w": 8,
+        "h": 6
+      },
       "type": "vis",
       "config": {
         "type": "metric",
@@ -27,11 +49,90 @@
           "type": "esql",
           "query": "FROM synthetics-http-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND service.name == \"openirn-api\"\n| EVAL is_up = CASE(monitor.status == \"up\", 1.0, 0.0)\n| STATS availability_raw = AVG(is_up) * 100\n| EVAL availability_pct = ROUND(availability_raw, 3)\n| KEEP availability_pct"
         },
-        "metrics": [{"type": "primary", "column": "availability_pct"}]
+        "metrics": [
+          {
+            "type": "primary",
+            "column": "availability_pct"
+          }
+        ]
       }
     },
     {
-      "grid": {"x": 8, "y": 4, "w": 8, "h": 6},
+      "grid": {
+        "x": 8,
+        "y": 7,
+        "w": 8,
+        "h": 6
+      },
+      "type": "vis",
+      "config": {
+        "type": "metric",
+        "title": "État courant (1 = disponible)",
+        "data_source": {
+          "type": "esql",
+          "query": "FROM synthetics-http-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND service.name == \"openirn-api\"\n| SORT @timestamp DESC\n| LIMIT 1\n| EVAL current_state = CASE(monitor.status == \"up\", 1, 0)\n| KEEP current_state"
+        },
+        "metrics": [
+          {
+            "type": "primary",
+            "column": "current_state"
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 16,
+        "y": 7,
+        "w": 8,
+        "h": 6
+      },
+      "type": "vis",
+      "config": {
+        "type": "metric",
+        "title": "Requêtes par minute (5 min)",
+        "data_source": {
+          "type": "esql",
+          "query": "FROM logs-openirn.api-*\n| WHERE @timestamp >= NOW() - 5 minutes AND url.path != \"/health\"\n| STATS request_count = COUNT(*)\n| EVAL requests_per_minute = ROUND(request_count / 5.0, 1)\n| KEEP requests_per_minute"
+        },
+        "metrics": [
+          {
+            "type": "primary",
+            "column": "requests_per_minute"
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 24,
+        "y": 7,
+        "w": 8,
+        "h": 6
+      },
+      "type": "vis",
+      "config": {
+        "type": "metric",
+        "title": "Taux de réponses 5xx (%)",
+        "data_source": {
+          "type": "esql",
+          "query": "FROM logs-openirn.api-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend\n| EVAL is_5xx = CASE(http.response.status_code >= 500, 1.0, 0.0)\n| STATS error_rate = ROUND(AVG(is_5xx) * 100, 3)\n| KEEP error_rate"
+        },
+        "metrics": [
+          {
+            "type": "primary",
+            "column": "error_rate"
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 32,
+        "y": 7,
+        "w": 8,
+        "h": 6
+      },
       "type": "vis",
       "config": {
         "type": "metric",
@@ -40,102 +141,44 @@
           "type": "esql",
           "query": "FROM logs-openirn.api-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend\n| STATS p95_ns = PERCENTILE(event.duration, 95)\n| EVAL p95_ms = ROUND(p95_ns / 1000000, 1)\n| KEEP p95_ms"
         },
-        "metrics": [{"type": "primary", "column": "p95_ms"}]
-      }
-    },
-    {
-      "grid": {"x": 16, "y": 4, "w": 8, "h": 6},
-      "type": "vis",
-      "config": {
-        "type": "metric",
-        "title": "Requêtes hors health",
-        "data_source": {
-          "type": "esql",
-          "query": "FROM logs-openirn.api-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND url.path != \"/health\"\n| STATS requests = COUNT(*)"
-        },
-        "metrics": [{"type": "primary", "column": "requests"}]
-      }
-    },
-    {
-      "grid": {"x": 24, "y": 4, "w": 8, "h": 6},
-      "type": "vis",
-      "config": {
-        "type": "metric",
-        "title": "Réponses HTTP 5xx",
-        "data_source": {
-          "type": "esql",
-          "query": "FROM logs-openirn.api-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND http.response.status_code >= 500\n| STATS errors_5xx = COUNT(*)"
-        },
-        "metrics": [{"type": "primary", "column": "errors_5xx"}]
-      }
-    },
-    {
-      "grid": {"x": 32, "y": 4, "w": 8, "h": 6},
-      "type": "vis",
-      "config": {
-        "type": "metric",
-        "title": "Événements de sécurité",
-        "data_source": {
-          "type": "esql",
-          "query": "FROM logs-openirn.security-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend\n| STATS security_events = COUNT(*)"
-        },
-        "metrics": [{"type": "primary", "column": "security_events"}]
-      }
-    },
-    {
-      "grid": {"x": 40, "y": 4, "w": 8, "h": 6},
-      "type": "vis",
-      "config": {
-        "type": "metric",
-        "title": "Sources pseudonymes distinctes",
-        "data_source": {
-          "type": "esql",
-          "query": "FROM logs-openirn.security-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend\n| STATS distinct_sources = COUNT_DISTINCT(openirn.security.source_address_hash)"
-        },
-        "metrics": [{"type": "primary", "column": "distinct_sources"}]
-      }
-    },
-    {
-      "grid": {"x": 0, "y": 10, "w": 24, "h": 12},
-      "type": "vis",
-      "config": {
-        "type": "xy",
-        "title": "Requêtes API par statut HTTP",
-        "layers": [
+        "metrics": [
           {
-            "type": "bar_stacked",
-            "data_source": {
-              "type": "esql",
-              "query": "FROM logs-openirn.api-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend\n| STATS requests = COUNT(*) BY time = BUCKET(@timestamp, 75, ?_tstart, ?_tend), status = http.response.status_code\n| SORT time"
-            },
-            "x": {"column": "time"},
-            "y": [{"column": "requests"}],
-            "breakdown_by": {"column": "status"}
+            "type": "primary",
+            "column": "p95_ms"
           }
         ]
       }
     },
     {
-      "grid": {"x": 24, "y": 10, "w": 24, "h": 12},
+      "grid": {
+        "x": 40,
+        "y": 7,
+        "w": 8,
+        "h": 6
+      },
       "type": "vis",
       "config": {
-        "type": "xy",
-        "title": "Latence API p50 et p95 (ms)",
-        "layers": [
+        "type": "metric",
+        "title": "Âge dernière sauvegarde (h)",
+        "data_source": {
+          "type": "esql",
+          "query": "FROM logs-openirn.operations-*\n| WHERE event.action == \"backup.created\" AND event.outcome == \"success\"\n| STATS last_backup = MAX(@timestamp)\n| EVAL backup_age_hours = ROUND(DATE_DIFF(\"minute\", last_backup, NOW()) / 60.0, 1)\n| KEEP backup_age_hours"
+        },
+        "metrics": [
           {
-            "type": "line",
-            "data_source": {
-              "type": "esql",
-              "query": "FROM logs-openirn.api-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend\n| STATS p50_ns = PERCENTILE(event.duration, 50), p95_ns = PERCENTILE(event.duration, 95) BY time = BUCKET(@timestamp, 75, ?_tstart, ?_tend)\n| EVAL p50_ms = ROUND(p50_ns / 1000000, 1), p95_ms = ROUND(p95_ns / 1000000, 1)\n| KEEP time, p50_ms, p95_ms\n| SORT time"
-            },
-            "x": {"column": "time"},
-            "y": [{"column": "p50_ms"}, {"column": "p95_ms"}]
+            "type": "primary",
+            "column": "backup_age_hours"
           }
         ]
       }
     },
     {
-      "grid": {"x": 0, "y": 22, "w": 24, "h": 10},
+      "grid": {
+        "x": 0,
+        "y": 13,
+        "w": 48,
+        "h": 10
+      },
       "type": "vis",
       "config": {
         "type": "xy",
@@ -147,38 +190,74 @@
               "type": "esql",
               "query": "FROM synthetics-http-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND service.name == \"openirn-api\"\n| EVAL is_up = CASE(monitor.status == \"up\", 1.0, 0.0)\n| STATS availability_pct = AVG(is_up) * 100 BY time = BUCKET(@timestamp, 75, ?_tstart, ?_tend)\n| SORT time"
             },
-            "x": {"column": "time"},
-            "y": [{"column": "availability_pct"}]
+            "x": {
+              "column": "time"
+            },
+            "y": [
+              {
+                "column": "availability_pct"
+              }
+            ]
           }
         ]
       }
     },
     {
-      "grid": {"x": 24, "y": 22, "w": 24, "h": 10},
+      "grid": {
+        "x": 0,
+        "y": 23,
+        "w": 48,
+        "h": 3
+      },
+      "type": "markdown",
+      "config": {
+        "content": "## Usage\n\nTrafic par route, codes HTTP, clients et tenants pseudonymisés, plateformes et trafic Apache."
+      }
+    },
+    {
+      "grid": {
+        "x": 0,
+        "y": 26,
+        "w": 24,
+        "h": 10
+      },
       "type": "vis",
       "config": {
         "type": "xy",
-        "title": "Événements de sécurité par action",
+        "title": "Usage — codes HTTP OpenIRN",
         "layers": [
           {
             "type": "bar_stacked",
             "data_source": {
               "type": "esql",
-              "query": "FROM logs-openirn.security-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend\n| STATS events = COUNT(*) BY time = BUCKET(@timestamp, 75, ?_tstart, ?_tend), action = event.action\n| SORT time"
+              "query": "FROM logs-openirn.api-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend\n| STATS requests = COUNT(*) BY time = BUCKET(@timestamp, 75, ?_tstart, ?_tend), status = http.response.status_code\n| SORT time"
             },
-            "x": {"column": "time"},
-            "y": [{"column": "events"}],
-            "breakdown_by": {"column": "action"}
+            "x": {
+              "column": "time"
+            },
+            "y": [
+              {
+                "column": "requests"
+              }
+            ],
+            "breakdown_by": {
+              "column": "status"
+            }
           }
         ]
       }
     },
     {
-      "grid": {"x": 0, "y": 32, "w": 24, "h": 10},
+      "grid": {
+        "x": 24,
+        "y": 26,
+        "w": 24,
+        "h": 10
+      },
       "type": "vis",
       "config": {
         "type": "xy",
-        "title": "Routes hors health les plus sollicitées",
+        "title": "Usage — trafic par route",
         "layers": [
           {
             "type": "bar",
@@ -186,18 +265,337 @@
               "type": "esql",
               "query": "FROM logs-openirn.api-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND url.path != \"/health\"\n| STATS requests = COUNT(*) BY route = url.path\n| SORT requests DESC\n| LIMIT 10"
             },
-            "x": {"column": "route"},
-            "y": [{"column": "requests"}]
+            "x": {
+              "column": "route"
+            },
+            "y": [
+              {
+                "column": "requests"
+              }
+            ]
           }
         ]
       }
     },
     {
-      "grid": {"x": 24, "y": 32, "w": 24, "h": 10},
+      "grid": {
+        "x": 0,
+        "y": 36,
+        "w": 12,
+        "h": 8
+      },
+      "type": "vis",
+      "config": {
+        "type": "metric",
+        "title": "Usage — clients actifs pseudonymisés",
+        "data_source": {
+          "type": "esql",
+          "query": "FROM logs-openirn.api-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND device.id != \"\"\n| STATS active_clients = COUNT_DISTINCT(device.id)"
+        },
+        "metrics": [
+          {
+            "type": "primary",
+            "column": "active_clients"
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 12,
+        "y": 36,
+        "w": 12,
+        "h": 8
+      },
+      "type": "vis",
+      "config": {
+        "type": "metric",
+        "title": "Usage — tenants actifs pseudonymisés",
+        "data_source": {
+          "type": "esql",
+          "query": "FROM logs-openirn.api-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND organization.id != \"\"\n| STATS active_tenants = COUNT_DISTINCT(organization.id)"
+        },
+        "metrics": [
+          {
+            "type": "primary",
+            "column": "active_tenants"
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 24,
+        "y": 36,
+        "w": 12,
+        "h": 8
+      },
       "type": "vis",
       "config": {
         "type": "xy",
-        "title": "Motifs des événements de sécurité",
+        "title": "Usage — plateformes clientes",
+        "layers": [
+          {
+            "type": "bar",
+            "data_source": {
+              "type": "esql",
+              "query": "FROM logs-openirn.api-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND openirn.client.platform != \"\"\n| STATS requests = COUNT(*) BY platform = openirn.client.platform\n| SORT requests DESC"
+            },
+            "x": {
+              "column": "platform"
+            },
+            "y": [
+              {
+                "column": "requests"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 36,
+        "y": 36,
+        "w": 12,
+        "h": 8
+      },
+      "type": "vis",
+      "config": {
+        "type": "xy",
+        "title": "Usage — trafic Apache par minute",
+        "layers": [
+          {
+            "type": "line",
+            "data_source": {
+              "type": "esql",
+              "query": "FROM logs-apache.access-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND host.name == \"__OPENIRN_MONITORED_HOST__\" AND url.path LIKE \"/api/*\"\n| STATS requests = COUNT(*) BY time = BUCKET(@timestamp, 75, ?_tstart, ?_tend)\n| SORT time"
+            },
+            "x": {
+              "column": "time"
+            },
+            "y": [
+              {
+                "column": "requests"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 0,
+        "y": 44,
+        "w": 48,
+        "h": 3
+      },
+      "type": "markdown",
+      "config": {
+        "content": "## Performance\n\nLatences p50/p95/p99, routes lentes, erreurs proxy et saturation des workers Apache."
+      }
+    },
+    {
+      "grid": {
+        "x": 0,
+        "y": 47,
+        "w": 24,
+        "h": 10
+      },
+      "type": "vis",
+      "config": {
+        "type": "xy",
+        "title": "Performance — latences API p50/p95/p99 (ms)",
+        "layers": [
+          {
+            "type": "line",
+            "data_source": {
+              "type": "esql",
+              "query": "FROM logs-openirn.api-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend\n| STATS p50_ns = PERCENTILE(event.duration, 50), p95_ns = PERCENTILE(event.duration, 95), p99_ns = PERCENTILE(event.duration, 99) BY time = BUCKET(@timestamp, 75, ?_tstart, ?_tend)\n| EVAL p50_ms = ROUND(p50_ns / 1000000, 1), p95_ms = ROUND(p95_ns / 1000000, 1), p99_ms = ROUND(p99_ns / 1000000, 1)\n| KEEP time, p50_ms, p95_ms, p99_ms\n| SORT time"
+            },
+            "x": {
+              "column": "time"
+            },
+            "y": [
+              {
+                "column": "p50_ms"
+              },
+              {
+                "column": "p95_ms"
+              },
+              {
+                "column": "p99_ms"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 24,
+        "y": 47,
+        "w": 24,
+        "h": 10
+      },
+      "type": "vis",
+      "config": {
+        "type": "xy",
+        "title": "Performance — routes lentes (p95 ms)",
+        "layers": [
+          {
+            "type": "bar",
+            "data_source": {
+              "type": "esql",
+              "query": "FROM logs-openirn.api-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND url.path != \"/health\"\n| STATS p95_ns = PERCENTILE(event.duration, 95), requests = COUNT(*) BY route = url.path\n| EVAL p95_ms = ROUND(p95_ns / 1000000, 1)\n| SORT p95_ms DESC\n| LIMIT 10"
+            },
+            "x": {
+              "column": "route"
+            },
+            "y": [
+              {
+                "column": "p95_ms"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 0,
+        "y": 57,
+        "w": 16,
+        "h": 8
+      },
+      "type": "vis",
+      "config": {
+        "type": "metric",
+        "title": "Performance — erreurs proxy Apache",
+        "data_source": {
+          "type": "esql",
+          "query": "FROM logs-apache.error-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND host.name == \"__OPENIRN_MONITORED_HOST__\" AND (apache.error.module == \"proxy\" OR apache.error.module == \"proxy_http\" OR MATCH(message, \"proxy\"))\n| STATS proxy_errors = COUNT(*)"
+        },
+        "metrics": [
+          {
+            "type": "primary",
+            "column": "proxy_errors"
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 16,
+        "y": 57,
+        "w": 16,
+        "h": 8
+      },
+      "type": "vis",
+      "config": {
+        "type": "metric",
+        "title": "Performance — saturation workers Apache (%)",
+        "data_source": {
+          "type": "esql",
+          "query": "FROM metrics-apache.status-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND host.name == \"__OPENIRN_MONITORED_HOST__\"\n| SORT @timestamp DESC\n| LIMIT 1\n| EVAL workers_total = apache.status.workers.busy + apache.status.workers.idle\n| EVAL saturation_pct = CASE(workers_total > 0, ROUND(apache.status.workers.busy * 100.0 / workers_total, 1), 0.0)\n| KEEP saturation_pct"
+        },
+        "metrics": [
+          {
+            "type": "primary",
+            "column": "saturation_pct"
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 32,
+        "y": 57,
+        "w": 16,
+        "h": 8
+      },
+      "type": "vis",
+      "config": {
+        "type": "xy",
+        "title": "Performance — workers Apache",
+        "layers": [
+          {
+            "type": "line",
+            "data_source": {
+              "type": "esql",
+              "query": "FROM metrics-apache.status-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND host.name == \"__OPENIRN_MONITORED_HOST__\"\n| STATS busy = MAX(apache.status.workers.busy), idle = MAX(apache.status.workers.idle) BY time = BUCKET(@timestamp, 75, ?_tstart, ?_tend)\n| SORT time"
+            },
+            "x": {
+              "column": "time"
+            },
+            "y": [
+              {
+                "column": "busy"
+              },
+              {
+                "column": "idle"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 0,
+        "y": 65,
+        "w": 48,
+        "h": 3
+      },
+      "type": "markdown",
+      "config": {
+        "content": "## Sécurité\n\nAuthentifications, limitations de débit, enrôlements, révocations et autres événements d'audit OpenIRN."
+      }
+    },
+    {
+      "grid": {
+        "x": 0,
+        "y": 68,
+        "w": 24,
+        "h": 10
+      },
+      "type": "vis",
+      "config": {
+        "type": "xy",
+        "title": "Sécurité — événements par action",
+        "layers": [
+          {
+            "type": "bar_stacked",
+            "data_source": {
+              "type": "esql",
+              "query": "FROM logs-openirn.security-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend\n| STATS events = COUNT(*) BY time = BUCKET(@timestamp, 75, ?_tstart, ?_tend), action = event.action\n| SORT time"
+            },
+            "x": {
+              "column": "time"
+            },
+            "y": [
+              {
+                "column": "events"
+              }
+            ],
+            "breakdown_by": {
+              "column": "action"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 24,
+        "y": 68,
+        "w": 24,
+        "h": 10
+      },
+      "type": "vis",
+      "config": {
+        "type": "xy",
+        "title": "Sécurité — motifs des événements",
         "layers": [
           {
             "type": "bar",
@@ -205,21 +603,129 @@
               "type": "esql",
               "query": "FROM logs-openirn.security-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND openirn.security.reason IS NOT NULL\n| STATS events = COUNT(*) BY reason = openirn.security.reason\n| SORT events DESC\n| LIMIT 10"
             },
-            "x": {"column": "reason"},
-            "y": [{"column": "events"}]
+            "x": {
+              "column": "reason"
+            },
+            "y": [
+              {
+                "column": "events"
+              }
+            ]
           }
         ]
       }
     },
     {
-      "grid": {"x": 0, "y": 42, "w": 48, "h": 3},
-      "type": "markdown",
+      "grid": {
+        "x": 0,
+        "y": 78,
+        "w": 12,
+        "h": 8
+      },
+      "type": "vis",
       "config": {
-        "content": "## Ressources de l'hôte OpenIRN et MariaDB\n\nPoints de vigilance : CPU > **85 %**, mémoire > **90 %**, partition racine > **85 %**, connexions ou threads MariaDB en hausse durable."
+        "type": "metric",
+        "title": "Sécurité — authentifications",
+        "data_source": {
+          "type": "esql",
+                  "query": "FROM logs-openirn.security-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND (event.action LIKE \"auth.*\" OR event.action LIKE \"authorization.*\")\n| STATS authentication_events = COUNT(*)"
+        },
+        "metrics": [
+          {
+            "type": "primary",
+            "column": "authentication_events"
+          }
+        ]
       }
     },
     {
-      "grid": {"x": 0, "y": 45, "w": 8, "h": 6},
+      "grid": {
+        "x": 12,
+        "y": 78,
+        "w": 12,
+        "h": 8
+      },
+      "type": "vis",
+      "config": {
+        "type": "metric",
+        "title": "Sécurité — rate limiting",
+        "data_source": {
+          "type": "esql",
+          "query": "FROM logs-openirn.security-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND event.action LIKE \"*.rate_limited\"\n| STATS rate_limited_events = COUNT(*)"
+        },
+        "metrics": [
+          {
+            "type": "primary",
+            "column": "rate_limited_events"
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 24,
+        "y": 78,
+        "w": 12,
+        "h": 8
+      },
+      "type": "vis",
+      "config": {
+        "type": "metric",
+        "title": "Sécurité — enrôlements",
+        "data_source": {
+          "type": "esql",
+                  "query": "FROM logs-openirn.security-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND (event.action LIKE \"enrollment.*\" OR event.action LIKE \"enrollment_request.*\")\n| STATS enrollment_events = COUNT(*)"
+        },
+        "metrics": [
+          {
+            "type": "primary",
+            "column": "enrollment_events"
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 36,
+        "y": 78,
+        "w": 12,
+        "h": 8
+      },
+      "type": "vis",
+      "config": {
+        "type": "metric",
+        "title": "Sécurité — révocations",
+        "data_source": {
+          "type": "esql",
+          "query": "FROM logs-openirn.security-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND (event.action LIKE \"*.revoked\" OR event.action LIKE \"*.deleted\")\n| STATS revocation_events = COUNT(*)"
+        },
+        "metrics": [
+          {
+            "type": "primary",
+            "column": "revocation_events"
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 0,
+        "y": 86,
+        "w": 48,
+        "h": 3
+      },
+      "type": "markdown",
+      "config": {
+        "content": "## Infrastructure\n\nCPU, mémoire, swap, disque, MariaDB et état des services systemd."
+      }
+    },
+    {
+      "grid": {
+        "x": 0,
+        "y": 89,
+        "w": 8,
+        "h": 6
+      },
       "type": "vis",
       "config": {
         "type": "metric",
@@ -228,11 +734,21 @@
           "type": "esql",
           "query": "FROM metrics-system.cpu-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND host.name == \"__OPENIRN_MONITORED_HOST__\"\n| SORT @timestamp DESC\n| LIMIT 1\n| EVAL cpu_pct = ROUND(system.cpu.total.norm.pct * 100, 1)\n| KEEP cpu_pct"
         },
-        "metrics": [{"type": "primary", "column": "cpu_pct"}]
+        "metrics": [
+          {
+            "type": "primary",
+            "column": "cpu_pct"
+          }
+        ]
       }
     },
     {
-      "grid": {"x": 8, "y": 45, "w": 8, "h": 6},
+      "grid": {
+        "x": 8,
+        "y": 89,
+        "w": 8,
+        "h": 6
+      },
       "type": "vis",
       "config": {
         "type": "metric",
@@ -241,11 +757,44 @@
           "type": "esql",
           "query": "FROM metrics-system.memory-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND host.name == \"__OPENIRN_MONITORED_HOST__\"\n| SORT @timestamp DESC\n| LIMIT 1\n| EVAL memory_pct = ROUND(system.memory.actual.used.pct * 100, 1)\n| KEEP memory_pct"
         },
-        "metrics": [{"type": "primary", "column": "memory_pct"}]
+        "metrics": [
+          {
+            "type": "primary",
+            "column": "memory_pct"
+          }
+        ]
       }
     },
     {
-      "grid": {"x": 16, "y": 45, "w": 8, "h": 6},
+      "grid": {
+        "x": 16,
+        "y": 89,
+        "w": 8,
+        "h": 6
+      },
+      "type": "vis",
+      "config": {
+        "type": "metric",
+        "title": "Infrastructure — swap utilisé (%)",
+        "data_source": {
+          "type": "esql",
+          "query": "FROM metrics-system.memory-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND host.name == \"__OPENIRN_MONITORED_HOST__\"\n| SORT @timestamp DESC\n| LIMIT 1\n| EVAL swap_pct = ROUND(system.memory.swap.used.pct * 100, 1)\n| KEEP swap_pct"
+        },
+        "metrics": [
+          {
+            "type": "primary",
+            "column": "swap_pct"
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 24,
+        "y": 89,
+        "w": 8,
+        "h": 6
+      },
       "type": "vis",
       "config": {
         "type": "metric",
@@ -254,11 +803,21 @@
           "type": "esql",
           "query": "FROM metrics-system.filesystem-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND host.name == \"__OPENIRN_MONITORED_HOST__\" AND system.filesystem.mount_point == \"/\"\n| SORT @timestamp DESC\n| LIMIT 1\n| EVAL disk_pct = ROUND(system.filesystem.used.pct * 100, 1)\n| KEEP disk_pct"
         },
-        "metrics": [{"type": "primary", "column": "disk_pct"}]
+        "metrics": [
+          {
+            "type": "primary",
+            "column": "disk_pct"
+          }
+        ]
       }
     },
     {
-      "grid": {"x": 24, "y": 45, "w": 8, "h": 6},
+      "grid": {
+        "x": 32,
+        "y": 89,
+        "w": 8,
+        "h": 6
+      },
       "type": "vis",
       "config": {
         "type": "metric",
@@ -267,11 +826,21 @@
           "type": "esql",
           "query": "FROM metrics-mysql.status-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND host.name == \"__OPENIRN_MONITORED_HOST__\"\n| SORT @timestamp DESC\n| LIMIT 1\n| KEEP mysql.status.threads.connected"
         },
-        "metrics": [{"type": "primary", "column": "mysql.status.threads.connected"}]
+        "metrics": [
+          {
+            "type": "primary",
+            "column": "mysql.status.threads.connected"
+          }
+        ]
       }
     },
     {
-      "grid": {"x": 32, "y": 45, "w": 8, "h": 6},
+      "grid": {
+        "x": 40,
+        "y": 89,
+        "w": 8,
+        "h": 6
+      },
       "type": "vis",
       "config": {
         "type": "metric",
@@ -280,11 +849,21 @@
           "type": "esql",
           "query": "FROM metrics-mysql.status-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND host.name == \"__OPENIRN_MONITORED_HOST__\"\n| SORT @timestamp DESC\n| LIMIT 1\n| KEEP mysql.status.threads.running"
         },
-        "metrics": [{"type": "primary", "column": "mysql.status.threads.running"}]
+        "metrics": [
+          {
+            "type": "primary",
+            "column": "mysql.status.threads.running"
+          }
+        ]
       }
     },
     {
-      "grid": {"x": 40, "y": 45, "w": 8, "h": 6},
+      "grid": {
+        "x": 0,
+        "y": 95,
+        "w": 12,
+        "h": 8
+      },
       "type": "vis",
       "config": {
         "type": "metric",
@@ -293,7 +872,229 @@
           "type": "esql",
           "query": "FROM metrics-mysql.status-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND host.name == \"__OPENIRN_MONITORED_HOST__\"\n| SORT @timestamp DESC\n| LIMIT 1\n| KEEP mysql.status.aborted.connects"
         },
-        "metrics": [{"type": "primary", "column": "mysql.status.aborted.connects"}]
+        "metrics": [
+          {
+            "type": "primary",
+            "column": "mysql.status.aborted.connects"
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 12,
+        "y": 95,
+        "w": 12,
+        "h": 8
+      },
+      "type": "vis",
+      "config": {
+        "type": "xy",
+        "title": "Infrastructure — état des services systemd (1 = actif)",
+        "layers": [
+          {
+            "type": "bar",
+            "data_source": {
+              "type": "esql",
+                  "query": "FROM metrics-linux.service-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND host.name == \"__OPENIRN_MONITORED_HOST__\" AND system.service.name IN (\"openirn-api.service\", \"openirn-api-backup.timer\", \"apache2.service\", \"mariadb.service\")\n| STATS state = LATEST(system.service.state) BY service = system.service.name\n| EVAL is_active = CASE(state == \"active\", 1, 0)\n| SORT service"
+            },
+            "x": {
+              "column": "service"
+            },
+            "y": [
+              {
+                "column": "is_active"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 24,
+        "y": 95,
+        "w": 12,
+        "h": 8
+      },
+      "type": "vis",
+      "config": {
+        "type": "xy",
+        "title": "Infrastructure — services systemd dans le temps",
+        "layers": [
+          {
+            "type": "bar_stacked",
+            "data_source": {
+              "type": "esql",
+                  "query": "FROM metrics-linux.service-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND host.name == \"__OPENIRN_MONITORED_HOST__\" AND system.service.name IN (\"openirn-api.service\", \"openirn-api-backup.timer\", \"apache2.service\", \"mariadb.service\")\n| STATS samples = COUNT(*) BY time = BUCKET(@timestamp, 75, ?_tstart, ?_tend), state = system.service.state\n| SORT time"
+            },
+            "x": {
+              "column": "time"
+            },
+            "y": [
+              {
+                "column": "samples"
+              }
+            ],
+            "breakdown_by": {
+              "column": "state"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 36,
+        "y": 95,
+        "w": 12,
+        "h": 8
+      },
+      "type": "vis",
+      "config": {
+        "type": "xy",
+        "title": "Infrastructure — activité MariaDB",
+        "layers": [
+          {
+            "type": "line",
+            "data_source": {
+              "type": "esql",
+              "query": "FROM metrics-mysql.status-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND host.name == \"__OPENIRN_MONITORED_HOST__\"\n| STATS connected = MAX(mysql.status.threads.connected), running = MAX(mysql.status.threads.running) BY time = BUCKET(@timestamp, 75, ?_tstart, ?_tend)\n| SORT time"
+            },
+            "x": {
+              "column": "time"
+            },
+            "y": [
+              {
+                "column": "connected"
+              },
+              {
+                "column": "running"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 0,
+        "y": 103,
+        "w": 48,
+        "h": 3
+      },
+      "type": "markdown",
+      "config": {
+        "content": "## Exploitation\n\nSauvegardes, redémarrages, certificat TLS et version de l'API déployée."
+      }
+    },
+    {
+      "grid": {
+        "x": 0,
+        "y": 106,
+        "w": 12,
+        "h": 8
+      },
+      "type": "vis",
+      "config": {
+        "type": "metric",
+        "title": "Exploitation — démarrages API",
+        "data_source": {
+          "type": "esql",
+          "query": "FROM logs-openirn.operations-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND event.action == \"service.started\"\n| STATS api_starts = COUNT(*)"
+        },
+        "metrics": [
+          {
+            "type": "primary",
+            "column": "api_starts"
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 12,
+        "y": 106,
+        "w": 12,
+        "h": 8
+      },
+      "type": "vis",
+      "config": {
+        "type": "metric",
+        "title": "Exploitation — validité TLS restante (jours)",
+        "data_source": {
+          "type": "esql",
+          "query": "FROM synthetics-http-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND service.name == \"openirn-api\" AND tls.server.x509.not_after IS NOT NULL\n| STATS certificate_expiry = MAX(tls.server.x509.not_after)\n| EVAL tls_days_remaining = DATE_DIFF(\"day\", NOW(), certificate_expiry)\n| KEEP tls_days_remaining"
+        },
+        "metrics": [
+          {
+            "type": "primary",
+            "column": "tls_days_remaining"
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 24,
+        "y": 106,
+        "w": 12,
+        "h": 8
+      },
+      "type": "vis",
+      "config": {
+        "type": "xy",
+        "title": "Exploitation — versions API observées",
+        "layers": [
+          {
+            "type": "bar",
+            "data_source": {
+              "type": "esql",
+              "query": "FROM logs-openirn.api-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND service.version IS NOT NULL\n| STATS requests = COUNT(*) BY version = service.version\n| SORT requests DESC"
+            },
+            "x": {
+              "column": "version"
+            },
+            "y": [
+              {
+                "column": "requests"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "grid": {
+        "x": 36,
+        "y": 106,
+        "w": 12,
+        "h": 8
+      },
+      "type": "vis",
+      "config": {
+        "type": "xy",
+        "title": "Exploitation — sauvegardes",
+        "layers": [
+          {
+            "type": "bar_stacked",
+            "data_source": {
+              "type": "esql",
+              "query": "FROM logs-openirn.operations-*\n| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend AND event.action LIKE \"backup.*\"\n| STATS backups = COUNT(*) BY time = BUCKET(@timestamp, 75, ?_tstart, ?_tend), outcome = event.outcome\n| SORT time"
+            },
+            "x": {
+              "column": "time"
+            },
+            "y": [
+              {
+                "column": "backups"
+              }
+            ],
+            "breakdown_by": {
+              "column": "outcome"
+            }
+          }
+        ]
       }
     }
   ]

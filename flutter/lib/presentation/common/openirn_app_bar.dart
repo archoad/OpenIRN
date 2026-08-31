@@ -138,9 +138,12 @@ class OpenIrnLanguageSwitcher extends StatelessWidget {
                 child: Row(
                   children: [
                     ExcludeSemantics(
-                      child: Text(
-                        language.flag,
-                        style: const TextStyle(fontSize: 22),
+                      child: OpenIrnLanguageFlag(
+                        key: ValueKey<String>(
+                          'openirn-language-flag-menu-${language.code}',
+                        ),
+                        language: language,
+                        width: 30,
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -170,9 +173,12 @@ class OpenIrnLanguageSwitcher extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               child: ExcludeSemantics(
-                child: Text(
-                  currentLanguage.flag,
-                  style: const TextStyle(fontSize: 20),
+                child: OpenIrnLanguageFlag(
+                  key: ValueKey<String>(
+                    'openirn-language-flag-current-${currentLanguage.code}',
+                  ),
+                  language: currentLanguage,
+                  width: 26,
                 ),
               ),
             ),
@@ -180,6 +186,151 @@ class OpenIrnLanguageSwitcher extends StatelessWidget {
         );
       },
     );
+  }
+}
+
+class OpenIrnLanguageFlag extends StatelessWidget {
+  final OpenIrnLanguage language;
+  final double width;
+
+  const OpenIrnLanguageFlag({
+    required this.language,
+    this.width = 30,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final borderRadius = BorderRadius.circular(width / 14);
+    return SizedBox(
+      width: width,
+      height: width * 2 / 3,
+      child: DecoratedBox(
+        position: DecorationPosition.foreground,
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant,
+            width: 0.75,
+          ),
+          borderRadius: borderRadius,
+        ),
+        child: ClipRRect(
+          borderRadius: borderRadius,
+          child: CustomPaint(painter: _OpenIrnLanguageFlagPainter(language)),
+        ),
+      ),
+    );
+  }
+}
+
+class _OpenIrnLanguageFlagPainter extends CustomPainter {
+  final OpenIrnLanguage language;
+
+  const _OpenIrnLanguageFlagPainter(this.language);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    switch (language) {
+      case OpenIrnLanguage.fr:
+        _paintFrenchFlag(canvas, size);
+        return;
+      case OpenIrnLanguage.en:
+        _paintUnitedKingdomFlag(canvas, size);
+        return;
+      case OpenIrnLanguage.es:
+        _paintSpanishFlag(canvas, size);
+        return;
+      case OpenIrnLanguage.de:
+        _paintGermanFlag(canvas, size);
+        return;
+    }
+  }
+
+  void _paintFrenchFlag(Canvas canvas, Size size) {
+    final stripeWidth = size.width / 3;
+    canvas
+      ..drawRect(
+        Rect.fromLTWH(0, 0, stripeWidth, size.height),
+        Paint()..color = const Color(0xff0055a4),
+      )
+      ..drawRect(
+        Rect.fromLTWH(stripeWidth, 0, stripeWidth, size.height),
+        Paint()..color = Colors.white,
+      )
+      ..drawRect(
+        Rect.fromLTWH(stripeWidth * 2, 0, stripeWidth, size.height),
+        Paint()..color = const Color(0xffef4135),
+      );
+  }
+
+  void _paintUnitedKingdomFlag(Canvas canvas, Size size) {
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()..color = const Color(0xff012169),
+    );
+
+    final whiteDiagonal = Paint()
+      ..color = Colors.white
+      ..strokeWidth = size.height * 0.24
+      ..style = PaintingStyle.stroke;
+    final redDiagonal = Paint()
+      ..color = const Color(0xffc8102e)
+      ..strokeWidth = size.height * 0.09
+      ..style = PaintingStyle.stroke;
+    canvas
+      ..drawLine(Offset.zero, Offset(size.width, size.height), whiteDiagonal)
+      ..drawLine(Offset(size.width, 0), Offset(0, size.height), whiteDiagonal)
+      ..drawLine(Offset.zero, Offset(size.width, size.height), redDiagonal)
+      ..drawLine(Offset(size.width, 0), Offset(0, size.height), redDiagonal)
+      ..drawRect(
+        Rect.fromLTWH(0, size.height * 0.34, size.width, size.height * 0.32),
+        Paint()..color = Colors.white,
+      )
+      ..drawRect(
+        Rect.fromLTWH(size.width * 0.38, 0, size.width * 0.24, size.height),
+        Paint()..color = Colors.white,
+      )
+      ..drawRect(
+        Rect.fromLTWH(0, size.height * 0.42, size.width, size.height * 0.16),
+        Paint()..color = const Color(0xffc8102e),
+      )
+      ..drawRect(
+        Rect.fromLTWH(size.width * 0.44, 0, size.width * 0.12, size.height),
+        Paint()..color = const Color(0xffc8102e),
+      );
+  }
+
+  void _paintSpanishFlag(Canvas canvas, Size size) {
+    final stripeHeight = size.height / 4;
+    final red = Paint()..color = const Color(0xffaa151b);
+    canvas
+      ..drawRect(Offset.zero & size, red)
+      ..drawRect(
+        Rect.fromLTWH(0, stripeHeight, size.width, stripeHeight * 2),
+        Paint()..color = const Color(0xfff1bf00),
+      );
+  }
+
+  void _paintGermanFlag(Canvas canvas, Size size) {
+    final stripeHeight = size.height / 3;
+    canvas
+      ..drawRect(
+        Rect.fromLTWH(0, 0, size.width, stripeHeight),
+        Paint()..color = Colors.black,
+      )
+      ..drawRect(
+        Rect.fromLTWH(0, stripeHeight, size.width, stripeHeight),
+        Paint()..color = const Color(0xffdd0000),
+      )
+      ..drawRect(
+        Rect.fromLTWH(0, stripeHeight * 2, size.width, stripeHeight),
+        Paint()..color = const Color(0xffffce00),
+      );
+  }
+
+  @override
+  bool shouldRepaint(_OpenIrnLanguageFlagPainter oldDelegate) {
+    return oldDelegate.language != language;
   }
 }
 

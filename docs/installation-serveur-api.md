@@ -132,6 +132,7 @@ tar --extract --gzip --file "$install_root/openirn.tar.gz" --directory "$install
 source_root="$(find "$install_root" -mindepth 1 -maxdepth 1 -type d -name 'OpenIRN-*' -print -quit)"
 test -n "$source_root"
 test -f "$source_root/server/openirn-api/app/main.py"
+test -f "$source_root/server/openirn-api/app/version.py"
 ```
 
 Déployer seulement le serveur :
@@ -168,7 +169,7 @@ Contrôler les imports sans démarrer l'API :
 
 ```bash
 cd /opt/openirn-api
-.venv/bin/python -m py_compile app/database_contract.py app/main.py tools/*.py
+.venv/bin/python -m py_compile app/database_contract.py app/version.py app/main.py tools/*.py
 .venv/bin/python -c 'import fastapi, pymysql, uvicorn; print("Dépendances Python OK")'
 ```
 
@@ -246,6 +247,9 @@ OPENIRN_API_ACCESS_LOG_BACKUP_COUNT=7
 OPENIRN_API_SECURITY_LOG_PATH=/var/lib/openirn-api/logs/security.ndjson
 OPENIRN_API_SECURITY_LOG_MAX_BYTES=10485760
 OPENIRN_API_SECURITY_LOG_BACKUP_COUNT=7
+OPENIRN_API_OPERATIONS_LOG_PATH=/var/lib/openirn-api/logs/operations.ndjson
+OPENIRN_API_OPERATIONS_LOG_MAX_BYTES=10485760
+OPENIRN_API_OPERATIONS_LOG_BACKUP_COUNT=7
 OPENIRN_API_OBSERVABILITY_HASH_SECRET=SECRET_OBSERVABILITE_À_REMPLACER
 OPENIRN_ENROLLMENT_CODE_SECRET=SECRET_ENROLEMENT_À_REMPLACER
 OPENIRN_SOLUTION_ADMIN_TENANT_ID=openirn-admin
@@ -275,9 +279,11 @@ stat -c '%U %G %a %n' /etc/openirn-api.env /etc/openirn-api-migration.env
 
 Résultat attendu : `root root 600` pour les deux fichiers.
 
-Le journal `api-access.ndjson` contient un événement ECS par requête. Il conserve la méthode, le modèle de route FastAPI, le statut, la durée, la taille de la réponse, la version du service et un identifiant de corrélation. Il exclut les corps, paramètres de requête, en-têtes, adresses clientes, PIN et jetons.
+Le journal `api-access.ndjson` contient un événement ECS par requête. Il conserve la méthode, le modèle de route FastAPI, le statut, la durée, la taille de la réponse, la version du service et un identifiant de corrélation. Après une authentification réussie, il ajoute les pseudonymes HMAC du tenant et du terminal, le mode d'authentification et la plateforme canonique du terminal enregistrée côté serveur. Il exclut les corps, paramètres de requête, en-têtes, adresses clientes, PIN, jetons et identifiants métier bruts.
 
-Le journal `security.ndjson` contient les authentifications, refus d'autorisation, sessions, enrôlements et opérations d'administration sensibles. Les identifiants d'espace, d'utilisateur, de terminal, de session, de demande et les adresses sources y sont pseudonymisés par HMAC. Aucun identifiant brut, PIN, jeton, code d'enrôlement, nom ou adresse électronique n'y est écrit. Les mutations sont journalisées seulement après le commit MariaDB correspondant. Les deux journaux sont automatiquement limités à 10 Mio et sept rotations avec la configuration ci-dessus.
+Le journal `security.ndjson` contient les authentifications, refus d'autorisation, sessions, enrôlements et opérations d'administration sensibles. Les identifiants d'espace, d'utilisateur, de terminal, de session, de demande et les adresses sources y sont pseudonymisés par HMAC. Aucun identifiant brut, PIN, jeton, code d'enrôlement, nom ou adresse électronique n'y est écrit. Les mutations sont journalisées seulement après le commit MariaDB correspondant.
+
+Le journal `operations.ndjson` recense les démarrages de l'API ainsi que les sauvegardes réussies ou échouées. Il contient la version du service et des attributs bornés utiles à l'exploitation, jamais le chemin, le nom, le hash ou le contenu d'une sauvegarde. Les trois journaux sont automatiquement limités à 10 Mio et sept rotations avec la configuration ci-dessus.
 
 # 8. Appliquer le schéma MariaDB
 
@@ -349,7 +355,7 @@ journalctl -u openirn-api.service -n 100 --no-pager
 Activer les modules nécessaires :
 
 ```bash
-a2enmod headers proxy proxy_http ssl
+a2enmod headers proxy proxy_http ssl status
 ```
 
 Installer d'abord un certificat TLS valide pour `$OPENIRN_HOST` selon la procédure de votre organisation. Les chemins ci-dessous sont des exemples à adapter.
@@ -384,14 +390,43 @@ Contenu :
 </VirtualHost>
 ```
 
-Remplacer le nom DNS et les chemins de certificat, puis vérifier et activer :
+Remplacer le nom DNS et les chemins de certificat. Créer ensuite une écoute
+séparée, strictement locale, pour Apache Status :
+
+```bash
+vim /etc/apache2/conf-available/openirn-status.conf
+```
+
+```apache
+Listen 127.0.0.1:8092
+ExtendedStatus On
+
+<VirtualHost 127.0.0.1:8092>
+    <Location /server-status>
+        SetHandler server-status
+        Require local
+    </Location>
+</VirtualHost>
+```
+
+Vérifier et activer le site et cette configuration :
 
 ```bash
 apache2ctl configtest
 a2ensite openirn-api.conf
+a2enconf openirn-status.conf
 systemctl reload apache2
 systemctl is-active apache2
 ```
+
+Contrôler localement la source de métriques Apache sans l'exposer sur Internet :
+
+```bash
+curl --fail --silent --show-error http://127.0.0.1:8092/server-status?auto | head
+```
+
+La réponse attendue contient notamment `BusyWorkers` et `IdleWorkers`. Une
+réponse publique sur `/server-status` doit au contraire être refusée.
 
 Contrôler depuis un poste qui résout le DNS :
 

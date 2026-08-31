@@ -116,6 +116,86 @@
       "timeWindow": {"size": 10, "unit": "m"},
       "alertDelay": 1,
       "query": "FROM metrics-mysql.status-*\n| WHERE host.name == \"__OPENIRN_MONITORED_HOST__\"\n| EVAL aborted_connects = TO_LONG(mysql.status.aborted.connects)\n| STATS samples = COUNT(*), aborted_min = MIN(aborted_connects), aborted_max = MAX(aborted_connects)\n| EVAL aborted_delta = aborted_max - aborted_min\n| WHERE samples >= 2 AND aborted_delta >= 5\n| KEEP samples, aborted_delta"
+    },
+    {
+      "id": "openirn-backup-stale",
+      "name": "[OpenIRN] Aucune sauvegarde réussie depuis 26 heures",
+      "severity": "critical",
+      "category": "operations",
+      "schedule": "15m",
+      "timeWindow": {"size": 26, "unit": "h"},
+      "alertDelay": 1,
+      "query": "FROM logs-openirn.operations-*\n| WHERE event.action == \"backup.created\" AND event.outcome == \"success\"\n| STATS successful_backups = COUNT(*)\n| WHERE successful_backups == 0\n| KEEP successful_backups"
+    },
+    {
+      "id": "openirn-backup-failed",
+      "name": "[OpenIRN] Échec de sauvegarde",
+      "severity": "critical",
+      "category": "operations",
+      "schedule": "5m",
+      "timeWindow": {"size": 15, "unit": "m"},
+      "alertDelay": 1,
+      "query": "FROM logs-openirn.operations-*\n| WHERE event.action == \"backup.failed\" OR (event.action == \"backup.created\" AND event.outcome == \"failure\")\n| STATS failed_backups = COUNT(*), last_failure = MAX(@timestamp)\n| WHERE failed_backups >= 1\n| KEEP failed_backups, last_failure"
+    },
+    {
+      "id": "openirn-apache-proxy-errors",
+      "name": "[OpenIRN] Erreurs du proxy Apache",
+      "severity": "critical",
+      "category": "proxy",
+      "schedule": "1m",
+      "timeWindow": {"size": 5, "unit": "m"},
+      "alertDelay": 1,
+      "query": "FROM logs-apache.error-*\n| WHERE host.name == \"__OPENIRN_MONITORED_HOST__\" AND (apache.error.module == \"proxy\" OR apache.error.module == \"proxy_http\" OR MATCH(message, \"proxy\"))\n| STATS proxy_errors = COUNT(*), last_error = MAX(@timestamp)\n| WHERE proxy_errors >= 1\n| KEEP proxy_errors, last_error"
+    },
+    {
+      "id": "openirn-apache-workers-saturated",
+      "name": "[OpenIRN] Workers Apache saturés",
+      "severity": "critical",
+      "category": "proxy",
+      "schedule": "1m",
+      "timeWindow": {"size": 5, "unit": "m"},
+      "alertDelay": 2,
+      "query": "FROM metrics-apache.status-*\n| WHERE host.name == \"__OPENIRN_MONITORED_HOST__\"\n| STATS busy = LATEST(apache.status.workers.busy), idle = LATEST(apache.status.workers.idle)\n| EVAL workers_total = busy + idle\n| EVAL saturation_pct = CASE(workers_total > 0, busy * 100.0 / workers_total, 0.0)\n| WHERE saturation_pct >= 90\n| KEEP busy, idle, saturation_pct"
+    },
+    {
+      "id": "openirn-host-swap-high",
+      "name": "[OpenIRN] Utilisation élevée du swap",
+      "severity": "warning",
+      "category": "system",
+      "schedule": "1m",
+      "timeWindow": {"size": 10, "unit": "m"},
+      "alertDelay": 2,
+      "query": "FROM metrics-system.memory-*\n| WHERE host.name == \"__OPENIRN_MONITORED_HOST__\"\n| STATS samples = COUNT(*), swap_avg_pct = AVG(system.memory.swap.used.pct) * 100\n| WHERE samples >= 5 AND swap_avg_pct >= 50\n| KEEP samples, swap_avg_pct"
+    },
+    {
+      "id": "openirn-systemd-service-down",
+      "name": "[OpenIRN] Service systemd OpenIRN inactif",
+      "severity": "critical",
+      "category": "system",
+      "schedule": "1m",
+      "timeWindow": {"size": 5, "unit": "m"},
+      "alertDelay": 2,
+      "query": "FROM metrics-linux.service-*\n| WHERE host.name == \"__OPENIRN_MONITORED_HOST__\" AND system.service.name IN (\"openirn-api.service\", \"openirn-api-backup.timer\", \"apache2.service\", \"mariadb.service\")\n| STATS state = LATEST(system.service.state), sub_state = LATEST(system.service.sub_state) BY service = system.service.name\n| WHERE state != \"active\"\n| KEEP service, state, sub_state"
+    },
+    {
+      "id": "openirn-tls-expiring",
+      "name": "[OpenIRN] Certificat TLS à renouveler",
+      "severity": "warning",
+      "category": "tls",
+      "schedule": "1h",
+      "timeWindow": {"size": 2, "unit": "h"},
+      "alertDelay": 1,
+      "query": "FROM synthetics-http-*\n| WHERE service.name == \"openirn-api\" AND tls.server.x509.not_after IS NOT NULL\n| STATS certificate_expiry = MAX(tls.server.x509.not_after)\n| EVAL days_remaining = DATE_DIFF(\"day\", NOW(), certificate_expiry)\n| WHERE days_remaining <= 30\n| KEEP certificate_expiry, days_remaining"
+    },
+    {
+      "id": "openirn-api-restarts",
+      "name": "[OpenIRN] Redémarrages répétés de l'API",
+      "severity": "warning",
+      "category": "operations",
+      "schedule": "5m",
+      "timeWindow": {"size": 15, "unit": "m"},
+      "alertDelay": 1,
+      "query": "FROM logs-openirn.operations-*\n| WHERE event.action == \"service.started\"\n| STATS api_starts = COUNT(*), last_start = MAX(@timestamp)\n| WHERE api_starts >= 3\n| KEEP api_starts, last_start"
     }
   ]
 }

@@ -8,7 +8,7 @@ void main() {
   test('declared languages and bundled catalog assets stay aligned', () {
     final languages = OpenIrnLanguage.values;
     final codes = languages.map((language) => language.code).toList();
-    final flags = languages.map((language) => language.flag).toList();
+    final labels = languages.map((language) => language.label).toList();
     final catalogCodes =
         Directory('assets/i18n')
             .listSync()
@@ -26,9 +26,9 @@ void main() {
       reason: 'duplicate language code',
     );
     expect(
-      flags.toSet(),
-      hasLength(flags.length),
-      reason: 'duplicate language flag',
+      labels.toSet(),
+      hasLength(labels.length),
+      reason: 'duplicate language label',
     );
     expect(catalogCodes, declaredCodes);
     for (final code in codes) {
