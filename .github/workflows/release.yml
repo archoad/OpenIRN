@@ -590,7 +590,7 @@ jobs:
 
       - name: Setup Microsoft Store Developer CLI
         if: ${{ vars.MICROSOFT_STORE_PUBLISH_ENABLED == 'true' }}
-        uses: microsoft/microsoft-store-apppublisher@v1.1
+        uses: microsoft/microsoft-store-apppublisher@v1.4
 
       - name: Configure Microsoft Store Developer CLI
         if: ${{ vars.MICROSOFT_STORE_PUBLISH_ENABLED == 'true' }}
