@@ -34,6 +34,7 @@ REQUIRED_MIGRATIONS = {
     168: "terminal_identity_table",
     169: "invalidate_legacy_default_pins",
     170: "enrollment_anti_abuse_rate_limit_buckets",
+    171: "reusable_enrollment_invitations",
 }
 
 RUNTIME_REQUIRED_PRIVILEGES = frozenset({"SELECT", "INSERT", "UPDATE", "DELETE"})

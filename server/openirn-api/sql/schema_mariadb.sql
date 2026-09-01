@@ -199,13 +199,20 @@ CREATE TABLE IF NOT EXISTS device_enrollment_codes (
     code_hash VARCHAR(64) NOT NULL,
     created_by_user_id VARCHAR(160) NULL,
     label VARCHAR(255) NOT NULL DEFAULT '',
-    expires_at VARCHAR(40) NOT NULL,
+    mode VARCHAR(32) NOT NULL DEFAULT 'one_time',
+    expires_at VARCHAR(40) NULL,
     consumed_at VARCHAR(40) NULL,
     consumed_by_device_id VARCHAR(160) NULL,
+    max_active_devices INT NULL,
+    use_count INT NOT NULL DEFAULT 0,
+    last_used_at VARCHAR(40) NULL,
+    revoked_at VARCHAR(40) NULL,
+    revoked_by_user_id VARCHAR(160) NULL,
     created_at VARCHAR(40) NOT NULL,
     PRIMARY KEY (tenant_id, enrollment_id),
     UNIQUE KEY uq_device_enrollment_codes_code_hash (code_hash),
     KEY idx_device_enrollment_codes_tenant_expires (tenant_id, expires_at),
+    KEY idx_device_enrollment_codes_tenant_mode_revoked (tenant_id, mode, revoked_at, created_at),
     CONSTRAINT fk_device_enrollment_codes_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

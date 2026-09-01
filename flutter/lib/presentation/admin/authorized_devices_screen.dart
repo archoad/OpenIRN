@@ -6,6 +6,7 @@ import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/authorized_device.dart';
 import '../../domain/models/device_enrollment_request.dart';
+import '../../domain/models/device_enrollment_invitation.dart';
 import '../../domain/models/sync_configuration.dart';
 import '../../domain/services/access_policy_service.dart';
 import '../../domain/services/app_sync_coordinator.dart';
@@ -43,6 +44,7 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
       return _AuthorizedDevicesStateData(
         configuration: SyncConfiguration.empty(),
         devices: const <AuthorizedDevice>[],
+        enrollmentInvitations: const <DeviceEnrollmentInvitation>[],
         serverAvailable: false,
         title: OpenIrnLocalizations.instance.tr(
           'authorized_devices.error.access_denied.title',
@@ -61,6 +63,7 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
       return _AuthorizedDevicesStateData(
         configuration: configuration,
         devices: const <AuthorizedDevice>[],
+        enrollmentInvitations: const <DeviceEnrollmentInvitation>[],
         serverAvailable: false,
         title: OpenIrnLocalizations.instance.tr(
           'authorized_devices.error.server_not_configured.title',
@@ -88,6 +91,7 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
       configuration: configuration,
       devices: result.devices,
       enrollmentRequests: result.enrollmentRequests,
+      enrollmentInvitations: result.enrollmentInvitations,
       includeAllTenants: includeAllTenants,
       serverAvailable: result.isAvailable,
       title: result.title,
@@ -127,6 +131,8 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
         createdByUserId: widget.activeUser.id,
         label: result.label,
         expiresInMinutes: result.expiresInMinutes,
+        reusable: result.reusable,
+        maxActiveDevices: result.maxActiveDevices,
       );
 
       if (!mounted) {
@@ -390,6 +396,60 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
     }
   }
 
+  Future<void> _revokeEnrollmentInvitation(
+    _AuthorizedDevicesStateData state,
+    DeviceEnrollmentInvitation invitation,
+  ) async {
+    if (_working || !invitation.isActive) {
+      return;
+    }
+    final revokeDevices = await showDialog<bool>(
+      context: context,
+      builder: (context) =>
+          _RevokeEnrollmentInvitationDialog(invitation: invitation),
+    );
+    if (revokeDevices == null) {
+      return;
+    }
+
+    OpenIrnApiDevicesResult? mutationResult;
+    final success = await _runDeviceMutation(() async {
+      mutationResult = await _apiClient.revokeReusableEnrollment(
+        baseUrl: state.configuration.apiBaseUrl,
+        tenantId: invitation.tenantId.trim().isEmpty
+            ? state.configuration.tenantId
+            : invitation.tenantId,
+        apiToken: state.configuration.apiToken,
+        enrollmentId: invitation.enrollmentId,
+        revokeDevices: revokeDevices,
+      );
+      return mutationResult!;
+    });
+    if (!success || !revokeDevices) {
+      return;
+    }
+
+    final rawRevokedIds = mutationResult?.responseBody?['revokedDeviceIds'];
+    final revokedDeviceIds = rawRevokedIds is List
+        ? rawRevokedIds.map((value) => value.toString()).toSet()
+        : const <String>{};
+    if (!revokedDeviceIds.contains(state.configuration.deviceId)) {
+      return;
+    }
+
+    await _configurationRepository.clearDeviceAuthorization();
+    final cleared =
+        SyncConfiguration.empty(
+          deviceId: state.configuration.deviceId,
+        ).copyWith(
+          tenantId: state.configuration.tenantId,
+          enabled: false,
+          apiToken: '',
+        );
+    await _configurationRepository.saveConfiguration(cleared);
+    AppSyncCoordinator.instance.stop();
+  }
+
   Future<bool> _runDeviceMutation(
     Future<OpenIrnApiDevicesResult> Function() action,
   ) async {
@@ -481,6 +541,18 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
                             _approveEnrollmentRequest(state, request),
                         onReject: (request) =>
                             _rejectEnrollmentRequest(state, request),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    if (state.serverAvailable &&
+                        state.enrollmentInvitations.isNotEmpty) ...[
+                      _ReusableEnrollmentInvitationsSection(
+                        invitations: state.enrollmentInvitations,
+                        working: _working,
+                        canRevoke:
+                            widget.activeUser.role == AppUserRole.administrator,
+                        onRevoke: (invitation) =>
+                            _revokeEnrollmentInvitation(state, invitation),
                       ),
                       const SizedBox(height: 12),
                     ],
@@ -1075,6 +1147,175 @@ class EnrollmentRequestCard extends StatelessWidget {
   }
 }
 
+class _ReusableEnrollmentInvitationsSection extends StatelessWidget {
+  final List<DeviceEnrollmentInvitation> invitations;
+  final bool working;
+  final bool canRevoke;
+  final ValueChanged<DeviceEnrollmentInvitation> onRevoke;
+
+  const _ReusableEnrollmentInvitationsSection({
+    required this.invitations,
+    required this.working,
+    required this.canRevoke,
+    required this.onRevoke,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          context.tr(
+            'authorized_devices.invitations.title',
+            fallback: 'Invitations permanentes',
+          ),
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        const SizedBox(height: 8),
+        for (final invitation in invitations) ...[
+          ReusableEnrollmentInvitationCard(
+            invitation: invitation,
+            working: working,
+            canRevoke: canRevoke,
+            onRevoke: () => onRevoke(invitation),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ],
+    );
+  }
+}
+
+class ReusableEnrollmentInvitationCard extends StatelessWidget {
+  final DeviceEnrollmentInvitation invitation;
+  final bool working;
+  final bool canRevoke;
+  final VoidCallback onRevoke;
+
+  const ReusableEnrollmentInvitationCard({
+    required this.invitation,
+    required this.working,
+    required this.canRevoke,
+    required this.onRevoke,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final details = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          invitation.label.trim().isEmpty
+              ? context.tr(
+                  'authorized_devices.invitations.unnamed',
+                  fallback: 'Invitation permanente',
+                )
+              : invitation.label,
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: 6),
+        Text(
+          context.tr(
+            'authorized_devices.invitations.capacity',
+            fallback:
+                '{active}/{maximum} terminaux actifs — {uses} utilisation(s)',
+            values: {
+              'active': invitation.activeDeviceCount,
+              'maximum': invitation.maxActiveDevices,
+              'uses': invitation.useCount,
+            },
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          context.tr(
+            'authorized_devices.invitations.created',
+            fallback: 'Créée le {date} — {workspace}',
+            values: {
+              'date': _formatDateTime(invitation.createdAt),
+              'workspace': invitation.tenantDisplayName,
+            },
+          ),
+        ),
+        if (invitation.lastUsedAt != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            context.tr(
+              'authorized_devices.invitations.last_used',
+              fallback: 'Dernière utilisation : {date}',
+              values: {'date': _formatDateTime(invitation.lastUsedAt)},
+            ),
+          ),
+        ],
+        if (!invitation.isActive && invitation.revokedAt != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            context.tr(
+              'authorized_devices.invitations.revoked_at',
+              fallback: 'Révoquée le {date}',
+              values: {'date': _formatDateTime(invitation.revokedAt)},
+            ),
+          ),
+        ],
+      ],
+    );
+    final action = invitation.isActive && canRevoke
+        ? FilledButton.tonalIcon(
+            onPressed: working ? null : onRevoke,
+            icon: const Icon(Icons.link_off_outlined),
+            label: Text(
+              context.tr(
+                'authorized_devices.invitations.revoke',
+                fallback: 'Révoquer l’invitation',
+              ),
+            ),
+          )
+        : Chip(
+            label: Text(
+              invitation.isActive
+                  ? context.tr(
+                      'authorized_devices.invitations.active',
+                      fallback: 'Active',
+                    )
+                  : context.tr(
+                      'authorized_devices.invitations.revoked',
+                      fallback: 'Révoquée',
+                    ),
+            ),
+          );
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            if (constraints.maxWidth < 680) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  details,
+                  const SizedBox(height: 12),
+                  Align(alignment: Alignment.centerRight, child: action),
+                ],
+              );
+            }
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: details),
+                const SizedBox(width: 12),
+                action,
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
 class _MessageCard extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -1113,6 +1354,91 @@ class _MessageCard extends StatelessWidget {
   }
 }
 
+class _RevokeEnrollmentInvitationDialog extends StatefulWidget {
+  final DeviceEnrollmentInvitation invitation;
+
+  const _RevokeEnrollmentInvitationDialog({required this.invitation});
+
+  @override
+  State<_RevokeEnrollmentInvitationDialog> createState() =>
+      _RevokeEnrollmentInvitationDialogState();
+}
+
+class _RevokeEnrollmentInvitationDialogState
+    extends State<_RevokeEnrollmentInvitationDialog> {
+  bool _revokeDevices = true;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      insetPadding: responsiveDialogInsetPadding(context),
+      title: Text(
+        context.tr(
+          'authorized_devices.invitations.revoke_title',
+          fallback: 'Révoquer cette invitation ?',
+        ),
+      ),
+      content: ResponsiveDialogContent(
+        maxWidth: 680,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              context.tr(
+                'authorized_devices.invitations.revoke_message',
+                fallback:
+                    'Le code ne pourra plus autoriser de nouveaux terminaux.',
+              ),
+            ),
+            const SizedBox(height: 12),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _revokeDevices,
+              onChanged: (value) {
+                setState(() {
+                  _revokeDevices = value ?? true;
+                });
+              },
+              title: Text(
+                context.tr(
+                  'authorized_devices.invitations.revoke_devices',
+                  fallback:
+                      'Révoquer également les terminaux et leurs sessions',
+                ),
+              ),
+              subtitle: Text(
+                context.tr(
+                  'authorized_devices.invitations.revoke_devices_help',
+                  fallback:
+                      '{count} terminal(aux) actif(s) ont été enrôlés avec cette invitation.',
+                  values: {'count': widget.invitation.activeDeviceCount},
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(context.tr('common.cancel', fallback: 'Annuler')),
+        ),
+        FilledButton.icon(
+          onPressed: () => Navigator.of(context).pop(_revokeDevices),
+          icon: const Icon(Icons.link_off_outlined),
+          label: Text(
+            context.tr(
+              'authorized_devices.action.revoke',
+              fallback: 'Révoquer',
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _EnrollmentDialog extends StatefulWidget {
   final AppUser activeUser;
 
@@ -1125,6 +1451,8 @@ class _EnrollmentDialog extends StatefulWidget {
 class _EnrollmentDialogState extends State<_EnrollmentDialog> {
   late final TextEditingController _labelController;
   int _expiresInMinutes = 10;
+  bool _reusable = false;
+  int _maxActiveDevices = 10;
 
   @override
   void initState() {
@@ -1165,11 +1493,17 @@ class _EnrollmentDialogState extends State<_EnrollmentDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                context.tr(
-                  'authorized_devices.enrollment.help',
-                  fallback:
-                      'OpenIRN va générer un code court à usage unique. Le nouveau terminal devra saisir ce code avant expiration.',
-                ),
+                _reusable
+                    ? context.tr(
+                        'authorized_devices.enrollment.reusable_help',
+                        fallback:
+                            'Cette invitation reste utilisable jusqu’à sa révocation. Chaque terminal reçoit son propre jeton révocable.',
+                      )
+                    : context.tr(
+                        'authorized_devices.enrollment.help',
+                        fallback:
+                            'OpenIRN va générer un code court à usage unique. Le nouveau terminal devra saisir ce code avant expiration.',
+                      ),
               ),
               const SizedBox(height: 16),
               TextField(
@@ -1184,56 +1518,106 @@ class _EnrollmentDialogState extends State<_EnrollmentDialog> {
                 ),
               ),
               const SizedBox(height: 16),
-              DropdownButtonFormField<int>(
-                initialValue: _expiresInMinutes,
-                decoration: InputDecoration(
-                  labelText: context.tr(
-                    'authorized_devices.enrollment.validity',
-                    fallback: 'Durée de validité',
+              if (widget.activeUser.role == AppUserRole.administrator) ...[
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: _reusable,
+                  onChanged: (value) {
+                    setState(() {
+                      _reusable = value;
+                    });
+                  },
+                  title: Text(
+                    context.tr(
+                      'authorized_devices.enrollment.reusable',
+                      fallback: 'Invitation permanente révocable',
+                    ),
                   ),
-                  border: const OutlineInputBorder(),
+                  subtitle: Text(
+                    context.tr(
+                      'authorized_devices.enrollment.reusable_admin_only',
+                      fallback:
+                          'Réservée aux administrateurs pour un besoin de recette ou de certification.',
+                    ),
+                  ),
                 ),
-                items: [
-                  DropdownMenuItem(
-                    value: 5,
-                    child: Text(
-                      context.tr(
-                        'common.minutes',
-                        fallback: '{count} minutes',
-                        values: {'count': 5},
+                const SizedBox(height: 8),
+              ],
+              if (_reusable)
+                DropdownButtonFormField<int>(
+                  initialValue: _maxActiveDevices,
+                  decoration: InputDecoration(
+                    labelText: context.tr(
+                      'authorized_devices.enrollment.max_active_devices',
+                      fallback: 'Nombre maximal de terminaux actifs',
+                    ),
+                    border: const OutlineInputBorder(),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 5, child: Text('5')),
+                    DropdownMenuItem(value: 10, child: Text('10')),
+                    DropdownMenuItem(value: 20, child: Text('20')),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) {
+                      return;
+                    }
+                    setState(() {
+                      _maxActiveDevices = value;
+                    });
+                  },
+                )
+              else
+                DropdownButtonFormField<int>(
+                  initialValue: _expiresInMinutes,
+                  decoration: InputDecoration(
+                    labelText: context.tr(
+                      'authorized_devices.enrollment.validity',
+                      fallback: 'Durée de validité',
+                    ),
+                    border: const OutlineInputBorder(),
+                  ),
+                  items: [
+                    DropdownMenuItem(
+                      value: 5,
+                      child: Text(
+                        context.tr(
+                          'common.minutes',
+                          fallback: '{count} minutes',
+                          values: {'count': 5},
+                        ),
                       ),
                     ),
-                  ),
-                  DropdownMenuItem(
-                    value: 10,
-                    child: Text(
-                      context.tr(
-                        'common.minutes',
-                        fallback: '{count} minutes',
-                        values: {'count': 10},
+                    DropdownMenuItem(
+                      value: 10,
+                      child: Text(
+                        context.tr(
+                          'common.minutes',
+                          fallback: '{count} minutes',
+                          values: {'count': 10},
+                        ),
                       ),
                     ),
-                  ),
-                  DropdownMenuItem(
-                    value: 15,
-                    child: Text(
-                      context.tr(
-                        'common.minutes',
-                        fallback: '{count} minutes',
-                        values: {'count': 15},
+                    DropdownMenuItem(
+                      value: 15,
+                      child: Text(
+                        context.tr(
+                          'common.minutes',
+                          fallback: '{count} minutes',
+                          values: {'count': 15},
+                        ),
                       ),
                     ),
-                  ),
-                ],
-                onChanged: (value) {
-                  if (value == null) {
-                    return;
-                  }
-                  setState(() {
-                    _expiresInMinutes = value;
-                  });
-                },
-              ),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) {
+                      return;
+                    }
+                    setState(() {
+                      _expiresInMinutes = value;
+                    });
+                  },
+                ),
             ],
           ),
         ),
@@ -1248,6 +1632,8 @@ class _EnrollmentDialogState extends State<_EnrollmentDialog> {
             _EnrollmentFormResult(
               label: _labelController.text.trim(),
               expiresInMinutes: _expiresInMinutes,
+              reusable: _reusable,
+              maxActiveDevices: _maxActiveDevices,
             ),
           ),
           icon: const Icon(Icons.add_link_outlined),
@@ -1314,14 +1700,29 @@ class _EnrollmentCodeDialog extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            Text(expiresAt),
+            Text(
+              enrollment.reusable
+                  ? context.tr(
+                      'authorized_devices.enrollment.reusable_capacity',
+                      fallback:
+                          'Valable jusqu’à révocation — maximum {count} terminaux actifs.',
+                      values: {'count': enrollment.maxActiveDevices},
+                    )
+                  : expiresAt,
+            ),
             const SizedBox(height: 12),
             Text(
-              context.tr(
-                'authorized_devices.enrollment.one_time_code',
-                fallback:
-                    'Ce code est à usage unique. Il ne sera plus affiché après fermeture de cette fenêtre.',
-              ),
+              enrollment.reusable
+                  ? context.tr(
+                      'authorized_devices.enrollment.reusable_code',
+                      fallback:
+                          'Ce code peut être réutilisé jusqu’à sa révocation. Il ne sera plus affiché après fermeture de cette fenêtre.',
+                    )
+                  : context.tr(
+                      'authorized_devices.enrollment.one_time_code',
+                      fallback:
+                          'Ce code est à usage unique. Il ne sera plus affiché après fermeture de cette fenêtre.',
+                    ),
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
@@ -1436,6 +1837,7 @@ class _AuthorizedDevicesStateData {
   final SyncConfiguration configuration;
   final List<AuthorizedDevice> devices;
   final List<DeviceEnrollmentRequest> enrollmentRequests;
+  final List<DeviceEnrollmentInvitation> enrollmentInvitations;
   final bool includeAllTenants;
   final bool serverAvailable;
   final String title;
@@ -1445,6 +1847,7 @@ class _AuthorizedDevicesStateData {
     required this.configuration,
     required this.devices,
     this.enrollmentRequests = const <DeviceEnrollmentRequest>[],
+    this.enrollmentInvitations = const <DeviceEnrollmentInvitation>[],
     required this.includeAllTenants,
     required this.serverAvailable,
     required this.title,
@@ -1455,10 +1858,14 @@ class _AuthorizedDevicesStateData {
 class _EnrollmentFormResult {
   final String label;
   final int expiresInMinutes;
+  final bool reusable;
+  final int maxActiveDevices;
 
   const _EnrollmentFormResult({
     required this.label,
     required this.expiresInMinutes,
+    required this.reusable,
+    required this.maxActiveDevices,
   });
 }
 

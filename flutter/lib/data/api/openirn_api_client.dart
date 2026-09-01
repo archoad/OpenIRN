@@ -7,6 +7,7 @@ import '../../domain/models/api_session.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/authorized_device.dart';
 import '../../domain/models/device_enrollment_request.dart';
+import '../../domain/models/device_enrollment_invitation.dart';
 import '../../domain/models/irn_asset_inventory.dart';
 import '../../domain/models/irn_referential.dart';
 import '../../domain/models/official_referential.dart';
@@ -14,6 +15,7 @@ import '../../domain/models/security_audit_event.dart';
 import '../../domain/models/sync_configuration.dart';
 import '../../domain/models/tenant_info.dart';
 import '../../domain/services/app_session_manager.dart';
+import '../../l10n/openirn_localizations.dart';
 import '../network/openirn_system_proxy.dart';
 
 enum OpenIrnApiReachability { ready, reachable, unreachable }
@@ -441,6 +443,7 @@ class OpenIrnApiDevicesResult {
   final String tenantId;
   final List<AuthorizedDevice> devices;
   final List<DeviceEnrollmentRequest> enrollmentRequests;
+  final List<DeviceEnrollmentInvitation> enrollmentInvitations;
   final Map<String, dynamic>? responseBody;
 
   const OpenIrnApiDevicesResult({
@@ -452,6 +455,7 @@ class OpenIrnApiDevicesResult {
     required this.tenantId,
     required this.devices,
     this.enrollmentRequests = const <DeviceEnrollmentRequest>[],
+    this.enrollmentInvitations = const <DeviceEnrollmentInvitation>[],
     this.responseBody,
   });
 
@@ -471,6 +475,8 @@ class OpenIrnApiEnrollmentResult {
   final String code;
   final DateTime? expiresAt;
   final int expiresInMinutes;
+  final bool reusable;
+  final int maxActiveDevices;
   final String qrPayloadText;
   final AuthorizedDevice? device;
   final String apiToken;
@@ -487,6 +493,8 @@ class OpenIrnApiEnrollmentResult {
     required this.code,
     required this.expiresAt,
     required this.expiresInMinutes,
+    this.reusable = false,
+    this.maxActiveDevices = 1,
     required this.qrPayloadText,
     required this.apiToken,
     this.device,
@@ -3535,6 +3543,20 @@ class OpenIrnApiClient {
                   .where((request) => request.requestId.trim().isNotEmpty)
                   .toList(growable: false)
             : const <DeviceEnrollmentRequest>[];
+        final rawInvitations = decodedBody?['enrollmentInvitations'];
+        final invitations = rawInvitations is List
+            ? rawInvitations
+                  .whereType<Map>()
+                  .map(
+                    (item) => DeviceEnrollmentInvitation.fromJson(
+                      Map<String, dynamic>.from(item),
+                    ),
+                  )
+                  .where(
+                    (invitation) => invitation.enrollmentId.trim().isNotEmpty,
+                  )
+                  .toList(growable: false)
+            : const <DeviceEnrollmentInvitation>[];
         return OpenIrnApiDevicesResult(
           status: OpenIrnApiDevicesStatus.available,
           url: devicesUri.toString(),
@@ -3544,6 +3566,7 @@ class OpenIrnApiClient {
           tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
           devices: devices,
           enrollmentRequests: requests,
+          enrollmentInvitations: invitations,
           responseBody: decodedBody,
         );
       }
@@ -3633,6 +3656,8 @@ class OpenIrnApiClient {
     required String createdByUserId,
     String label = '',
     int expiresInMinutes = 10,
+    bool reusable = false,
+    int maxActiveDevices = 10,
   }) async {
     final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
       baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
@@ -3648,6 +3673,8 @@ class OpenIrnApiClient {
         'createdByUserId': createdByUserId.trim(),
         'label': label.trim(),
         'expiresInMinutes': expiresInMinutes.clamp(1, 60),
+        'mode': reusable ? 'reusable_until_revoked' : 'one_time',
+        if (reusable) 'maxActiveDevices': maxActiveDevices.clamp(1, 25),
       }, bearerToken: apiToken);
       final decodedBody = _decodeJsonObject(response.body);
 
@@ -3657,7 +3684,13 @@ class OpenIrnApiClient {
           url: enrollmentUri.toString(),
           statusCode: response.statusCode,
           title: 'Invitation créée',
-          message: 'Le code d’appairage est prêt. Il est à usage unique.',
+          message: reusable
+              ? OpenIrnLocalizations.instance.tr(
+                  'authorized_devices.enrollment.reusable_ready',
+                  fallback:
+                      'L’invitation permanente est prête. Elle reste active jusqu’à sa révocation.',
+                )
+              : 'Le code d’appairage est prêt. Il est à usage unique.',
           tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
           enrollmentId: decodedBody?['enrollmentId']?.toString() ?? '',
           code: decodedBody?['code']?.toString() ?? '',
@@ -3665,6 +3698,8 @@ class OpenIrnApiClient {
             decodedBody?['expiresAt']?.toString() ?? '',
           )?.toUtc(),
           expiresInMinutes: _intFromJson(decodedBody?['expiresInMinutes']),
+          reusable: decodedBody?['reusable'] == true,
+          maxActiveDevices: _intFromJson(decodedBody?['maxActiveDevices']),
           qrPayloadText: decodedBody?['qrPayloadText']?.toString() ?? '',
           apiToken: '',
           responseBody: decodedBody,
@@ -4347,6 +4382,83 @@ class OpenIrnApiClient {
     }
   }
 
+  Future<OpenIrnApiDevicesResult> revokeReusableEnrollment({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    required String enrollmentId,
+    bool revokeDevices = true,
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final revokeUri =
+        Uri.parse(
+          '$normalizedBaseUrl/devices/enrollments/$enrollmentId',
+        ).replace(
+          queryParameters: <String, String>{
+            'tenantId': safeTenantId,
+            'revokeDevices': revokeDevices ? 'true' : 'false',
+          },
+        );
+
+    try {
+      final response = await _delete(revokeUri, bearerToken: apiToken);
+      return _devicesMutationResult(
+        response,
+        revokeUri,
+        safeTenantId,
+        successTitle: OpenIrnLocalizations.instance.tr(
+          'authorized_devices.invitations.revoke_success_title',
+          fallback: 'Invitation révoquée',
+        ),
+        successMessage: OpenIrnLocalizations.instance.tr(
+          'authorized_devices.invitations.revoke_success_message',
+          fallback:
+              'L’invitation ne permet plus d’autoriser de nouveaux terminaux.',
+        ),
+      );
+    } on TimeoutException {
+      return _devicesNetworkError(
+        revokeUri,
+        safeTenantId,
+        'Délai dépassé',
+        'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+      );
+    } on SocketException catch (error) {
+      return _devicesNetworkError(
+        revokeUri,
+        safeTenantId,
+        'Serveur injoignable',
+        error.message,
+      );
+    } on HandshakeException catch (error) {
+      return _devicesNetworkError(
+        revokeUri,
+        safeTenantId,
+        'Erreur TLS',
+        error.message,
+      );
+    } on FormatException catch (error) {
+      return _devicesNetworkError(
+        revokeUri,
+        safeTenantId,
+        'Adresse serveur invalide',
+        error.message,
+      );
+    } on HttpException catch (error) {
+      return _devicesNetworkError(
+        revokeUri,
+        safeTenantId,
+        'Erreur HTTP',
+        error.message,
+      );
+    }
+  }
+
   Stream<OpenIrnSyncEvent> watchSyncEvents({
     String? baseUrl,
     required String tenantId,
@@ -4955,6 +5067,18 @@ class OpenIrnApiClient {
               .where((request) => request.requestId.trim().isNotEmpty)
               .toList(growable: false)
         : const <DeviceEnrollmentRequest>[];
+    final rawInvitations = decodedBody?['enrollmentInvitations'];
+    final invitations = rawInvitations is List
+        ? rawInvitations
+              .whereType<Map>()
+              .map(
+                (item) => DeviceEnrollmentInvitation.fromJson(
+                  Map<String, dynamic>.from(item),
+                ),
+              )
+              .where((invitation) => invitation.enrollmentId.trim().isNotEmpty)
+              .toList(growable: false)
+        : const <DeviceEnrollmentInvitation>[];
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return OpenIrnApiDevicesResult(
@@ -4966,6 +5090,7 @@ class OpenIrnApiClient {
         tenantId: decodedBody?['tenantId']?.toString() ?? tenantId,
         devices: devices,
         enrollmentRequests: requests,
+        enrollmentInvitations: invitations,
         responseBody: decodedBody,
       );
     }
@@ -4981,6 +5106,7 @@ class OpenIrnApiClient {
       tenantId: tenantId,
       devices: devices,
       enrollmentRequests: requests,
+      enrollmentInvitations: invitations,
       responseBody: decodedBody,
     );
   }

@@ -7,6 +7,7 @@ import os
 import sys
 import unittest
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,6 +24,15 @@ class _Request:
     def __init__(self, peer: str, headers: dict[str, str] | None = None):
         self.headers = headers or {}
         self.client = type("Client", (), {"host": peer})()
+
+
+class _JsonRequest(_Request):
+    def __init__(self, payload: dict[str, object], peer: str = "192.0.2.10"):
+        super().__init__(peer)
+        self.payload = payload
+
+    async def json(self):
+        return self.payload
 
 
 class EnrollmentSecretTests(unittest.TestCase):
@@ -221,6 +231,326 @@ class ExistingDeviceEnrollmentTests(unittest.TestCase):
                 sql.startswith("INSERT INTO device_audit_log")
                 and "enrollment.reenrollment_blocked" in parameters
                 for sql, parameters in statements
+            )
+        )
+
+
+class ReusableEnrollmentMigrationTests(unittest.TestCase):
+    def test_migration_is_additive_idempotent_and_recorded(self):
+        statements: list[str] = []
+
+        class Result:
+            def fetchone(self):
+                return None
+
+        class Connection:
+            def execute(self, sql, parameters=None):
+                statements.append(" ".join(sql.split()))
+                return Result()
+
+        with (
+            patch.object(api, "_table_exists", return_value=True),
+            patch.object(api, "_table_columns", return_value={"expires_at"}),
+            patch.object(api, "_migration_applied", return_value=False),
+            patch.object(api, "_index_exists", return_value=False),
+        ):
+            api._migrate_reusable_enrollment_codes_schema(Connection())
+
+        for column in (
+            "mode",
+            "max_active_devices",
+            "use_count",
+            "last_used_at",
+            "revoked_at",
+            "revoked_by_user_id",
+        ):
+            self.assertTrue(
+                any(f"ADD COLUMN {column} " in sql for sql in statements),
+                column,
+            )
+        self.assertTrue(
+            any("MODIFY COLUMN expires_at VARCHAR(40) NULL" in sql for sql in statements)
+        )
+        self.assertTrue(
+            any("idx_device_enrollment_codes_tenant_mode_revoked" in sql for sql in statements)
+        )
+        self.assertTrue(any("schema_migrations" in sql for sql in statements))
+
+
+class ReusableEnrollmentAuthorizationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reusable_invitation_requires_administrator_role(self):
+        request = _JsonRequest(
+            {
+                "tenantId": "tenant-a",
+                "label": "Microsoft certification",
+                "mode": api.ENROLLMENT_MODE_REUSABLE,
+                "maxActiveDevices": 10,
+            }
+        )
+        with (
+            patch.object(
+                api,
+                "_require_campaign_manager_authorization",
+                return_value={"userId": "pilot-a"},
+            ),
+            patch.object(
+                api,
+                "_require_admin_authorization",
+                side_effect=HTTPException(status_code=403, detail="admin required"),
+            ),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                await api.devices_enrollment(request)
+
+        self.assertEqual(raised.exception.status_code, 403)
+
+
+class ReusableEnrollmentConsumptionTests(unittest.IsolatedAsyncioTestCase):
+    class Result:
+        rowcount = 1
+
+        def __init__(self, row=None, rows=None):
+            self.row = row
+            self.rows = rows or []
+
+        def fetchone(self):
+            return self.row
+
+        def fetchall(self):
+            return self.rows
+
+    class Connection:
+        def __init__(self, *, active_count: int = 0, revoked_at=None):
+            self.active_count = active_count
+            self.revoked_at = revoked_at
+            self.statements: list[tuple[str, tuple[object, ...]]] = []
+            self.commits = 0
+
+        def execute(self, sql, parameters=None):
+            normalized = " ".join(sql.split())
+            values = tuple(parameters or ())
+            self.statements.append((normalized, values))
+            if normalized.startswith("SELECT 1 FROM tenants"):
+                return ReusableEnrollmentConsumptionTests.Result({"exists": 1})
+            if "FROM device_enrollment_codes" in normalized and "code_hash" in normalized:
+                return ReusableEnrollmentConsumptionTests.Result(
+                    {
+                        "tenant_id": "tenant-a",
+                        "enrollment_id": "enrollment-certification",
+                        "created_by_user_id": "admin-a",
+                        "label": "Microsoft certification",
+                        "mode": api.ENROLLMENT_MODE_REUSABLE,
+                        "expires_at": None,
+                        "consumed_at": None,
+                        "consumed_by_device_id": None,
+                        "max_active_devices": 10,
+                        "use_count": 2,
+                        "last_used_at": None,
+                        "revoked_at": self.revoked_at,
+                        "created_at": "2026-09-01T00:00:00+00:00",
+                    }
+                )
+            if normalized.startswith("SELECT COUNT(*) AS total FROM authorized_devices"):
+                return ReusableEnrollmentConsumptionTests.Result(
+                    {"total": self.active_count}
+                )
+            return ReusableEnrollmentConsumptionTests.Result()
+
+        def commit(self):
+            self.commits += 1
+
+    async def _consume(self, connection, device_id: str):
+        @contextmanager
+        def fake_db(*_args, **_kwargs):
+            yield connection
+
+        request = _JsonRequest(
+            {
+                "tenantId": "tenant-a",
+                "code": "ABCD-EFGH-JKMN-PQ",
+                "deviceName": f"Certification {device_id}",
+                "platform": "windows",
+                "deviceId": device_id,
+            }
+        )
+        with (
+            patch.object(api, "_db", fake_db),
+            patch.object(api, "_enrollment_code_hash", return_value="code-hash"),
+            patch.object(api, "_enforce_enrollment_rate_limit"),
+            patch.object(
+                api,
+                "_create_device",
+                return_value=(
+                    {
+                        "tenantId": "tenant-a",
+                        "deviceId": device_id,
+                        "name": f"Certification {device_id}",
+                    },
+                    f"odt_{device_id}",
+                ),
+            ) as create_device,
+        ):
+            result = await api.devices_enrollment_consume(request)
+        return result, create_device
+
+    async def test_reusable_invitation_can_enroll_distinct_devices_without_consumption(self):
+        for device_id in ("device-a", "device-b"):
+            connection = self.Connection(active_count=1)
+            result, create_device = await self._consume(connection, device_id)
+
+            self.assertEqual(result["apiToken"], f"odt_{device_id}")
+            create_device.assert_called_once()
+            enrollment_select = next(
+                parameters
+                for sql, parameters in connection.statements
+                if "FROM device_enrollment_codes" in sql and "code_hash" in sql
+            )
+            self.assertEqual(enrollment_select, ("tenant-a", "code-hash"))
+            self.assertTrue(
+                any(
+                    "SET use_count = use_count + 1, last_used_at = ?" in sql
+                    for sql, _ in connection.statements
+                )
+            )
+            self.assertFalse(
+                any("SET consumed_at = ?" in sql for sql, _ in connection.statements)
+            )
+            audit_payloads = [
+                str(parameters[-1])
+                for sql, parameters in connection.statements
+                if sql.startswith("INSERT INTO device_audit_log")
+            ]
+            self.assertFalse(any("ABCD" in payload for payload in audit_payloads))
+
+    async def test_reusable_invitation_refuses_new_device_at_capacity(self):
+        connection = self.Connection(active_count=10)
+        with self.assertRaises(HTTPException) as raised:
+            _result, create_device = await self._consume(connection, "device-c")
+
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertGreaterEqual(connection.commits, 1)
+
+    async def test_revoked_reusable_invitation_is_rejected(self):
+        connection = self.Connection(
+            active_count=0,
+            revoked_at="2026-09-01T12:00:00+00:00",
+        )
+        with self.assertRaises(HTTPException) as raised:
+            await self._consume(connection, "device-d")
+
+        self.assertEqual(raised.exception.status_code, 410)
+
+
+class ReusableEnrollmentRevocationTests(unittest.TestCase):
+    def test_revocation_cascades_to_tenant_scoped_devices_and_sessions(self):
+        statements: list[tuple[str, tuple[object, ...]]] = []
+
+        class Result:
+            rowcount = 1
+
+            def __init__(self, row=None, rows=None):
+                self.row = row
+                self.rows = rows or []
+
+            def fetchone(self):
+                return self.row
+
+            def fetchall(self):
+                return self.rows
+
+        class Connection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def execute(self, sql, parameters=None):
+                normalized = " ".join(sql.split())
+                values = tuple(parameters or ())
+                statements.append((normalized, values))
+                if "SELECT enrollment_id, mode, label, revoked_at" in normalized:
+                    return Result(
+                        {
+                            "enrollment_id": "enrollment-certification",
+                            "mode": api.ENROLLMENT_MODE_REUSABLE,
+                            "label": "Microsoft certification",
+                            "revoked_at": None,
+                        }
+                    )
+                if normalized.startswith("SELECT device_id, name, platform, last_seen_at"):
+                    return Result(
+                        rows=[
+                            {
+                                "device_id": "device-a",
+                                "name": "Microsoft A",
+                                "platform": "windows",
+                                "last_seen_at": "2026-09-01T10:00:00+00:00",
+                            },
+                            {
+                                "device_id": "device-b",
+                                "name": "Microsoft B",
+                                "platform": "windows",
+                                "last_seen_at": "2026-09-01T11:00:00+00:00",
+                            },
+                        ]
+                    )
+                return Result()
+
+        connection = Connection()
+
+        @contextmanager
+        def fake_db(*_args, **_kwargs):
+            yield connection
+
+        request = _Request("192.0.2.10")
+        with (
+            patch.object(api, "_db", fake_db),
+            patch.object(
+                api,
+                "_resolve_tenant_id_for_request",
+                return_value="tenant-a",
+            ),
+            patch.object(
+                api,
+                "_require_admin_authorization",
+                return_value={"userId": "administrator-a"},
+            ),
+            patch.object(api, "_list_devices", return_value=[]),
+            patch.object(
+                api,
+                "_list_reusable_enrollment_invitations",
+                return_value=[],
+            ),
+        ):
+            result = api.reusable_enrollment_revoke(
+                "enrollment-certification",
+                request,
+                tenantId="tenant-a",
+                revokeDevices=True,
+            )
+
+        self.assertEqual(result["revokedDeviceIds"], ["device-a", "device-b"])
+        session_updates = [
+            parameters
+            for sql, parameters in statements
+            if sql.startswith("UPDATE api_sessions SET revoked_at")
+        ]
+        self.assertEqual(
+            [parameters[2] for parameters in session_updates],
+            ["device-a", "device-b"],
+        )
+        self.assertTrue(
+            any(
+                sql.startswith("DELETE FROM authorized_devices")
+                and parameters == ("tenant-a", "enrollment-certification")
+                for sql, parameters in statements
+            )
+        )
+        self.assertTrue(
+            all(
+                parameters[1] == "tenant-a"
+                for parameters in session_updates
             )
         )
 

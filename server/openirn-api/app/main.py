@@ -151,6 +151,10 @@ API_ROLE_ADMIN = {"administrator"}
 API_ROLE_CAMPAIGN_MANAGER = {"administrator", "campaign_manager"}
 API_ROLE_WRITE = {"administrator", "campaign_manager", "evaluator", "reviewer"}
 API_ROLE_READ = {"administrator", "campaign_manager", "evaluator", "reviewer", "reader"}
+ENROLLMENT_MODE_ONE_TIME = "one_time"
+ENROLLMENT_MODE_REUSABLE = "reusable_until_revoked"
+REUSABLE_ENROLLMENT_DEFAULT_MAX_ACTIVE_DEVICES = 10
+REUSABLE_ENROLLMENT_MAX_ACTIVE_DEVICES = 25
 SECURITY_AUDIT_EVENT_PREFIXES = (
     "auth.",
     "authorization.",
@@ -1506,6 +1510,7 @@ def _apply_schema(migration_mysql_url: str) -> None:
         _migrate_terminal_identity_schema(con)
         _invalidate_legacy_default_pins(con)
         _record_migration(con, 170, "enrollment_anti_abuse_rate_limit_buckets")
+        _migrate_reusable_enrollment_codes_schema(con)
         _ensure_tenant(con, DEFAULT_TENANT_ID)
         _backfill_default_tenant_display_name(con)
         _sync_solution_administrators_to_all_tenants(con)
@@ -1692,6 +1697,45 @@ def _invalidate_legacy_default_pins(con: Any) -> None:
             payload={"userId": row["user_id"], "reason": "predictable_default_pin"},
         )
     _record_migration(con, 169, "invalidate_legacy_default_pins")
+
+
+def _migrate_reusable_enrollment_codes_schema(con: Any) -> None:
+    """Extend one-time enrollment codes with revocable reusable invitations."""
+    if not _table_exists(con, "device_enrollment_codes"):
+        _record_migration(con, 171, "reusable_enrollment_invitations")
+        return
+
+    columns = _table_columns(con, "device_enrollment_codes")
+    additions = {
+        "mode": "VARCHAR(32) NOT NULL DEFAULT 'one_time' AFTER label",
+        "max_active_devices": "INT NULL AFTER consumed_by_device_id",
+        "use_count": "INT NOT NULL DEFAULT 0 AFTER max_active_devices",
+        "last_used_at": "VARCHAR(40) NULL AFTER use_count",
+        "revoked_at": "VARCHAR(40) NULL AFTER last_used_at",
+        "revoked_by_user_id": "VARCHAR(160) NULL AFTER revoked_at",
+    }
+    for column_name, definition in additions.items():
+        if column_name not in columns:
+            con.execute(
+                f"ALTER TABLE device_enrollment_codes ADD COLUMN {column_name} {definition}"
+            )
+
+    if not _migration_applied(con, 171):
+        con.execute(
+            "ALTER TABLE device_enrollment_codes MODIFY COLUMN expires_at VARCHAR(40) NULL"
+        )
+        if not _index_exists(
+            con,
+            "device_enrollment_codes",
+            "idx_device_enrollment_codes_tenant_mode_revoked",
+        ):
+            con.execute(
+                """
+                CREATE INDEX idx_device_enrollment_codes_tenant_mode_revoked
+                ON device_enrollment_codes(tenant_id, mode, revoked_at, created_at)
+                """
+            )
+        _record_migration(con, 171, "reusable_enrollment_invitations")
 
 
 def _alias_target(con: Any, entity_type: str, old_id: str, scope_id: str = "") -> str:
@@ -3089,6 +3133,69 @@ def _list_device_enrollment_requests(
             (tenant_id, max(1, min(limit, 200))),
         ).fetchall()
     return [_enrollment_request_from_row(row) for row in rows]
+
+
+def _enrollment_invitation_from_row(row: Any) -> dict[str, Any]:
+    revoked_at = _row_value(row, "revoked_at")
+    return {
+        "tenantId": row["tenant_id"],
+        "tenantDisplayName": str(
+            _row_value(row, "tenant_display_name", "") or ""
+        ).strip()
+        or "Espace de travail",
+        "enrollmentId": row["enrollment_id"],
+        "label": str(row["label"] or "").strip(),
+        "mode": str(_row_value(row, "mode", ENROLLMENT_MODE_ONE_TIME) or ""),
+        "status": "revoked" if revoked_at else "active",
+        "createdAt": row["created_at"],
+        "createdByUserId": str(row["created_by_user_id"] or ""),
+        "expiresAt": row["expires_at"],
+        "maxActiveDevices": int(_row_value(row, "max_active_devices", 0) or 0),
+        "activeDeviceCount": int(_row_value(row, "active_device_count", 0) or 0),
+        "useCount": int(_row_value(row, "use_count", 0) or 0),
+        "lastUsedAt": _row_value(row, "last_used_at"),
+        "revokedAt": revoked_at,
+        "revokedByUserId": str(_row_value(row, "revoked_by_user_id", "") or ""),
+    }
+
+
+def _list_reusable_enrollment_invitations(
+    con: Any,
+    tenant_id: str,
+    *,
+    include_all_tenants: bool = False,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    where_clause = "" if include_all_tenants else "AND e.tenant_id = ?"
+    parameters: tuple[Any, ...] = (
+        (max(1, min(limit, 500)),)
+        if include_all_tenants
+        else (tenant_id, max(1, min(limit, 200)))
+    )
+    rows = con.execute(
+        f"""
+        SELECT e.tenant_id,
+               COALESCE(NULLIF(t.display_name, ''), 'Espace de travail') AS tenant_display_name,
+               e.enrollment_id, e.created_by_user_id, e.label, e.mode,
+               e.expires_at, e.max_active_devices, e.use_count, e.last_used_at,
+               e.revoked_at, e.revoked_by_user_id, e.created_at,
+               (
+                   SELECT COUNT(*)
+                   FROM authorized_devices d
+                   WHERE d.tenant_id = e.tenant_id
+                     AND d.enrollment_id = e.enrollment_id
+                     AND d.status = 'active' AND d.revoked_at IS NULL
+               ) AS active_device_count
+        FROM device_enrollment_codes e
+        LEFT JOIN tenants t ON t.id = e.tenant_id
+        WHERE e.mode = '{ENROLLMENT_MODE_REUSABLE}' {where_clause}
+        ORDER BY CASE WHEN e.revoked_at IS NULL THEN 0 ELSE 1 END,
+                 e.created_at DESC
+        LIMIT ?
+        """,
+        parameters,
+    ).fetchall()
+    return [_enrollment_invitation_from_row(row) for row in rows]
 
 
 ADRI_PILLAR_RE = re.compile(r"^RES-[1-8]$")
@@ -5631,6 +5738,11 @@ def devices(
             tenant_id,
             include_all_tenants=include_all_tenants,
         )
+        invitations_list = _list_reusable_enrollment_invitations(
+            con,
+            tenant_id,
+            include_all_tenants=include_all_tenants,
+        )
         tenant_display_name = _tenant_display_name(con, tenant_id)
         con.commit()
     return {
@@ -5641,8 +5753,10 @@ def devices(
         "scope": "all_tenants" if include_all_tenants else "tenant",
         "deviceCount": len(devices_list),
         "enrollmentRequestCount": len(requests_list),
+        "enrollmentInvitationCount": len(invitations_list),
         "devices": devices_list,
         "enrollmentRequests": requests_list,
+        "enrollmentInvitations": invitations_list,
         "serverTime": _utc_now().isoformat(),
     }
 
@@ -5779,9 +5893,14 @@ async def devices_enrollment(request: Request) -> dict[str, Any]:
         payload = {}
 
     tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
-    _require_campaign_manager_authorization(request, tenant_id)
-    created_by_user_id = str(payload.get("createdByUserId") or "").strip()[:120]
+    auth_context = _require_campaign_manager_authorization(request, tenant_id)
+    created_by_user_id = str(auth_context.get("userId") or "server").strip()[:120]
     label = str(payload.get("label") or "").strip()[:120]
+    mode = str(payload.get("mode") or ENROLLMENT_MODE_ONE_TIME).strip().lower()
+    if mode not in {ENROLLMENT_MODE_ONE_TIME, ENROLLMENT_MODE_REUSABLE}:
+        raise HTTPException(status_code=400, detail="Mode d’invitation d’enrôlement invalide")
+    if mode == ENROLLMENT_MODE_REUSABLE:
+        _require_admin_authorization(request, tenant_id)
     allowed_expiration_minutes = {5, 10, 15}
     try:
         expires_in_minutes = int(payload.get("expiresInMinutes") or 10)
@@ -5795,16 +5914,34 @@ async def devices_enrollment(request: Request) -> dict[str, Any]:
     normalized_code = _normalize_enrollment_code(raw_code)
     enrollment_id = f"enrollment_{uuid.uuid4().hex}"
     now = _utc_now()
-    expires_at = now + timedelta(minutes=expires_in_minutes)
+    expires_at = (
+        None
+        if mode == ENROLLMENT_MODE_REUSABLE
+        else now + timedelta(minutes=expires_in_minutes)
+    )
+    try:
+        max_active_devices = int(
+            payload.get("maxActiveDevices")
+            or REUSABLE_ENROLLMENT_DEFAULT_MAX_ACTIVE_DEVICES
+        )
+    except (TypeError, ValueError):
+        max_active_devices = REUSABLE_ENROLLMENT_DEFAULT_MAX_ACTIVE_DEVICES
+    max_active_devices = max(
+        1,
+        min(max_active_devices, REUSABLE_ENROLLMENT_MAX_ACTIVE_DEVICES),
+    )
+    if mode == ENROLLMENT_MODE_ONE_TIME:
+        max_active_devices = 1
 
     with _db() as con:
         _ensure_tenant(con, tenant_id)
         con.execute(
             """
             INSERT INTO device_enrollment_codes(
-                tenant_id, enrollment_id, code_hash, created_by_user_id, label,
-                expires_at, consumed_at, consumed_by_device_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?)
+                tenant_id, enrollment_id, code_hash, created_by_user_id, label, mode,
+                expires_at, consumed_at, consumed_by_device_id, max_active_devices,
+                use_count, last_used_at, revoked_at, revoked_by_user_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, 0, NULL, NULL, NULL, ?)
             """,
             (
                 tenant_id,
@@ -5812,7 +5949,9 @@ async def devices_enrollment(request: Request) -> dict[str, Any]:
                 _enrollment_code_hash(tenant_id, normalized_code),
                 created_by_user_id,
                 label,
-                expires_at.isoformat(),
+                mode,
+                expires_at.isoformat() if expires_at is not None else None,
+                max_active_devices,
                 now.isoformat(),
             ),
         )
@@ -5824,7 +5963,9 @@ async def devices_enrollment(request: Request) -> dict[str, Any]:
                 "enrollmentId": enrollment_id,
                 "createdByUserId": created_by_user_id,
                 "label": label,
-                "expiresAt": expires_at.isoformat(),
+                "mode": mode,
+                "expiresAt": expires_at.isoformat() if expires_at is not None else None,
+                "maxActiveDevices": max_active_devices,
             },
         )
         con.commit()
@@ -5834,7 +5975,9 @@ async def devices_enrollment(request: Request) -> dict[str, Any]:
         "tenantId": tenant_id,
         "code": display_code,
         "enrollmentId": enrollment_id,
-        "expiresAt": expires_at.isoformat(),
+        "mode": mode,
+        "expiresAt": expires_at.isoformat() if expires_at is not None else None,
+        "maxActiveDevices": max_active_devices,
     }
     return {
         "status": "ok",
@@ -5842,8 +5985,11 @@ async def devices_enrollment(request: Request) -> dict[str, Any]:
         "tenantId": tenant_id,
         "enrollmentId": enrollment_id,
         "code": display_code,
-        "expiresAt": expires_at.isoformat(),
-        "expiresInMinutes": expires_in_minutes,
+        "mode": mode,
+        "reusable": mode == ENROLLMENT_MODE_REUSABLE,
+        "expiresAt": expires_at.isoformat() if expires_at is not None else None,
+        "expiresInMinutes": 0 if expires_at is None else expires_in_minutes,
+        "maxActiveDevices": max_active_devices,
         "qrPayload": qr_payload,
         "qrPayloadText": _canonical_json(qr_payload),
         "serverTime": _utc_now().isoformat(),
@@ -6063,7 +6209,8 @@ async def devices_enrollment_consume(request: Request) -> dict[str, Any]:
         enrollment = con.execute(
             """
             SELECT tenant_id, enrollment_id, created_by_user_id, label,
-                   expires_at, consumed_at, consumed_by_device_id, created_at
+                   mode, expires_at, consumed_at, consumed_by_device_id,
+                   max_active_devices, use_count, last_used_at, revoked_at, created_at
             FROM device_enrollment_codes
             WHERE tenant_id = ? AND code_hash = ?
             FOR UPDATE
@@ -6073,12 +6220,51 @@ async def devices_enrollment_consume(request: Request) -> dict[str, Any]:
         if enrollment is None:
             con.commit()
             raise HTTPException(status_code=404, detail="Unknown enrollment code")
-        if enrollment["consumed_at"]:
+        mode = str(enrollment["mode"] or ENROLLMENT_MODE_ONE_TIME)
+        reusable = mode == ENROLLMENT_MODE_REUSABLE
+        if enrollment["revoked_at"]:
+            con.commit()
+            raise HTTPException(status_code=410, detail="Enrollment invitation has been revoked")
+        if not reusable and enrollment["consumed_at"]:
             con.commit()
             raise HTTPException(status_code=409, detail="Enrollment code has already been consumed")
-        if _parse_datetime(enrollment["expires_at"]) < now:
+        if not reusable and _parse_datetime(enrollment["expires_at"]) < now:
             con.commit()
             raise HTTPException(status_code=410, detail="Enrollment code has expired")
+        if reusable:
+            max_active_devices = max(
+                1,
+                int(
+                    enrollment["max_active_devices"]
+                    or REUSABLE_ENROLLMENT_DEFAULT_MAX_ACTIVE_DEVICES
+                ),
+            )
+            active_row = con.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM authorized_devices
+                WHERE tenant_id = ? AND enrollment_id = ?
+                  AND status = 'active' AND revoked_at IS NULL
+                """,
+                (tenant_id, enrollment["enrollment_id"]),
+            ).fetchone()
+            active_device_count = int(active_row["total"] if active_row else 0)
+            if active_device_count >= max_active_devices:
+                _record_device_audit(
+                    con,
+                    tenant_id,
+                    "enrollment.capacity_limited",
+                    payload={
+                        "enrollmentId": enrollment["enrollment_id"],
+                        "activeDeviceCount": active_device_count,
+                        "maxActiveDevices": max_active_devices,
+                    },
+                )
+                con.commit()
+                raise HTTPException(
+                    status_code=409,
+                    detail="Enrollment invitation has reached its active device limit",
+                )
 
         try:
             device, token = _create_device(
@@ -6093,22 +6279,39 @@ async def devices_enrollment_consume(request: Request) -> dict[str, Any]:
         except _ExistingDeviceAuthorization:
             con.commit()
             raise
-        con.execute(
-            """
-            UPDATE device_enrollment_codes
-            SET consumed_at = ?, consumed_by_device_id = ?
-            WHERE tenant_id = ? AND enrollment_id = ?
-            """,
-            (now.isoformat(), device["deviceId"], tenant_id, enrollment["enrollment_id"]),
-        )
-        con.execute(
-            """
-            UPDATE device_enrollment_requests
-            SET status = 'consumed'
-            WHERE tenant_id = ? AND enrollment_id = ? AND status = 'approved'
-            """,
-            (tenant_id, enrollment["enrollment_id"]),
-        )
+        if reusable:
+            con.execute(
+                """
+                UPDATE device_enrollment_codes
+                SET use_count = use_count + 1, last_used_at = ?
+                WHERE tenant_id = ? AND enrollment_id = ? AND revoked_at IS NULL
+                """,
+                (now.isoformat(), tenant_id, enrollment["enrollment_id"]),
+            )
+        else:
+            con.execute(
+                """
+                UPDATE device_enrollment_codes
+                SET consumed_at = ?, consumed_by_device_id = ?,
+                    use_count = 1, last_used_at = ?
+                WHERE tenant_id = ? AND enrollment_id = ?
+                """,
+                (
+                    now.isoformat(),
+                    device["deviceId"],
+                    now.isoformat(),
+                    tenant_id,
+                    enrollment["enrollment_id"],
+                ),
+            )
+            con.execute(
+                """
+                UPDATE device_enrollment_requests
+                SET status = 'consumed'
+                WHERE tenant_id = ? AND enrollment_id = ? AND status = 'approved'
+                """,
+                (tenant_id, enrollment["enrollment_id"]),
+            )
         _record_device_audit(
             con,
             tenant_id,
@@ -6119,6 +6322,8 @@ async def devices_enrollment_consume(request: Request) -> dict[str, Any]:
                 "deviceName": device_name,
                 "platform": platform,
                 "requestedDeviceId": requested_device_id,
+                "mode": mode,
+                "useCount": int(enrollment["use_count"] or 0) + 1,
             },
         )
         con.commit()
@@ -6129,6 +6334,124 @@ async def devices_enrollment_consume(request: Request) -> dict[str, Any]:
         "tenantId": tenant_id,
         "apiToken": token,
         "device": device,
+        "serverTime": _utc_now().isoformat(),
+    }
+
+
+@app.delete("/devices/enrollments/{enrollment_id}")
+def reusable_enrollment_revoke(
+    enrollment_id: str,
+    request: Request,
+    tenantId: str = Query(default="default", min_length=1, max_length=80),
+    revokeDevices: bool = Query(default=True),
+) -> dict[str, Any]:
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
+    auth_context = _require_admin_authorization(request, tenant_id)
+    actor_user_id = str(auth_context.get("userId") or "server").strip()[:120]
+    now = _utc_now().isoformat()
+    revoked_device_ids: list[str] = []
+
+    with _db() as con:
+        with con:
+            invitation = con.execute(
+                """
+                SELECT enrollment_id, mode, label, revoked_at
+                FROM device_enrollment_codes
+                WHERE tenant_id = ? AND enrollment_id = ?
+                FOR UPDATE
+                """,
+                (tenant_id, enrollment_id),
+            ).fetchone()
+            if invitation is None:
+                raise HTTPException(status_code=404, detail="Enrollment invitation not found")
+            if str(invitation["mode"] or ENROLLMENT_MODE_ONE_TIME) != ENROLLMENT_MODE_REUSABLE:
+                raise HTTPException(status_code=400, detail="This enrollment code is not reusable")
+
+            if not invitation["revoked_at"]:
+                con.execute(
+                    """
+                    UPDATE device_enrollment_codes
+                    SET revoked_at = ?, revoked_by_user_id = ?
+                    WHERE tenant_id = ? AND enrollment_id = ?
+                    """,
+                    (now, actor_user_id, tenant_id, enrollment_id),
+                )
+
+            if revokeDevices:
+                device_rows = con.execute(
+                    """
+                    SELECT device_id, name, platform, last_seen_at
+                    FROM authorized_devices
+                    WHERE tenant_id = ? AND enrollment_id = ?
+                      AND status = 'active' AND revoked_at IS NULL
+                    FOR UPDATE
+                    """,
+                    (tenant_id, enrollment_id),
+                ).fetchall()
+                revoked_device_ids = [
+                    str(row["device_id"] or "").strip()
+                    for row in device_rows
+                    if str(row["device_id"] or "").strip()
+                ]
+                for row in device_rows:
+                    device_id = str(row["device_id"] or "").strip()
+                    if not device_id:
+                        continue
+                    con.execute(
+                        """
+                        UPDATE api_sessions
+                        SET revoked_at = ?
+                        WHERE tenant_id = ? AND device_id = ? AND revoked_at IS NULL
+                        """,
+                        (now, tenant_id, device_id),
+                    )
+                    _record_device_audit(
+                        con,
+                        tenant_id,
+                        "device.revoked",
+                        device_id=device_id,
+                        payload={
+                            "deleted": True,
+                            "deletedAt": now,
+                            "reason": "enrollment_invitation_revoked",
+                            "enrollmentId": enrollment_id,
+                            "name": row["name"],
+                            "platform": row["platform"],
+                            "lastSeenAt": row["last_seen_at"],
+                        },
+                    )
+                con.execute(
+                    """
+                    DELETE FROM authorized_devices
+                    WHERE tenant_id = ? AND enrollment_id = ?
+                    """,
+                    (tenant_id, enrollment_id),
+                )
+
+            _record_device_audit(
+                con,
+                tenant_id,
+                "enrollment.revoked",
+                payload={
+                    "enrollmentId": enrollment_id,
+                    "label": invitation["label"],
+                    "actorUserId": actor_user_id,
+                    "revokeDevices": revokeDevices,
+                    "revokedDeviceCount": len(revoked_device_ids),
+                },
+            )
+            devices_list = _list_devices(con, tenant_id)
+            invitations_list = _list_reusable_enrollment_invitations(con, tenant_id)
+
+    return {
+        "status": "revoked",
+        "type": "openirn.deviceEnrollmentRevoked",
+        "tenantId": tenant_id,
+        "enrollmentId": enrollment_id,
+        "revokedDeviceIds": revoked_device_ids,
+        "revokedDeviceCount": len(revoked_device_ids),
+        "devices": devices_list,
+        "enrollmentInvitations": invitations_list,
         "serverTime": _utc_now().isoformat(),
     }
 
