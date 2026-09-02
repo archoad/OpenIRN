@@ -73,7 +73,12 @@ require_pattern 'PARTNER_CENTER_SELLER_ID' 'secret Partner Center Seller ID réf
 require_pattern 'PARTNER_CENTER_CLIENT_ID' 'secret Partner Center Client ID référencé'
 require_pattern 'PARTNER_CENTER_CLIENT_SECRET' 'secret Partner Center Client Secret référencé'
 require_pattern 'MICROSOFT_STORE_PRODUCT_ID:[[:space:]]*9N63P1KPCMMZ' 'identifiant public du produit Microsoft Store configuré'
-require_pattern '--inputFile' 'MSIX Store transmis explicitement au CLI'
+require_pattern '--inputDirectory' 'répertoire du MSIX Store transmis explicitement au CLI'
+if grep -q -- '--inputFile' .github/workflows/release.yml; then
+  echo "[ERREUR] option MSStore CLI incompatible --inputFile encore présente" >&2
+  exit 1
+fi
+echo "[OK] option MSStore CLI incompatible --inputFile absente"
 require_pattern '--appId.*MICROSOFT_STORE_PRODUCT_ID' 'produit Microsoft Store transmis explicitement au CLI'
 require_pattern 'msstore publish' 'soumission automatique Microsoft Store configurée'
 

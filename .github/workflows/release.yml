@@ -625,7 +625,7 @@ jobs:
             throw "Microsoft Store MSIX artifact not found"
           }
           msstore publish "${{ github.workspace }}\flutter" `
-            --inputFile "$($storeMsix.FullName)" `
+            --inputDirectory "$($storeMsix.Directory.FullName)" `
             --appId "$env:MICROSOFT_STORE_PRODUCT_ID"
           if ($LASTEXITCODE -ne 0) {
             throw "Microsoft Store submission failed with exit code $LASTEXITCODE"
