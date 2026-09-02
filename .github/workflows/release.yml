@@ -35,6 +35,7 @@ env:
   STORE_MSIX_PUBLISHER_DISPLAY_NAME: 'archoad FR'
   STORE_MSIX_PFN: archoadFR.OpenIRN_40n6zg9mmw8te
   STORE_MSIX_PACKAGE_SID: S-1-15-2-1093717781-299261422-2075608443-880705312-3180602753-3190663317-2185964278
+  MICROSOFT_STORE_PRODUCT_ID: 9N63P1KPCMMZ
   MSIX_LOGO_PATH: 'windows\runner\resources\msix_logo.png'
   ARTIFACT_SIGNING_ENDPOINT: https://neu.codesigning.azure.net/
   ARTIFACT_SIGNING_ACCOUNT: openirnsign
@@ -550,6 +551,11 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Checkout release ref
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name || github.ref }}
+
       - name: Download Microsoft Store submission package
         uses: actions/download-artifact@v4
         with:
@@ -557,14 +563,12 @@ jobs:
           path: store_submission
 
       - name: Validate Microsoft Store publication settings
-        if: ${{ vars.MICROSOFT_STORE_PUBLISH_ENABLED == 'true' }}
         shell: pwsh
         env:
           PARTNER_CENTER_TENANT_ID: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
           PARTNER_CENTER_SELLER_ID: ${{ secrets.PARTNER_CENTER_SELLER_ID }}
           PARTNER_CENTER_CLIENT_ID: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
           PARTNER_CENTER_CLIENT_SECRET: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
-          MICROSOFT_STORE_PRODUCT_ID: ${{ vars.MICROSOFT_STORE_PRODUCT_ID }}
         run: |
           $required = @{
             PARTNER_CENTER_TENANT_ID = $env:PARTNER_CENTER_TENANT_ID
@@ -589,11 +593,9 @@ jobs:
           Write-Host "Microsoft Store package ready:" $storeMsix.Name
 
       - name: Setup Microsoft Store Developer CLI
-        if: ${{ vars.MICROSOFT_STORE_PUBLISH_ENABLED == 'true' }}
-        uses: microsoft/microsoft-store-apppublisher@v1.1
+        uses: microsoft/microsoft-store-apppublisher@v1.4
 
       - name: Configure Microsoft Store Developer CLI
-        if: ${{ vars.MICROSOFT_STORE_PUBLISH_ENABLED == 'true' }}
         shell: pwsh
         env:
           PARTNER_CENTER_TENANT_ID: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
@@ -615,32 +617,21 @@ jobs:
           }
 
       - name: Publish package to Microsoft Store
-        if: ${{ vars.MICROSOFT_STORE_PUBLISH_ENABLED == 'true' }}
         shell: pwsh
-        env:
-          MICROSOFT_STORE_PRODUCT_ID: ${{ vars.MICROSOFT_STORE_PRODUCT_ID }}
         run: |
           $storeMsix = Get-ChildItem store_submission -Recurse -Filter *.msix |
             Select-Object -First 1
           if (-not $storeMsix) {
             throw "Microsoft Store MSIX artifact not found"
           }
-          msstore publish "$($storeMsix.FullName)" -id "$env:MICROSOFT_STORE_PRODUCT_ID"
+          msstore publish "${{ github.workspace }}\flutter" `
+            --inputFile "$($storeMsix.FullName)" `
+            --appId "$env:MICROSOFT_STORE_PRODUCT_ID"
           if ($LASTEXITCODE -ne 0) {
             throw "Microsoft Store submission failed with exit code $LASTEXITCODE"
           }
           "Microsoft Store submission committed for product $env:MICROSOFT_STORE_PRODUCT_ID." |
             Add-Content -Path $env:GITHUB_STEP_SUMMARY
-
-      - name: Report Microsoft Store bootstrap mode
-        if: ${{ vars.MICROSOFT_STORE_PUBLISH_ENABLED != 'true' }}
-        shell: pwsh
-        run: |
-          @"
-          Microsoft Store automatic publication is disabled.
-          The Store-ready MSIX is available in the openirn-windows-store-submission workflow artifact.
-          Complete the first submission manually in Partner Center, then set MICROSOFT_STORE_PUBLISH_ENABLED=true.
-          "@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
 
   documentation:
     name: Documentation PDF OpenIRN
@@ -760,7 +751,7 @@ jobs:
 
           Les artefacts Windows sont signés avec Azure Artifact Signing, profil Public Trust `openirn-public`, au nom de `Archoad`. Les signatures utilisent SHA-256 et le service d'horodatage Microsoft.
 
-          Un second MSIX est construit avec l’identité Partner Center `archoadFR.OpenIRN`. Il est conservé comme artefact GitHub Actions pour l’amorçage et, lorsque l’automatisation Microsoft Store est activée, soumis automatiquement à Partner Center. Après certification, Microsoft Store signe lui-même ce package avant sa distribution.
+          Un second MSIX est construit avec l’identité Partner Center `archoadFR.OpenIRN` et soumis automatiquement au produit Microsoft Store `9N63P1KPCMMZ`. Après certification, Microsoft Store signe lui-même ce package avant sa distribution.
 
           ## macOS et iOS
 

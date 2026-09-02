@@ -67,14 +67,21 @@ require_pattern 'STORE_MSIX_VERSION=.*storeMsixVersion' 'version MSIX Microsoft 
 require_pattern 'name:[[:space:]]*openirn-windows-store-submission' 'artefact de soumission Microsoft Store isolé'
 require_pattern 'name:[[:space:]]*Download direct Windows artifacts' 'téléchargement explicite des seuls artefacts Windows directs configuré'
 require_pattern 'environment:[[:space:]]*microsoft-store' 'environnement GitHub Microsoft Store configuré'
-require_pattern 'microsoft/microsoft-store-apppublisher@v1\.1' 'Microsoft Store Developer CLI configuré'
+require_pattern 'microsoft/microsoft-store-apppublisher@v1\.4' 'Microsoft Store Developer CLI v1.4 configuré'
 require_pattern 'PARTNER_CENTER_TENANT_ID' 'secret Partner Center Tenant ID référencé'
 require_pattern 'PARTNER_CENTER_SELLER_ID' 'secret Partner Center Seller ID référencé'
 require_pattern 'PARTNER_CENTER_CLIENT_ID' 'secret Partner Center Client ID référencé'
 require_pattern 'PARTNER_CENTER_CLIENT_SECRET' 'secret Partner Center Client Secret référencé'
-require_pattern 'MICROSOFT_STORE_PRODUCT_ID' 'variable identifiant produit Microsoft Store référencée'
-require_pattern 'MICROSOFT_STORE_PUBLISH_ENABLED' 'garde d activation Microsoft Store configurée'
+require_pattern 'MICROSOFT_STORE_PRODUCT_ID:[[:space:]]*9N63P1KPCMMZ' 'identifiant public du produit Microsoft Store configuré'
+require_pattern '--inputFile' 'MSIX Store transmis explicitement au CLI'
+require_pattern '--appId.*MICROSOFT_STORE_PRODUCT_ID' 'produit Microsoft Store transmis explicitement au CLI'
 require_pattern 'msstore publish' 'soumission automatique Microsoft Store configurée'
+
+if grep -q 'MICROSOFT_STORE_PUBLISH_ENABLED' .github/workflows/release.yml; then
+  echo "[ERREUR] la publication Microsoft Store reste conditionnelle" >&2
+  exit 1
+fi
+echo "[OK] soumission Microsoft Store obligatoire pour chaque release"
 
 if grep -Eq 'name:[[:space:]]*Download build artifacts' .github/workflows/release.yml; then
   echo "[ERREUR] téléchargement global des artefacts détecté ; le MSIX Store ne doit pas rejoindre la GitHub Release" >&2

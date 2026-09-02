@@ -36,7 +36,7 @@ Usage: tools/check_openirn_release_preflight.sh [options]
 
 Options:
   --tag vX.Y.Z          Vérifie que le tag correspond à la version Flutter publique.
-  --require-secrets    Échoue si les secrets Android/Azure sont absents localement ou dans GitHub.
+  --require-secrets    Échoue si les secrets Android/Azure/Partner Center sont absents localement ou dans GitHub.
   --with-apple         Vérifie aussi les prérequis macOS/iOS Apple, optionnels pour l'instant.
   --strict             Transforme certains avertissements en erreurs.
   -h, --help           Affiche cette aide.
@@ -99,12 +99,16 @@ forbidden_grep() {
 
 GITHUB_SECRET_NAMES_CACHE=""
 GITHUB_SECRET_NAMES_LOADED=false
+GITHUB_SECRET_NAMES_ENVIRONMENT=""
 
 load_github_secret_names() {
-  if [[ "$GITHUB_SECRET_NAMES_LOADED" == true ]]; then
+  local environment="${1:-}"
+  if [[ "$GITHUB_SECRET_NAMES_LOADED" == true && "$GITHUB_SECRET_NAMES_ENVIRONMENT" == "$environment" ]]; then
     return 0
   fi
   GITHUB_SECRET_NAMES_LOADED=true
+  GITHUB_SECRET_NAMES_ENVIRONMENT="$environment"
+  GITHUB_SECRET_NAMES_CACHE=""
 
   if ! command -v gh >/dev/null 2>&1; then
     return 0
@@ -113,22 +117,32 @@ load_github_secret_names() {
   # En local, `gh secret list` permet de vérifier que les secrets existent dans
   # GitHub sans jamais lire leur valeur. En GitHub Actions, les secrets attendus
   # sont normalement injectés comme variables d'environnement par le workflow.
-  GITHUB_SECRET_NAMES_CACHE="$(gh secret list --json name --jq '.[].name' 2>/dev/null || true)"
+  if [[ -n "$environment" ]]; then
+    GITHUB_SECRET_NAMES_CACHE="$(gh secret list --env "$environment" --json name --jq '.[].name' 2>/dev/null || true)"
+  else
+    GITHUB_SECRET_NAMES_CACHE="$(gh secret list --json name --jq '.[].name' 2>/dev/null || true)"
+  fi
 }
 
 github_secret_exists() {
   local name="$1"
-  load_github_secret_names
+  local environment="${2:-}"
+  load_github_secret_names "$environment"
   [[ -n "$GITHUB_SECRET_NAMES_CACHE" ]] && grep -Fxq "$name" <<<"$GITHUB_SECRET_NAMES_CACHE"
 }
 
 check_secret() {
   local name="$1"
   local required="$2"
+  local github_environment="${3:-}"
   if [[ -n "${!name:-}" ]]; then
     ok "secret/env ${name} disponible"
-  elif github_secret_exists "$name"; then
-    ok "secret GitHub ${name} configuré"
+  elif github_secret_exists "$name" "$github_environment"; then
+    if [[ -n "$github_environment" ]]; then
+      ok "secret GitHub ${github_environment} ${name} configuré"
+    else
+      ok "secret GitHub ${name} configuré"
+    fi
   else
     if [[ "$REQUIRE_SECRETS" == true && "$required" == true ]]; then
       fail "secret/env GitHub ${name} manquant"
@@ -189,8 +203,8 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   if [[ -n "$EXPECTED_TAG" ]]; then
     if git rev-parse -q --verify "refs/tags/${EXPECTED_TAG}" >/dev/null; then
       ok "tag local ${EXPECTED_TAG} présent"
-      if git show "${EXPECTED_TAG}:README.md" 2>/dev/null | grep -Fq 'GPL-3.0-or-later' && \
-        git show "${EXPECTED_TAG}:LICENSE" 2>/dev/null | grep -Fq 'GNU GENERAL PUBLIC LICENSE'; then
+      if git show "${EXPECTED_TAG}:README.md" 2>/dev/null | grep -F 'GPL-3.0-or-later' >/dev/null && \
+        git show "${EXPECTED_TAG}:LICENSE" 2>/dev/null | grep -F 'GNU GENERAL PUBLIC LICENSE' >/dev/null; then
         ok "tag local ${EXPECTED_TAG} contient la licence GPL-3.0-or-later"
       else
         fail "tag local ${EXPECTED_TAG} ne contient pas la licence GPL-3.0-or-later"
@@ -227,14 +241,16 @@ require_grep 'STORE_MSIX_VERSION=.*storeMsixVersion' .github/workflows/release.y
 require_grep 'name:[[:space:]]*openirn-windows-store-submission' .github/workflows/release.yml 'artefact de soumission Microsoft Store isolé'
 require_grep 'name:[[:space:]]*Download direct Windows artifacts' .github/workflows/release.yml 'téléchargement explicite des seuls artefacts Windows directs configuré'
 require_grep 'environment:[[:space:]]*microsoft-store' .github/workflows/release.yml 'environnement GitHub Microsoft Store configuré'
-require_grep 'microsoft/microsoft-store-apppublisher@v1\.1' .github/workflows/release.yml 'Microsoft Store Developer CLI configuré'
+require_grep 'microsoft/microsoft-store-apppublisher@v1\.4' .github/workflows/release.yml 'Microsoft Store Developer CLI v1.4 configuré'
 require_grep 'PARTNER_CENTER_TENANT_ID' .github/workflows/release.yml 'secret Partner Center Tenant ID référencé'
 require_grep 'PARTNER_CENTER_SELLER_ID' .github/workflows/release.yml 'secret Partner Center Seller ID référencé'
 require_grep 'PARTNER_CENTER_CLIENT_ID' .github/workflows/release.yml 'secret Partner Center Client ID référencé'
 require_grep 'PARTNER_CENTER_CLIENT_SECRET' .github/workflows/release.yml 'secret Partner Center Client Secret référencé'
-require_grep 'MICROSOFT_STORE_PRODUCT_ID' .github/workflows/release.yml 'identifiant produit Microsoft Store référencé'
-require_grep 'MICROSOFT_STORE_PUBLISH_ENABLED' .github/workflows/release.yml 'garde d activation Microsoft Store configurée'
+require_grep 'MICROSOFT_STORE_PRODUCT_ID:[[:space:]]*9N63P1KPCMMZ' .github/workflows/release.yml 'identifiant public du produit Microsoft Store configuré'
+require_grep '--inputFile' .github/workflows/release.yml 'MSIX Store transmis explicitement au CLI'
+require_grep '--appId.*MICROSOFT_STORE_PRODUCT_ID' .github/workflows/release.yml 'produit Microsoft Store transmis explicitement au CLI'
 require_grep 'msstore publish' .github/workflows/release.yml 'soumission automatique Microsoft Store configurée'
+forbidden_grep 'MICROSOFT_STORE_PUBLISH_ENABLED' .github/workflows/release.yml 'garde d activation Microsoft Store'
 forbidden_grep 'name:[[:space:]]*Download build artifacts' .github/workflows/release.yml 'téléchargement global incluant le package Microsoft Store'
 require_grep '^[[:space:]]*lmodern[[:space:]]*\\' .github/workflows/release.yml 'dépendance LaTeX lmodern configurée pour les PDF'
 require_grep '^[[:space:]]*texlive-fonts-recommended[[:space:]]*\\' .github/workflows/release.yml 'polices TeX recommandées configurées pour les PDF'
@@ -268,8 +284,8 @@ require_grep 'Square44x44Logo\.targetsize-256\.png' .github/workflows/release.ym
 require_grep 'qualifiedIconFiles' .github/workflows/release.yml 'contrôle des ressources MSIX qualifiées par échelle configuré'
 require_grep 'Test-MsixIconTransparency\.ps1' .github/workflows/release.yml 'contrôle de transparence des icônes MSIX configuré'
 require_grep 'Get-AppxPackage -Name archoadFR\.OpenIRN' docs/deploiement-applications.md 'contrôle du package Microsoft Store documenté en français'
-require_grep 'MICROSOFT_STORE_PUBLISH_ENABLED=true' docs/deploiement-applications.md 'activation Microsoft Store documentée en français'
-require_grep 'MICROSOFT_STORE_PUBLISH_ENABLED=true' docs/en/application-deployment.md 'activation Microsoft Store documentée en anglais'
+require_grep 'apps\.microsoft\.com/detail/9N63P1KPCMMZ' docs/deploiement-applications.md 'publication Microsoft Store documentée en français'
+require_grep 'apps\.microsoft\.com/detail/9N63P1KPCMMZ' docs/en/application-deployment.md 'publication Microsoft Store documentée en anglais'
 
 printf '\n== Apple optionnel ==\n'
 if [[ "$WITH_APPLE" == true ]]; then
@@ -298,6 +314,14 @@ for secret in \
   AZURE_TENANT_ID \
   AZURE_SUBSCRIPTION_ID; do
   check_secret "$secret" true
+done
+
+for secret in \
+  PARTNER_CENTER_TENANT_ID \
+  PARTNER_CENTER_SELLER_ID \
+  PARTNER_CENTER_CLIENT_ID \
+  PARTNER_CENTER_CLIENT_SECRET; do
+  check_secret "$secret" true microsoft-store
 done
 
 printf '\n== Protection des secrets ==\n'

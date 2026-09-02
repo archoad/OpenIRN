@@ -128,7 +128,7 @@ Le workflow de release construit deux packages Windows distincts :
 - `openirn-windows-x64.msix`, signé par Azure Artifact Signing, reste destiné au téléchargement direct depuis la GitHub Release ;
 - `OpenIRN-Store.msix` utilise l'identité attribuée par Partner Center. Ce fichier de soumission n'est pas joint à la GitHub Release et ne doit pas être installé directement. Microsoft Store le signe après certification et distribue le package final.
 
-Lorsque la fiche OpenIRN est publiée dans le Store, rechercher **OpenIRN** dans Microsoft Store, vérifier que l'éditeur affiché est **archoad FR**, puis cliquer sur **Installer**. Les mises à jour suivantes sont distribuées par le Store.
+OpenIRN est publié officiellement sur le [Microsoft Store](https://apps.microsoft.com/detail/9N63P1KPCMMZ). Vérifier que l'éditeur affiché est **archoad FR**, puis cliquer sur **Installer**. Les mises à jour suivantes sont distribuées par le Store après leur certification.
 
 Contrôler le package installé :
 
@@ -151,19 +151,17 @@ Cette section concerne le mainteneur de la release. Partner Center a attribué l
 | Package Family Name | `archoadFR.OpenIRN_40n6zg9mmw8te` |
 | Package SID | `S-1-15-2-1093717781-299261422-2075608443-880705312-3180602753-3190663317-2185964278` |
 
-Avant d'activer l'automatisation :
+Pour permettre la soumission automatique à chaque release :
 
 1. vérifier que le produit est gratuit : Microsoft limite actuellement cette automatisation GitHub Actions aux produits gratuits ;
-2. terminer une première soumission manuelle dans Partner Center et attendre que l'application soit publiée ;
-3. enregistrer une application Microsoft Entra et l'ajouter aux utilisateurs Partner Center avec le rôle **Manager** ;
-4. créer dans le dépôt GitHub l'environnement `microsoft-store` ;
-5. ajouter à cet environnement les secrets `PARTNER_CENTER_TENANT_ID`, `PARTNER_CENTER_SELLER_ID`, `PARTNER_CENTER_CLIENT_ID` et `PARTNER_CENTER_CLIENT_SECRET` ;
-6. ajouter la variable `MICROSOFT_STORE_PRODUCT_ID` avec l'identifiant produit affiché par Partner Center. Cet identifiant n'est pas `archoadFR.OpenIRN` ;
-7. laisser `MICROSOFT_STORE_PUBLISH_ENABLED` absente ou égale à `false` pendant l'amorçage ;
-8. lancer une release et télécharger l'artefact GitHub Actions `openirn-windows-store-submission` si le package de la première soumission est nécessaire ;
-9. une fois la première version publiée, définir `MICROSOFT_STORE_PUBLISH_ENABLED=true` dans l'environnement `microsoft-store`.
+2. conserver une application Microsoft Entra ajoutée aux utilisateurs Partner Center avec le rôle **Manager** ;
+3. créer dans le dépôt GitHub l'environnement `microsoft-store` ;
+4. ajouter à cet environnement les secrets `PARTNER_CENTER_TENANT_ID`, `PARTNER_CENTER_SELLER_ID`, `PARTNER_CENTER_CLIENT_ID` et `PARTNER_CENTER_CLIENT_SECRET` ;
+5. ne pas configurer d'approbation obligatoire sur cet environnement si la publication doit rester entièrement automatique.
 
-À chaque tag `vX.Y.Z`, le workflow vérifie l'identité et la version du MSIX Store, puis exécute la soumission automatique si cette variable vaut exactement `true`. La version Flutter `X.Y.Z+build` produit un MSIX direct `X.Y.Z.build` et un MSIX Store `X.Y.Z.0` : le quatrième composant reste à zéro car il est réservé par Microsoft Store. Une version déjà soumise ou inférieure à celle du Store sera refusée. Une règle d'approbation obligatoire sur l'environnement GitHub mettra le job en attente ; ne pas en configurer si la publication doit être entièrement automatique.
+L'identifiant public du produit, `9N63P1KPCMMZ`, est versionné dans le workflow ; aucun secret ni variable GitHub n'est nécessaire pour cette valeur. À chaque tag `vX.Y.Z`, ainsi qu'à chaque exécution manuelle du workflow de release, le workflow vérifie l'identité et la version du MSIX Store, puis soumet obligatoirement le package à Partner Center. Un secret absent ou un refus de Partner Center fait échouer la release avant sa publication GitHub.
+
+La version Flutter `X.Y.Z+build` produit un MSIX direct `X.Y.Z.build` et un MSIX Store `X.Y.Z.0` : le quatrième composant reste à zéro car il est réservé par Microsoft Store. Une version déjà soumise ou inférieure à celle du Store sera refusée. La réussite du job signifie que la soumission a été transmise ; sa disponibilité publique reste soumise à la certification Microsoft.
 
 ## Option portable : ZIP signé
 

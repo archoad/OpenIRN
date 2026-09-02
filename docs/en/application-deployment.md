@@ -128,7 +128,7 @@ The release workflow builds two separate Windows packages:
 - `openirn-windows-x64.msix`, signed by Azure Artifact Signing, remains available for direct download from the GitHub Release;
 - `OpenIRN-Store.msix` uses the identity assigned by Partner Center. This submission file is not attached to the GitHub Release and must not be installed directly. Microsoft Store signs it after certification and distributes the final package.
 
-Once the OpenIRN listing is live, search for **OpenIRN** in Microsoft Store, check that **archoad FR** is displayed as the publisher, then select **Install**. Further updates are delivered by the Store.
+OpenIRN is officially available from the [Microsoft Store](https://apps.microsoft.com/detail/9N63P1KPCMMZ). Check that **archoad FR** is displayed as the publisher, then select **Install**. Further updates are delivered by the Store after certification.
 
 Check the installed package:
 
@@ -151,19 +151,17 @@ This section is intended for the release maintainer. Partner Center assigned the
 | Package Family Name | `archoadFR.OpenIRN_40n6zg9mmw8te` |
 | Package SID | `S-1-15-2-1093717781-299261422-2075608443-880705312-3180602753-3190663317-2185964278` |
 
-Before enabling automation:
+To submit every release automatically:
 
 1. check that the product is free: Microsoft currently limits this GitHub Actions automation to free products;
-2. complete the first submission manually in Partner Center and wait for the app to become available;
-3. register a Microsoft Entra application and add it to the Partner Center users with the **Manager** role;
-4. create a `microsoft-store` environment in the GitHub repository;
-5. add `PARTNER_CENTER_TENANT_ID`, `PARTNER_CENTER_SELLER_ID`, `PARTNER_CENTER_CLIENT_ID`, and `PARTNER_CENTER_CLIENT_SECRET` as environment secrets;
-6. add the `MICROSOFT_STORE_PRODUCT_ID` variable with the product ID shown by Partner Center. This ID is not `archoadFR.OpenIRN`;
-7. leave `MICROSOFT_STORE_PUBLISH_ENABLED` unset or set to `false` during bootstrap;
-8. run a release and download the `openirn-windows-store-submission` GitHub Actions artifact if the first submission package is needed;
-9. after the first version is live, set `MICROSOFT_STORE_PUBLISH_ENABLED=true` in the `microsoft-store` environment.
+2. keep a Microsoft Entra application registered as a Partner Center user with the **Manager** role;
+3. create a `microsoft-store` environment in the GitHub repository;
+4. add `PARTNER_CENTER_TENANT_ID`, `PARTNER_CENTER_SELLER_ID`, `PARTNER_CENTER_CLIENT_ID`, and `PARTNER_CENTER_CLIENT_SECRET` as environment secrets;
+5. do not configure required reviewers on this environment if publication must remain fully automatic.
 
-For every `vX.Y.Z` tag, the workflow checks the Store MSIX identity and version, then runs the automatic submission when this variable is exactly `true`. Flutter version `X.Y.Z+build` produces direct MSIX version `X.Y.Z.build` and Store MSIX version `X.Y.Z.0`: the fourth component remains zero because Microsoft Store reserves it. A version that has already been submitted, or is lower than the Store version, will be rejected. A required reviewer rule on the GitHub environment will keep the job waiting; do not configure one if publication must be fully automatic.
+The public product ID, `9N63P1KPCMMZ`, is stored in the workflow; it does not require a GitHub secret or variable. For every `vX.Y.Z` tag, and for every manual run of the release workflow, the workflow verifies the Store MSIX identity and version and then submits the package to Partner Center. A missing secret or a Partner Center rejection fails the release before the GitHub Release is published.
+
+Flutter version `X.Y.Z+build` produces direct MSIX version `X.Y.Z.build` and Store MSIX version `X.Y.Z.0`: the fourth component remains zero because Microsoft Store reserves it. A version that has already been submitted, or is lower than the Store version, will be rejected. A successful job means the submission was sent; public availability remains subject to Microsoft certification.
 
 ## Portable option: signed ZIP
 

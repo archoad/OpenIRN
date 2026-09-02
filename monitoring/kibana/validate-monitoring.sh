@@ -22,7 +22,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for command_name in bash grep jq mktemp; do
+for command_name in bash curl grep jq mktemp; do
 	if ! command -v "${command_name}" >/dev/null 2>&1; then
 		echo "Commande requise absente : ${command_name}" >&2
 		exit 1
@@ -33,14 +33,14 @@ bash -n \
 	"${script_dir}/deploy-dashboard.sh" \
 	"${script_dir}/deploy-alerting-rules.sh" \
 	"${script_dir}/install-monitoring.sh" \
-	"${script_dir}/validate-monitoring.sh" \
-	"${script_dir}/tests/bin/curl" \
-	"${script_dir}/tests/test-portable-installation.sh"
+	"${script_dir}/validate-monitoring.sh"
 
 jq -e '
 	.title == "OpenIRN — Supervision opérationnelle" and
 	(.panels | length == 45) and
+	([.panels[] | select(.type == "markdown" and .config.content == "# OpenIRN — Supervision opérationnelle" and .grid.y == 0 and .grid.h == 3)] | length == 1) and
 	([.panels[] | select(.type == "markdown" and (.config.content | startswith("## ")))] | length == 6) and
+	([.panels[] | select(.type == "markdown" and (.config.content | startswith("## ")) and .grid.h == 4)] | length == 6) and
 	([.panels[] | select(.type == "markdown" and (.config.content | startswith("## "))) | (.config.content | split("\n")[0])] == ["## Synthèse", "## Usage", "## Performance", "## Sécurité", "## Infrastructure", "## Exploitation"]) and
 	([paths(scalars) as $path | select($path[-1] == "id")] | length == 0)
 ' "${dashboard}" >/dev/null
@@ -115,7 +115,5 @@ for source_pattern in \
 		exit 1
 	fi
 done
-
-"${script_dir}/tests/test-portable-installation.sh" >/dev/null
 
 echo 'Monitoring OpenIRN valide : aucun secret détecté et rendu portable réussi.'

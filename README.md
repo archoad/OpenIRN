@@ -238,7 +238,7 @@ Le dépôt contient des workflows GitHub Actions pour :
 - exécuter un préflight de release ;
 - produire des artefacts Android signés ;
 - produire le ZIP et le MSIX Windows signés destinés à la distribution directe ;
-- produire un second MSIX avec l’identité Partner Center et le soumettre au Microsoft Store lorsque l’automatisation est activée ;
+- produire un second MSIX avec l’identité Partner Center et le soumettre automatiquement au Microsoft Store pour chaque release ;
 - convertir les guides Markdown français et anglais en PDF ;
 - publier les empreintes SHA-256 des artefacts.
 
@@ -251,7 +251,7 @@ Les artefacts signés actuellement visés sont :
 - les huit guides OpenIRN français et anglais au format PDF ;
 - `SHA256SUMS.txt`.
 
-Le MSIX de soumission Microsoft Store utilise l’identité `archoadFR.OpenIRN`. Il n’est pas joint à la GitHub Release et ne doit pas être installé directement : Microsoft le signe après certification. La procédure d’amorçage et la configuration Partner Center sont décrites dans le [guide de déploiement](docs/deploiement-applications.md#publication-automatique-sur-le-microsoft-store).
+OpenIRN est [publié officiellement sur le Microsoft Store](https://apps.microsoft.com/detail/9N63P1KPCMMZ). Le MSIX de soumission utilise l’identité `archoadFR.OpenIRN`. Il n’est pas joint à la GitHub Release et ne doit pas être installé directement : Microsoft le signe après certification. La configuration Partner Center requise pour les mises à jour automatiques est décrite dans le [guide de déploiement](docs/deploiement-applications.md#publication-automatique-sur-le-microsoft-store).
 
 macOS et iOS restent présents dans le projet Flutter, mais ne font pas encore partie du profil de release signé principal tant qu’un circuit Apple Developer n’est pas configuré.
 
