@@ -11,4 +11,4 @@ PRODUCT_NAME = OpenIRN
 PRODUCT_BUNDLE_IDENTIFIER = io.archoad.openirn
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 io.github.archoad. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 Michel Dubois / Archoad.
