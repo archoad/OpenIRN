@@ -47,6 +47,33 @@ void main() {
     expect(find.text('Licence GNU GPL d’OpenIRN'), findsOneWidget);
     expect(find.textContaining('GNU GENERAL PUBLIC LICENSE'), findsOneWidget);
   });
+
+  testWidgets('the About screen opens the OpenIRN privacy policy', (
+    tester,
+  ) async {
+    Uri? openedUrl;
+
+    await tester.pumpWidget(
+      OpenIrnLocalizationScope(
+        controller: OpenIrnLocalizations.instance,
+        child: MaterialApp(
+          home: AboutScreen(
+            referential: _referential,
+            externalUrlLauncher: (url) async {
+              openedUrl = url;
+              return true;
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Politique de confidentialité'));
+    await tester.pump();
+
+    expect(openedUrl, Uri.parse('https://www.archoad.io/openirn/privacy.html'));
+  });
 }
 
 const _referential = IrnReferential(

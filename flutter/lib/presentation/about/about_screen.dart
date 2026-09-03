@@ -1,14 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../domain/models/irn_referential.dart';
 import '../../l10n/openirn_localizations.dart';
 import '../common/openirn_app_bar.dart';
 
+typedef ExternalUrlLauncher = Future<bool> Function(Uri url);
+
+final _privacyPolicyUri = Uri.parse(
+  'https://www.archoad.io/openirn/privacy.html',
+);
+
 class AboutScreen extends StatefulWidget {
   final IrnReferential referential;
+  final ExternalUrlLauncher? externalUrlLauncher;
 
-  const AboutScreen({required this.referential, super.key});
+  const AboutScreen({
+    required this.referential,
+    this.externalUrlLauncher,
+    super.key,
+  });
 
   @override
   State<AboutScreen> createState() => _AboutScreenState();
@@ -31,6 +43,7 @@ class _AboutScreenState extends State<AboutScreen> {
               _ApplicationCard(
                 referential: widget.referential,
                 packageInfoFuture: _packageInfoFuture,
+                externalUrlLauncher: widget.externalUrlLauncher,
               ),
               const SizedBox(height: 12),
               _ReferentialCard(referential: widget.referential),
@@ -45,10 +58,12 @@ class _AboutScreenState extends State<AboutScreen> {
 class _ApplicationCard extends StatelessWidget {
   final IrnReferential referential;
   final Future<PackageInfo> packageInfoFuture;
+  final ExternalUrlLauncher? externalUrlLauncher;
 
   const _ApplicationCard({
     required this.referential,
     required this.packageInfoFuture,
+    required this.externalUrlLauncher,
   });
 
   @override
@@ -109,13 +124,22 @@ class _ApplicationCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text(context.tr('about.application_license')),
             const SizedBox(height: 4),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: () => _showApplicationLicense(context),
-                icon: const Icon(Icons.description_outlined),
-                label: Text(context.tr('about.application_license_action')),
-              ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                TextButton.icon(
+                  onPressed: () => _showApplicationLicense(context),
+                  icon: const Icon(Icons.description_outlined),
+                  label: Text(context.tr('about.application_license_action')),
+                ),
+                TextButton.icon(
+                  onPressed: () =>
+                      _openPrivacyPolicy(context, externalUrlLauncher),
+                  icon: const Icon(Icons.privacy_tip_outlined),
+                  label: Text(context.tr('about.privacy_policy_action')),
+                ),
+              ],
             ),
           ],
         ),
@@ -230,4 +254,28 @@ Future<void> _showApplicationLicense(BuildContext context) async {
       ],
     ),
   );
+}
+
+Future<void> _openPrivacyPolicy(
+  BuildContext context,
+  ExternalUrlLauncher? externalUrlLauncher,
+) async {
+  final launcher = externalUrlLauncher ?? _launchExternalUrl;
+  var opened = false;
+  try {
+    opened = await launcher(_privacyPolicyUri);
+  } catch (_) {
+    opened = false;
+  }
+  if (!context.mounted || opened) {
+    return;
+  }
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text(context.tr('about.privacy_policy_error'))),
+  );
+}
+
+Future<bool> _launchExternalUrl(Uri url) {
+  return launchUrl(url, mode: LaunchMode.externalApplication);
 }

@@ -27,7 +27,7 @@ env:
   FLUTTER_CHANNEL: stable
   APP_NAME: openirn
   APP_DISPLAY_NAME: OpenIRN
-  APP_BUNDLE_ID: io.github.archoad.openirn
+  APP_BUNDLE_ID: io.archoad.openirn
   PUBLISHER_SUBJECT: 'CN=Archoad, O=Archoad, L=Noyen-sur-Sarthe, S=Sarthe, C=FR'
   MSIX_IDENTITY_NAME: Archoad.OpenIRN
   STORE_MSIX_IDENTITY_NAME: archoadFR.OpenIRN

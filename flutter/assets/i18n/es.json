@@ -3,6 +3,8 @@
   "about.application_license": "Código de la aplicación bajo GNU GPL v3 o posterior",
   "about.application_license_action": "Leer la licencia completa",
   "about.application_license_title": "Licencia GNU GPL de OpenIRN",
+  "about.privacy_policy_action": "Política de privacidad",
+  "about.privacy_policy_error": "No se pudo abrir la política de privacidad.",
   "about.referential_license": "Licencia del marco de referencia",
   "about.referential_used": "Marco de referencia utilizado",
   "about.referential_version": "Marco de referencia {version}",

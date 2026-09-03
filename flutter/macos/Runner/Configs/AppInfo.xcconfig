@@ -8,7 +8,7 @@
 PRODUCT_NAME = OpenIRN
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = io.github.archoad.openirn
+PRODUCT_BUNDLE_IDENTIFIER = io.archoad.openirn
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 io.github.archoad. All rights reserved.
