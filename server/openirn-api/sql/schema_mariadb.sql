@@ -180,6 +180,7 @@ CREATE TABLE IF NOT EXISTS device_enrollment_requests (
     device_id VARCHAR(160) NOT NULL DEFAULT '',
     device_name VARCHAR(255) NOT NULL DEFAULT '',
     platform VARCHAR(64) NOT NULL DEFAULT '',
+    requester_email VARCHAR(254) NOT NULL DEFAULT '',
     requester_note TEXT NOT NULL,
     requester_ip VARCHAR(80) NOT NULL DEFAULT '',
     status VARCHAR(32) NOT NULL DEFAULT 'pending',

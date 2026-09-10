@@ -32,8 +32,10 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
   late final TextEditingController _tenantIdController;
   late final TextEditingController _codeController;
   late final TextEditingController _deviceNameController;
+  late final TextEditingController _requesterEmailController;
   bool _working = false;
   bool _terminalNameLocked = false;
+  String? _requesterEmailError;
   String _localDeviceId = '';
   OpenIrnApiConnectionResult? _connectionResult;
   OpenIrnApiEnrollmentResult? _enrollmentResult;
@@ -45,6 +47,7 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
     _tenantIdController = TextEditingController(text: initialTenantId);
     _codeController = TextEditingController();
     _deviceNameController = TextEditingController(text: _defaultDeviceName());
+    _requesterEmailController = TextEditingController();
     _loadLocalTerminalIdentity();
   }
 
@@ -53,6 +56,7 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
     _tenantIdController.dispose();
     _codeController.dispose();
     _deviceNameController.dispose();
+    _requesterEmailController.dispose();
     super.dispose();
   }
 
@@ -99,6 +103,7 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
 
   Future<void> _requestEnrollmentApproval() async {
     final tenantId = _tenantIdController.text.trim();
+    final requesterEmail = _requesterEmailController.text.trim().toLowerCase();
     final deviceName = _terminalNameLocked
         ? (_deviceNameController.text.trim().isEmpty
               ? context.tr(
@@ -107,16 +112,31 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
                 )
               : _deviceNameController.text.trim())
         : _deviceNameController.text.trim();
+    final requesterEmailError = requesterEmail.isEmpty
+        ? context.tr(
+            'device_enrollment.requester_email.required',
+            fallback: 'L’adresse email du demandeur est obligatoire.',
+          )
+        : (!_looksLikeEmail(requesterEmail)
+              ? context.tr(
+                  'device_enrollment.requester_email.invalid',
+                  fallback: 'Saisissez une adresse email valide.',
+                )
+              : null);
     if (tenantId.isEmpty ||
         (!_terminalNameLocked && deviceName.isEmpty) ||
+        requesterEmailError != null ||
         _working) {
+      setState(() {
+        _requesterEmailError = requesterEmailError;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             context.tr(
               'device_enrollment.validation.workspace_and_name',
               fallback:
-                  'Indiquez d’abord l’espace de travail et le nom de ce terminal.',
+                  'Indiquez l’espace de travail, le nom du terminal et une adresse email valide.',
             ),
           ),
         ),
@@ -126,6 +146,7 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
 
     setState(() {
       _working = true;
+      _requesterEmailError = null;
       _connectionResult = null;
       _enrollmentResult = null;
     });
@@ -137,6 +158,7 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
       tenantId: tenantId,
       deviceName: deviceName,
       platform: _platformName(),
+      requesterEmail: requesterEmail,
       deviceId: currentConfiguration.deviceId,
     );
 
@@ -462,6 +484,40 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
                           },
                         ),
                         const SizedBox(height: 12),
+                        TextField(
+                          controller: _requesterEmailController,
+                          textInputAction: TextInputAction.next,
+                          keyboardType: TextInputType.emailAddress,
+                          autofillHints: const [AutofillHints.email],
+                          autocorrect: false,
+                          enableSuggestions: false,
+                          onChanged: (_) {
+                            if (_requesterEmailError != null) {
+                              setState(() {
+                                _requesterEmailError = null;
+                              });
+                            }
+                          },
+                          decoration: InputDecoration(
+                            labelText: context.tr(
+                              'device_enrollment.requester_email.label',
+                              fallback: 'Adresse email du demandeur',
+                            ),
+                            hintText: context.tr(
+                              'device_enrollment.requester_email.hint',
+                              fallback: 'prenom.nom@entreprise.fr',
+                            ),
+                            helperText: context.tr(
+                              'device_enrollment.requester_email.help',
+                              fallback:
+                                  'Cette adresse permettra à l’administrateur d’identifier la demande et d’envoyer le code.',
+                            ),
+                            errorText: _requesterEmailError,
+                            border: const OutlineInputBorder(),
+                            prefixIcon: const Icon(Icons.alternate_email),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
                         TextFormField(
                           controller: _codeController,
                           textCapitalization: TextCapitalization.characters,
@@ -641,6 +697,12 @@ class _DeviceEnrollmentScreenState extends State<DeviceEnrollmentScreen> {
 
   String _defaultDeviceName() {
     return '${OpenIrnLocalizations.instance.tr('device_enrollment.default_device_prefix', fallback: 'Terminal')} ${_platformLabel()}';
+  }
+
+  bool _looksLikeEmail(String value) {
+    return RegExp(
+      r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$",
+    ).hasMatch(value);
   }
 
   String _platformLabel() {

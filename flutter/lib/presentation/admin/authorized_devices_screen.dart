@@ -5,6 +5,7 @@ import '../../data/api/openirn_api_client.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/authorized_device.dart';
+import '../../domain/models/authorized_terminal_overview.dart';
 import '../../domain/models/device_enrollment_request.dart';
 import '../../domain/models/device_enrollment_invitation.dart';
 import '../../domain/models/sync_configuration.dart';
@@ -198,7 +199,18 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
 
       await showDialog<void>(
         context: context,
-        builder: (context) => _EnrollmentCodeDialog(enrollment: enrollment),
+        builder: (context) => _EnrollmentCodeDialog(
+          enrollment: enrollment,
+          requesterEmail: request.requesterEmail,
+          onSendEmail: () => _apiClient.sendDeviceEnrollmentCodeEmail(
+            baseUrl: state.configuration.apiBaseUrl,
+            tenantId: request.tenantId,
+            apiToken: state.configuration.apiToken,
+            requestId: request.requestId,
+            enrollmentId: enrollment.enrollmentId,
+            code: enrollment.code,
+          ),
+        ),
       );
       await _refresh();
     } finally {
@@ -516,6 +528,11 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
             );
           }
 
+          final terminalOverviews = AuthorizedTerminalOverview.combine(
+            devices: state.devices,
+            requests: state.enrollmentRequests,
+          );
+
           return Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 1100),
@@ -532,18 +549,6 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
                           : null,
                     ),
                     const SizedBox(height: 12),
-                    if (state.serverAvailable &&
-                        state.enrollmentRequests.isNotEmpty) ...[
-                      _EnrollmentRequestsSection(
-                        requests: state.enrollmentRequests,
-                        working: _working,
-                        onApprove: (request) =>
-                            _approveEnrollmentRequest(state, request),
-                        onReject: (request) =>
-                            _rejectEnrollmentRequest(state, request),
-                      ),
-                      const SizedBox(height: 12),
-                    ],
                     if (state.serverAvailable &&
                         state.enrollmentInvitations.isNotEmpty) ...[
                       _ReusableEnrollmentInvitationsSection(
@@ -562,7 +567,7 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
                         title: state.title,
                         message: state.message,
                       )
-                    else if (state.devices.isEmpty)
+                    else if (terminalOverviews.isEmpty)
                       _MessageCard(
                         icon: Icons.devices_other_outlined,
                         title: context.tr(
@@ -576,14 +581,33 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
                         ),
                       )
                     else
-                      for (final device in state.devices) ...[
-                        _DeviceCard(
-                          device: device,
+                      for (final overview in terminalOverviews) ...[
+                        AuthorizedTerminalCard(
+                          device: overview.device,
+                          request: overview.request,
+                          requestCount: overview.requestCount,
                           working: _working,
                           isCurrentDevice:
-                              device.deviceId == state.configuration.deviceId,
-                          onRename: () => _renameDevice(state, device),
-                          onRevoke: () => _revokeDevice(state, device),
+                              overview.device?.deviceId ==
+                              state.configuration.deviceId,
+                          onApprove: overview.request?.isPending == true
+                              ? () => _approveEnrollmentRequest(
+                                  state,
+                                  overview.request!,
+                                )
+                              : null,
+                          onReject: overview.request?.isPending == true
+                              ? () => _rejectEnrollmentRequest(
+                                  state,
+                                  overview.request!,
+                                )
+                              : null,
+                          onRename: overview.device?.isActive == true
+                              ? () => _renameDevice(state, overview.device!)
+                              : null,
+                          onRevoke: overview.device?.isActive == true
+                              ? () => _revokeDevice(state, overview.device!)
+                              : null,
                         ),
                         const SizedBox(height: 12),
                       ],
@@ -703,24 +727,39 @@ class _HeaderCard extends StatelessWidget {
   }
 }
 
-class _DeviceCard extends StatelessWidget {
-  final AuthorizedDevice device;
+class AuthorizedTerminalCard extends StatelessWidget {
+  final AuthorizedDevice? device;
+  final DeviceEnrollmentRequest? request;
+  final int requestCount;
   final bool working;
   final bool isCurrentDevice;
-  final VoidCallback onRename;
-  final VoidCallback onRevoke;
+  final VoidCallback? onApprove;
+  final VoidCallback? onReject;
+  final VoidCallback? onRename;
+  final VoidCallback? onRevoke;
 
-  const _DeviceCard({
+  const AuthorizedTerminalCard({
     required this.device,
+    required this.request,
+    this.requestCount = 0,
     required this.working,
     required this.isCurrentDevice,
-    required this.onRename,
-    required this.onRevoke,
-  });
+    this.onApprove,
+    this.onReject,
+    this.onRename,
+    this.onRevoke,
+    super.key,
+  }) : assert(device != null || request != null);
 
   @override
   Widget build(BuildContext context) {
-    final lastSeen = device.lastSeenAt == null
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final currentDevice = device;
+    final currentRequest = request;
+    final displayName =
+        currentDevice?.displayName ?? currentRequest!.displayName;
+    final lastSeen = currentDevice?.lastSeenAt == null
         ? context.tr(
             'authorized_devices.last_seen.never',
             fallback: 'Jamais vu',
@@ -728,14 +767,14 @@ class _DeviceCard extends StatelessWidget {
         : context.tr(
             'authorized_devices.last_seen.at',
             fallback: 'Dernière activité : {date}',
-            values: {'date': _formatDateTime(device.lastSeenAt!)},
+            values: {'date': _formatDateTime(currentDevice!.lastSeenAt!)},
           );
-    final statusColor = device.isActive
-        ? Theme.of(context).colorScheme.primaryContainer
-        : Theme.of(context).colorScheme.errorContainer;
-    final statusTextColor = device.isActive
-        ? Theme.of(context).colorScheme.onPrimaryContainer
-        : Theme.of(context).colorScheme.onErrorContainer;
+    final requestPending = currentRequest?.isPending ?? false;
+    final requestWorkspaceAlreadyShown =
+        currentDevice?.effectiveWorkspaces.any(
+          (workspace) => workspace.tenantId == currentRequest?.tenantId,
+        ) ??
+        false;
 
     return Card(
       child: Padding(
@@ -744,7 +783,11 @@ class _DeviceCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Icon(
-              device.isActive ? Icons.devices_outlined : Icons.block_outlined,
+              currentDevice == null
+                  ? Icons.phonelink_lock_outlined
+                  : currentDevice.isActive
+                  ? Icons.devices_outlined
+                  : Icons.block_outlined,
               size: 34,
             ),
             const SizedBox(width: 14),
@@ -757,27 +800,46 @@ class _DeviceCard extends StatelessWidget {
                     runSpacing: 8,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      Text(
-                        device.displayName,
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: statusColor,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 4,
+                      Text(displayName, style: theme.textTheme.titleMedium),
+                      if (currentDevice != null)
+                        _StatusBadge(
+                          backgroundColor: currentDevice.isActive
+                              ? colorScheme.primaryContainer
+                              : colorScheme.errorContainer,
+                          foregroundColor: currentDevice.isActive
+                              ? colorScheme.onPrimaryContainer
+                              : colorScheme.onErrorContainer,
+                          label: context.tr(
+                            'authorized_devices.terminal_status',
+                            fallback: 'Terminal : {status}',
+                            values: {
+                              'status': context.trText(
+                                currentDevice.statusLabel,
+                              ),
+                            },
                           ),
-                          child: Text(
-                            context.trText(device.statusLabel),
-                            style: TextStyle(color: statusTextColor),
+                        ),
+                      if (currentRequest != null)
+                        _StatusBadge(
+                          backgroundColor: requestPending
+                              ? colorScheme.tertiaryContainer
+                              : colorScheme.surfaceContainerHighest,
+                          foregroundColor: requestPending
+                              ? colorScheme.onTertiaryContainer
+                              : colorScheme.onSurfaceVariant,
+                          label: context.tr(
+                            'authorized_devices.request_status',
+                            fallback: 'Demande : {status}',
+                            values: {
+                              'status': context.trText(
+                                currentRequest.statusLabel,
+                              ),
+                            },
                           ),
                         ),
-                      ),
-                      for (final workspace in device.effectiveWorkspaces)
+                      for (final workspace
+                          in currentDevice?.effectiveWorkspaces ??
+                              const <AuthorizedDeviceWorkspace>[])
                         Chip(
                           avatar: Icon(
                             workspace.isActive
@@ -787,212 +849,224 @@ class _DeviceCard extends StatelessWidget {
                           ),
                           label: Text(workspace.tenantLabel),
                         ),
-                      if (isCurrentDevice)
-                        DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.primaryContainer,
-                            borderRadius: BorderRadius.circular(999),
+                      if (currentRequest != null &&
+                          !requestWorkspaceAlreadyShown &&
+                          currentRequest.tenantId.trim().isNotEmpty)
+                        Chip(
+                          avatar: const Icon(
+                            Icons.account_tree_outlined,
+                            size: 18,
                           ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 4,
-                            ),
-                            child: Text(
-                              context.tr(
-                                'authorized_devices.current_device',
-                                fallback: 'Ce terminal',
-                              ),
-                              style: TextStyle(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onPrimaryContainer,
-                              ),
-                            ),
+                          label: Text(currentRequest.tenantLabel),
+                        ),
+                      if (isCurrentDevice)
+                        _StatusBadge(
+                          backgroundColor: colorScheme.primaryContainer,
+                          foregroundColor: colorScheme.onPrimaryContainer,
+                          label: context.tr(
+                            'authorized_devices.current_device',
+                            fallback: 'Ce terminal',
                           ),
                         ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  Text('${device.platformLabel} — $lastSeen'),
-                  const SizedBox(height: 4),
-                  Text(
-                    device.workspaceCount > 1
-                        ? context.tr(
-                            'authorized_devices.enrolled.multiple',
-                            fallback:
-                                'Enrollé dans {count} espaces : {summary}',
-                            values: {
-                              'count': device.workspaceCount,
-                              'summary': device.workspaceSummary,
-                            },
-                          )
-                        : context.tr(
-                            'authorized_devices.enrolled.single',
-                            fallback: 'Enrollé dans {summary}',
-                            values: {'summary': device.workspaceSummary},
-                          ),
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    context.tr(
-                      'authorized_devices.device_id',
-                      fallback: 'Identifiant terminal : {deviceId}',
-                      values: {'deviceId': device.deviceId},
+                  if (currentDevice != null) ...[
+                    const SizedBox(height: 8),
+                    Text('${currentDevice.platformLabel} — $lastSeen'),
+                    const SizedBox(height: 4),
+                    Text(
+                      currentDevice.workspaceCount > 1
+                          ? context.tr(
+                              'authorized_devices.enrolled.multiple',
+                              fallback:
+                                  'Enrollé dans {count} espaces : {summary}',
+                              values: {
+                                'count': currentDevice.workspaceCount,
+                                'summary': currentDevice.workspaceSummary,
+                              },
+                            )
+                          : context.tr(
+                              'authorized_devices.enrolled.single',
+                              fallback: 'Enrollé dans {summary}',
+                              values: {
+                                'summary': currentDevice.workspaceSummary,
+                              },
+                            ),
+                      style: theme.textTheme.bodySmall,
                     ),
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    context.tr(
-                      'authorized_devices.created_at',
-                      fallback: 'Créé le {date}',
-                      values: {'date': _formatDateTime(device.createdAt)},
-                    ),
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  if (device.revokedAt != null) ...[
                     const SizedBox(height: 4),
                     Text(
                       context.tr(
-                        'authorized_devices.revoked_at',
-                        fallback: 'Révoqué le {date}',
-                        values: {'date': _formatDateTime(device.revokedAt)},
+                        'authorized_devices.device_id',
+                        fallback: 'Identifiant terminal : {deviceId}',
+                        values: {'deviceId': currentDevice.deviceId},
                       ),
-                      style: Theme.of(context).textTheme.bodySmall,
+                      style: theme.textTheme.bodySmall,
                     ),
+                    const SizedBox(height: 4),
+                    Text(
+                      context.tr(
+                        'authorized_devices.created_at',
+                        fallback: 'Créé le {date}',
+                        values: {
+                          'date': _formatDateTime(currentDevice.createdAt),
+                        },
+                      ),
+                      style: theme.textTheme.bodySmall,
+                    ),
+                    if (currentDevice.revokedAt != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        context.tr(
+                          'authorized_devices.revoked_at',
+                          fallback: 'Révoqué le {date}',
+                          values: {
+                            'date': _formatDateTime(currentDevice.revokedAt),
+                          },
+                        ),
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
+                  ],
+                  if (currentRequest != null) ...[
+                    if (currentDevice != null) ...[
+                      const SizedBox(height: 10),
+                      const Divider(),
+                    ] else
+                      const SizedBox(height: 8),
+                    Text(
+                      context.tr(
+                        'authorized_devices.requests.requested_at',
+                        fallback: '{platform} — demandée le {date}',
+                        values: {
+                          'platform': currentRequest.platformLabel,
+                          'date': _formatDateTime(currentRequest.requestedAt),
+                        },
+                      ),
+                    ),
+                    if (currentRequest.requesterEmail.trim().isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        context.tr(
+                          'authorized_devices.requests.requester_email',
+                          fallback: 'Demandeur : {email}',
+                          values: {'email': currentRequest.requesterEmail},
+                        ),
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
+                    if (currentRequest.requesterNote.trim().isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        currentRequest.requesterNote,
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
+                    if (currentRequest.decidedAt != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        context.tr(
+                          'authorized_devices.requests.decided_at',
+                          fallback: 'Traitée le {date}',
+                          values: {
+                            'date': _formatDateTime(currentRequest.decidedAt),
+                          },
+                        ),
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
+                    if (requestCount > 1) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        context.tr(
+                          'authorized_devices.requests.history_count',
+                          fallback:
+                              '{count} demandes d’enrôlement associées à ce terminal.',
+                          values: {'count': requestCount},
+                        ),
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
+                    if (currentRequest.isPending &&
+                        onApprove != null &&
+                        onReject != null) ...[
+                      const SizedBox(height: 12),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Wrap(
+                          alignment: WrapAlignment.end,
+                          spacing: 4,
+                          runSpacing: 8,
+                          children: [
+                            TextButton.icon(
+                              onPressed: working ? null : onReject,
+                              icon: const Icon(Icons.block_outlined),
+                              label: Text(
+                                context.tr(
+                                  'common.reject',
+                                  fallback: 'Refuser',
+                                ),
+                              ),
+                            ),
+                            FilledButton.icon(
+                              onPressed: working ? null : onApprove,
+                              icon: const Icon(Icons.check_circle_outline),
+                              label: Text(
+                                context.tr(
+                                  'common.approve',
+                                  fallback: 'Approuver',
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                 ],
               ),
             ),
-            PopupMenuButton<String>(
-              enabled: !working,
-              onSelected: (value) {
-                if (value == 'rename') {
-                  onRename();
-                } else if (value == 'revoke') {
-                  onRevoke();
-                }
-              },
-              itemBuilder: (context) => [
-                PopupMenuItem<String>(
-                  value: 'rename',
-                  enabled: device.isActive,
-                  child: Text(
-                    context.tr(
-                      'authorized_devices.action.rename',
-                      fallback: 'Renommer',
+            if (currentDevice != null)
+              PopupMenuButton<String>(
+                enabled: !working,
+                onSelected: (value) {
+                  if (value == 'rename') {
+                    onRename?.call();
+                  } else if (value == 'revoke') {
+                    onRevoke?.call();
+                  }
+                },
+                itemBuilder: (context) => [
+                  PopupMenuItem<String>(
+                    value: 'rename',
+                    enabled: currentDevice.isActive && onRename != null,
+                    child: Text(
+                      context.tr(
+                        'authorized_devices.action.rename',
+                        fallback: 'Renommer',
+                      ),
                     ),
                   ),
-                ),
-                PopupMenuItem<String>(
-                  value: 'revoke',
-                  enabled: device.isActive,
-                  child: Text(
-                    device.workspaceCount > 1
-                        ? context.tr(
-                            'authorized_devices.action.revoke_workspace',
-                            fallback: 'Révoquer dans cet espace',
-                          )
-                        : context.tr(
-                            'authorized_devices.action.revoke',
-                            fallback: 'Révoquer',
-                          ),
+                  PopupMenuItem<String>(
+                    value: 'revoke',
+                    enabled: currentDevice.isActive && onRevoke != null,
+                    child: Text(
+                      currentDevice.workspaceCount > 1
+                          ? context.tr(
+                              'authorized_devices.action.revoke_workspace',
+                              fallback: 'Révoquer dans cet espace',
+                            )
+                          : context.tr(
+                              'authorized_devices.action.revoke',
+                              fallback: 'Révoquer',
+                            ),
+                    ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
           ],
         ),
       ),
-    );
-  }
-}
-
-class _EnrollmentRequestsSection extends StatelessWidget {
-  final List<DeviceEnrollmentRequest> requests;
-  final bool working;
-  final ValueChanged<DeviceEnrollmentRequest> onApprove;
-  final ValueChanged<DeviceEnrollmentRequest> onReject;
-
-  const _EnrollmentRequestsSection({
-    required this.requests,
-    required this.working,
-    required this.onApprove,
-    required this.onReject,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final pending = requests.where((request) => request.isPending).toList();
-    final history = requests.where((request) => !request.isPending).take(5);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(18),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.notification_important_outlined, size: 34),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        context.tr(
-                          'authorized_devices.requests.title',
-                          fallback: 'Demandes d’enrôlement',
-                        ),
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        pending.isEmpty
-                            ? context.tr(
-                                'authorized_devices.requests.none_pending',
-                                fallback: 'Aucune demande en attente.',
-                              )
-                            : context.tr(
-                                'authorized_devices.requests.pending_count',
-                                fallback:
-                                    '{count} demande(s) en attente de validation.',
-                                values: {'count': pending.length},
-                              ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        for (final request in pending) ...[
-          EnrollmentRequestCard(
-            request: request,
-            working: working,
-            onApprove: () => onApprove(request),
-            onReject: () => onReject(request),
-          ),
-          const SizedBox(height: 12),
-        ],
-        for (final request in history) ...[
-          EnrollmentRequestCard(
-            request: request,
-            working: working,
-            onApprove: () => onApprove(request),
-            onReject: () => onReject(request),
-          ),
-          const SizedBox(height: 12),
-        ],
-      ],
     );
   }
 }
@@ -1013,135 +1087,39 @@ class EnrollmentRequestCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final statusColor = request.isPending
-        ? colorScheme.tertiaryContainer
-        : colorScheme.surfaceContainerHighest;
-    final statusTextColor = request.isPending
-        ? colorScheme.onTertiaryContainer
-        : colorScheme.onSurfaceVariant;
-
-    final details = Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(
-          request.isPending
-              ? Icons.phonelink_lock_outlined
-              : Icons.phonelink_setup_outlined,
-          size: 34,
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  Text(request.displayName, style: theme.textTheme.titleMedium),
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: statusColor,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
-                      ),
-                      child: Text(
-                        context.trText(request.statusLabel),
-                        style: TextStyle(color: statusTextColor),
-                      ),
-                    ),
-                  ),
-                  if (request.tenantId.trim().isNotEmpty)
-                    Chip(
-                      avatar: const Icon(Icons.account_tree_outlined, size: 18),
-                      label: Text(request.tenantLabel),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                context.tr(
-                  'authorized_devices.requests.requested_at',
-                  fallback: '{platform} — demandée le {date}',
-                  values: {
-                    'platform': request.platformLabel,
-                    'date': _formatDateTime(request.requestedAt),
-                  },
-                ),
-              ),
-              if (request.requesterNote.trim().isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(request.requesterNote, style: theme.textTheme.bodySmall),
-              ],
-              if (request.decidedAt != null) ...[
-                const SizedBox(height: 6),
-                Text(
-                  context.tr(
-                    'authorized_devices.requests.decided_at',
-                    fallback: 'Traitée le {date}',
-                    values: {'date': _formatDateTime(request.decidedAt)},
-                  ),
-                  style: theme.textTheme.bodySmall,
-                ),
-              ],
-            ],
-          ),
-        ),
-      ],
+    return AuthorizedTerminalCard(
+      device: null,
+      request: request,
+      requestCount: 1,
+      working: working,
+      isCurrentDevice: false,
+      onApprove: onApprove,
+      onReject: onReject,
     );
-    final actions = Wrap(
-      alignment: WrapAlignment.end,
-      spacing: 4,
-      runSpacing: 8,
-      children: [
-        TextButton.icon(
-          onPressed: working ? null : onReject,
-          icon: const Icon(Icons.block_outlined),
-          label: Text(context.tr('common.reject', fallback: 'Refuser')),
-        ),
-        FilledButton.icon(
-          onPressed: working ? null : onApprove,
-          icon: const Icon(Icons.check_circle_outline),
-          label: Text(context.tr('common.approve', fallback: 'Approuver')),
-        ),
-      ],
-    );
+  }
+}
 
-    return Card(
+class _StatusBadge extends StatelessWidget {
+  final Color backgroundColor;
+  final Color foregroundColor;
+  final String label;
+
+  const _StatusBadge({
+    required this.backgroundColor,
+    required this.foregroundColor,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(999),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final isCompact = constraints.maxWidth < 680;
-            if (isCompact) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  details,
-                  if (request.isPending) ...[
-                    const SizedBox(height: 12),
-                    Align(alignment: Alignment.centerRight, child: actions),
-                  ],
-                ],
-              );
-            }
-
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(child: details),
-                if (request.isPending) ...[const SizedBox(width: 12), actions],
-              ],
-            );
-          },
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        child: Text(label, style: TextStyle(color: foregroundColor)),
       ),
     );
   }
@@ -1649,13 +1627,49 @@ class _EnrollmentDialogState extends State<_EnrollmentDialog> {
   }
 }
 
-class _EnrollmentCodeDialog extends StatelessWidget {
+class _EnrollmentCodeDialog extends StatefulWidget {
   final OpenIrnApiEnrollmentResult enrollment;
+  final String requesterEmail;
+  final Future<OpenIrnApiEnrollmentResult> Function()? onSendEmail;
 
-  const _EnrollmentCodeDialog({required this.enrollment});
+  const _EnrollmentCodeDialog({
+    required this.enrollment,
+    this.requesterEmail = '',
+    this.onSendEmail,
+  });
+
+  @override
+  State<_EnrollmentCodeDialog> createState() => _EnrollmentCodeDialogState();
+}
+
+class _EnrollmentCodeDialogState extends State<_EnrollmentCodeDialog> {
+  bool _sending = false;
+  bool _sent = false;
+
+  Future<void> _sendEmail() async {
+    final send = widget.onSendEmail;
+    if (send == null || _sending || _sent) {
+      return;
+    }
+    setState(() {
+      _sending = true;
+    });
+    final result = await send();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _sending = false;
+      _sent = result.isAccepted;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${result.title} — ${result.message}')),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    final enrollment = widget.enrollment;
     final expiresAt = enrollment.expiresAt == null
         ? context.tr(
             'authorized_devices.enrollment.no_expiration',
@@ -1725,6 +1739,17 @@ class _EnrollmentCodeDialog extends StatelessWidget {
                     ),
               style: Theme.of(context).textTheme.bodySmall,
             ),
+            if (widget.requesterEmail.trim().isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                context.tr(
+                  'authorized_devices.enrollment.email_recipient',
+                  fallback: 'Destinataire : {email}',
+                  values: {'email': widget.requesterEmail},
+                ),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
           ],
         ),
       ),
@@ -1748,6 +1773,31 @@ class _EnrollmentCodeDialog extends StatelessWidget {
           icon: const Icon(Icons.copy_outlined),
           label: Text(context.tr('common.copy', fallback: 'Copier')),
         ),
+        if (widget.onSendEmail != null)
+          FilledButton.tonalIcon(
+            onPressed: _sending || _sent ? null : _sendEmail,
+            icon: _sending
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(
+                    _sent
+                        ? Icons.mark_email_read_outlined
+                        : Icons.send_outlined,
+                  ),
+            label: Text(
+              _sent
+                  ? context.tr(
+                      'authorized_devices.enrollment.email_sent',
+                      fallback: 'Email envoyé',
+                    )
+                  : context.tr(
+                      'authorized_devices.enrollment.send_email',
+                      fallback: 'Envoyer par email',
+                    ),
+            ),
+          ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(),
           child: Text(context.tr('common.close', fallback: 'Fermer')),

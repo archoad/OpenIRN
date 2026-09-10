@@ -258,6 +258,24 @@ OPENIRN_SESSION_TTL_MINUTES=480
 OPENIRN_SESSION_IDLE_TIMEOUT_MINUTES=30
 ```
 
+To enable the button that emails an enrollment code, add the SMTP settings to
+the same runtime file. Do not commit real values:
+
+```text
+OPENIRN_SMTP_HOST=smtp.example.net
+OPENIRN_SMTP_PORT=587
+OPENIRN_SMTP_SECURITY=starttls
+OPENIRN_SMTP_FROM=openirn@example.net
+OPENIRN_SMTP_USERNAME=SMTP_USERNAME_TO_REPLACE
+OPENIRN_SMTP_PASSWORD=SMTP_PASSWORD_TO_REPLACE
+OPENIRN_SMTP_TIMEOUT_SECONDS=10
+```
+
+`OPENIRN_SMTP_SECURITY` accepts `starttls`, `ssl`, or `plain`. For an
+unauthenticated SMTP relay, omit both `OPENIRN_SMTP_USERNAME` and
+`OPENIRN_SMTP_PASSWORD`. Use `plain` only with a trusted local relay. Restart
+`openirn-api` after changing these settings.
+
 Create a separate migration file:
 
 ```bash

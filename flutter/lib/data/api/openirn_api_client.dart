@@ -3806,6 +3806,7 @@ class OpenIrnApiClient {
     required String tenantId,
     required String deviceName,
     required String platform,
+    required String requesterEmail,
     String note = '',
     String deviceId = '',
   }) async {
@@ -3824,6 +3825,7 @@ class OpenIrnApiClient {
         'tenantId': safeTenantId,
         'deviceName': deviceName.trim(),
         'platform': platform.trim(),
+        'requesterEmail': requesterEmail.trim().toLowerCase(),
         'note': note.trim(),
         if (deviceId.trim().isNotEmpty) 'deviceId': deviceId.trim(),
       });
@@ -4036,6 +4038,124 @@ class OpenIrnApiClient {
     } on HttpException catch (error) {
       return _enrollmentNetworkError(
         approveUri,
+        safeTenantId,
+        'Erreur HTTP',
+        error.message,
+      );
+    }
+  }
+
+  Future<OpenIrnApiEnrollmentResult> sendDeviceEnrollmentCodeEmail({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    required String requestId,
+    required String enrollmentId,
+    required String code,
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final sendUri = Uri.parse(
+      '$normalizedBaseUrl/devices/enrollment/requests/$requestId/send-code',
+    );
+    try {
+      final response = await _postJson(sendUri, <String, dynamic>{
+        'tenantId': safeTenantId,
+        'enrollmentId': enrollmentId.trim(),
+        'code': code.trim(),
+      }, bearerToken: apiToken);
+      final decodedBody = _decodeJsonObject(response.body);
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return OpenIrnApiEnrollmentResult(
+          status: OpenIrnApiEnrollmentStatus.accepted,
+          url: sendUri.toString(),
+          statusCode: response.statusCode,
+          title: OpenIrnLocalizations.instance.tr(
+            'authorized_devices.enrollment.email_sent_title',
+            fallback: 'Email envoyé',
+          ),
+          message: OpenIrnLocalizations.instance.tr(
+            'authorized_devices.enrollment.email_sent_message',
+            fallback: 'Le code d’appairage a été envoyé au demandeur.',
+          ),
+          tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
+          enrollmentId:
+              decodedBody?['enrollmentId']?.toString() ?? enrollmentId,
+          code: code,
+          expiresAt: null,
+          expiresInMinutes: 0,
+          qrPayloadText: '',
+          apiToken: '',
+          responseBody: decodedBody,
+        );
+      }
+      final failureMessage = switch (response.statusCode) {
+        503 => OpenIrnLocalizations.instance.tr(
+          'authorized_devices.enrollment.email_not_configured',
+          fallback: 'L’envoi par email n’est pas configuré sur le serveur.',
+        ),
+        410 => OpenIrnLocalizations.instance.tr(
+          'authorized_devices.enrollment.email_code_inactive',
+          fallback: 'Le code d’appairage a expiré ou n’est plus actif.',
+        ),
+        _ => OpenIrnLocalizations.instance.tr(
+          'authorized_devices.enrollment.email_send_rejected_message',
+          fallback: 'Le serveur a refusé l’envoi du code d’appairage.',
+        ),
+      };
+      return OpenIrnApiEnrollmentResult(
+        status: OpenIrnApiEnrollmentStatus.rejected,
+        url: sendUri.toString(),
+        statusCode: response.statusCode,
+        title: OpenIrnLocalizations.instance.tr(
+          'authorized_devices.enrollment.email_send_rejected_title',
+          fallback: 'Envoi refusé',
+        ),
+        message: failureMessage,
+        tenantId: safeTenantId,
+        enrollmentId: enrollmentId,
+        code: code,
+        expiresAt: null,
+        expiresInMinutes: 0,
+        qrPayloadText: '',
+        apiToken: '',
+        responseBody: decodedBody,
+      );
+    } on TimeoutException {
+      return _enrollmentNetworkError(
+        sendUri,
+        safeTenantId,
+        'Délai dépassé',
+        'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+      );
+    } on SocketException catch (error) {
+      return _enrollmentNetworkError(
+        sendUri,
+        safeTenantId,
+        'Serveur injoignable',
+        error.message,
+      );
+    } on HandshakeException catch (error) {
+      return _enrollmentNetworkError(
+        sendUri,
+        safeTenantId,
+        'Erreur TLS',
+        error.message,
+      );
+    } on FormatException catch (error) {
+      return _enrollmentNetworkError(
+        sendUri,
+        safeTenantId,
+        'Adresse serveur invalide',
+        error.message,
+      );
+    } on HttpException catch (error) {
+      return _enrollmentNetworkError(
+        sendUri,
         safeTenantId,
         'Erreur HTTP',
         error.message,

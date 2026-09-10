@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:openirn/domain/models/authorized_device.dart';
 import 'package:openirn/domain/models/device_enrollment_request.dart';
 import 'package:openirn/domain/models/device_enrollment_invitation.dart';
 import 'package:openirn/l10n/openirn_localizations.dart';
@@ -12,6 +13,71 @@ void main() {
   setUp(() async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     await OpenIrnLocalizations.instance.initialize();
+  });
+
+  testWidgets('groups device and enrollment request in one card', (
+    tester,
+  ) async {
+    await OpenIrnLocalizations.instance.setLanguage(
+      OpenIrnLanguage.fr,
+      persist: false,
+    );
+    final device = AuthorizedDevice(
+      tenantId: 'tenant-a',
+      deviceId: 'device-a',
+      tenantDisplayName: 'Espace A',
+      name: 'Portable Alice',
+      platform: 'windows',
+      status: 'active',
+      createdAt: DateTime.utc(2026, 9, 10, 10, 5),
+      lastSeenAt: DateTime.utc(2026, 9, 10, 10, 10),
+      revokedAt: null,
+      invitedByUserId: 'admin-a',
+      enrollmentId: 'enrollment-a',
+    );
+    final request = DeviceEnrollmentRequest(
+      tenantId: 'tenant-a',
+      requestId: 'request-a',
+      deviceId: 'device-a',
+      tenantDisplayName: 'Espace A',
+      deviceName: 'Portable Alice',
+      platform: 'windows',
+      requesterEmail: 'alice.security@example.test',
+      requesterNote: '',
+      status: 'consumed',
+      requestedAt: DateTime.utc(2026, 9, 10, 10),
+      decidedAt: DateTime.utc(2026, 9, 10, 10, 2),
+      decidedByUserId: 'admin-a',
+      decisionNote: '',
+      enrollmentId: 'enrollment-a',
+    );
+
+    await tester.pumpWidget(
+      OpenIrnLocalizationScope(
+        controller: OpenIrnLocalizations.instance,
+        child: MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: AuthorizedTerminalCard(
+                device: device,
+                request: request,
+                requestCount: 1,
+                working: false,
+                isCurrentDevice: false,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(Card), findsOneWidget);
+    expect(find.text('Terminal : Actif'), findsOneWidget);
+    expect(find.text('Demande : Consommée'), findsOneWidget);
+    expect(find.textContaining('alice.security@example.test'), findsOneWidget);
   });
 
   for (final language in [OpenIrnLanguage.es, OpenIrnLanguage.de]) {
@@ -37,6 +103,7 @@ void main() {
               'Espacio de trabajo / Arbeitsbereich con un nombre muy largo',
           deviceName: 'iPhone profesional mit einem sehr langen Namen',
           platform: 'ios',
+          requesterEmail: 'alice.security@example.test',
           requesterNote:
               'Solicitud de emparejamiento detallada / ausführliche Kopplungsanfrage.',
           status: 'pending',
@@ -78,6 +145,10 @@ void main() {
         expect(tester.takeException(), isNull);
         expect(find.text(approveLabel), findsOneWidget);
         expect(find.text(rejectLabel), findsOneWidget);
+        expect(
+          find.textContaining('alice.security@example.test'),
+          findsOneWidget,
+        );
         expect(
           tester.getTopLeft(find.text(approveLabel)).dy,
           greaterThan(tester.getBottomLeft(find.textContaining('iOS')).dy),

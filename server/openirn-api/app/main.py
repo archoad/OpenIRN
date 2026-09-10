@@ -9,6 +9,8 @@ import os
 import re
 import secrets
 import shutil
+import smtplib
+import ssl
 import subprocess
 import tempfile
 import uuid
@@ -18,6 +20,7 @@ import urllib.request
 import zipfile
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 from pathlib import Path
 from io import BytesIO
 from typing import Any, Awaitable, Callable, Iterator
@@ -119,6 +122,11 @@ ENROLLMENT_REQUEST_MAX_PENDING = _positive_int_env("OPENIRN_ENROLLMENT_REQUEST_M
 ENROLLMENT_REQUEST_TTL_HOURS = _positive_int_env("OPENIRN_ENROLLMENT_REQUEST_TTL_HOURS", 24)
 ENROLLMENT_RATE_LIMIT_RETENTION_DAYS = _positive_int_env("OPENIRN_ENROLLMENT_RATE_LIMIT_RETENTION_DAYS", 7)
 ENROLLMENT_CODE_SECRET_ENV = "OPENIRN_ENROLLMENT_CODE_SECRET"
+EMAIL_RE = re.compile(
+    r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$"
+)
 
 
 def _parse_trusted_proxy_networks(raw: str) -> tuple[Any, ...]:
@@ -696,6 +704,115 @@ def _normalize_enrollment_code(value: Any) -> str:
 def _format_enrollment_code(value: str) -> str:
     normalized = _normalize_enrollment_code(value)
     return "-".join(normalized[index : index + 4] for index in range(0, len(normalized), 4))
+
+
+def _normalize_email(value: Any) -> str:
+    email = str(value or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="L’adresse email du demandeur est obligatoire")
+    if len(email) > 254 or EMAIL_RE.fullmatch(email) is None:
+        raise HTTPException(status_code=400, detail="L’adresse email du demandeur est invalide")
+    return email
+
+
+def _smtp_settings() -> dict[str, Any]:
+    host = os.environ.get("OPENIRN_SMTP_HOST", "").strip()
+    sender = os.environ.get("OPENIRN_SMTP_FROM", "").strip().lower()
+    username = os.environ.get("OPENIRN_SMTP_USERNAME", "").strip()
+    password = os.environ.get("OPENIRN_SMTP_PASSWORD", "")
+    security = os.environ.get("OPENIRN_SMTP_SECURITY", "starttls").strip().lower()
+    if not host or not sender:
+        raise HTTPException(
+            status_code=503,
+            detail="L’envoi par email n’est pas configuré sur le serveur OpenIRN",
+        )
+    if len(sender) > 254 or EMAIL_RE.fullmatch(sender) is None:
+        raise HTTPException(status_code=503, detail="OPENIRN_SMTP_FROM est invalide")
+    if bool(username) != bool(password):
+        raise HTTPException(
+            status_code=503,
+            detail="OPENIRN_SMTP_USERNAME et OPENIRN_SMTP_PASSWORD doivent être configurés ensemble",
+        )
+    if security not in {"starttls", "ssl", "plain"}:
+        raise HTTPException(
+            status_code=503,
+            detail="OPENIRN_SMTP_SECURITY doit valoir starttls, ssl ou plain",
+        )
+    try:
+        port = int(os.environ.get("OPENIRN_SMTP_PORT", "465" if security == "ssl" else "587"))
+        timeout = float(os.environ.get("OPENIRN_SMTP_TIMEOUT_SECONDS", "10"))
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail="Configuration SMTP invalide") from exc
+    if port < 1 or port > 65535 or timeout <= 0 or timeout > 60:
+        raise HTTPException(status_code=503, detail="Configuration SMTP invalide")
+    return {
+        "host": host,
+        "port": port,
+        "security": security,
+        "username": username,
+        "password": password,
+        "sender": sender,
+        "timeout": timeout,
+    }
+
+
+def _send_enrollment_code_email(
+    *,
+    recipient: str,
+    code: str,
+    device_name: str,
+    tenant_display_name: str,
+    expires_at: str,
+) -> None:
+    settings = _smtp_settings()
+    message = EmailMessage()
+    message["From"] = settings["sender"]
+    message["To"] = recipient
+    message["Subject"] = "OpenIRN — code d’enrôlement / enrollment code"
+    message.set_content(
+        "\n".join(
+            [
+                "Bonjour,",
+                "",
+                f"Votre demande d’enrôlement du terminal « {device_name} » dans l’espace "
+                f"« {tenant_display_name} » a été approuvée.",
+                f"Code d’appairage : {code}",
+                f"Expiration : {expires_at}",
+                "",
+                "Saisissez ce code dans OpenIRN. Ne le transmettez à personne d’autre.",
+                "",
+                "Hello,",
+                "",
+                f"Your enrollment request for device \"{device_name}\" in workspace "
+                f"\"{tenant_display_name}\" has been approved.",
+                f"Pairing code: {code}",
+                f"Expiration: {expires_at}",
+                "",
+                "Enter this code in OpenIRN. Do not share it with anyone else.",
+            ]
+        )
+    )
+
+    tls_context = ssl.create_default_context()
+    if settings["security"] == "ssl":
+        smtp: Any = smtplib.SMTP_SSL(
+            settings["host"],
+            settings["port"],
+            timeout=settings["timeout"],
+            context=tls_context,
+        )
+    else:
+        smtp = smtplib.SMTP(
+            settings["host"],
+            settings["port"],
+            timeout=settings["timeout"],
+        )
+    with smtp:
+        if settings["security"] == "starttls":
+            smtp.starttls(context=tls_context)
+        if settings["username"]:
+            smtp.login(settings["username"], settings["password"])
+        smtp.send_message(message)
 
 
 def _new_enrollment_code() -> str:
@@ -1511,6 +1628,7 @@ def _apply_schema(migration_mysql_url: str) -> None:
         _invalidate_legacy_default_pins(con)
         _record_migration(con, 170, "enrollment_anti_abuse_rate_limit_buckets")
         _migrate_reusable_enrollment_codes_schema(con)
+        _migrate_enrollment_request_email_schema(con)
         _ensure_tenant(con, DEFAULT_TENANT_ID)
         _backfill_default_tenant_display_name(con)
         _sync_solution_administrators_to_all_tenants(con)
@@ -1736,6 +1854,22 @@ def _migrate_reusable_enrollment_codes_schema(con: Any) -> None:
                 """
             )
         _record_migration(con, 171, "reusable_enrollment_invitations")
+
+
+def _migrate_enrollment_request_email_schema(con: Any) -> None:
+    """Store the requester email while keeping existing enrollment requests valid."""
+    if not _table_exists(con, "device_enrollment_requests"):
+        _record_migration(con, 172, "enrollment_request_email")
+        return
+    columns = _table_columns(con, "device_enrollment_requests")
+    if "requester_email" not in columns:
+        con.execute(
+            """
+            ALTER TABLE device_enrollment_requests
+            ADD COLUMN requester_email VARCHAR(254) NOT NULL DEFAULT '' AFTER platform
+            """
+        )
+    _record_migration(con, 172, "enrollment_request_email")
 
 
 def _alias_target(con: Any, entity_type: str, old_id: str, scope_id: str = "") -> str:
@@ -3072,6 +3206,7 @@ def _enrollment_request_from_row(row: Any) -> dict[str, Any]:
         "deviceId": str(_row_value(row, "device_id", "") or ""),
         "deviceName": row["device_name"],
         "platform": row["platform"],
+        "requesterEmail": str(_row_value(row, "requester_email", "") or ""),
         "requesterNote": row["requester_note"],
         "status": row["status"],
         "requestedAt": row["requested_at"],
@@ -3099,7 +3234,8 @@ def _list_device_enrollment_requests(
         rows = con.execute(
             """
             SELECT r.tenant_id, COALESCE(NULLIF(t.display_name, ''), 'Espace de travail') AS tenant_display_name,
-                   r.request_id, r.device_id, r.device_name, r.platform, r.requester_note,
+                   r.request_id, r.device_id, r.device_name, r.platform, r.requester_email,
+                   r.requester_note,
                    r.status, r.requested_at, r.decided_at, r.decided_by_user_id,
                    u.first_name AS decided_by_first_name, u.last_name AS decided_by_last_name,
                    u.email AS decided_by_email,
@@ -3117,7 +3253,8 @@ def _list_device_enrollment_requests(
         rows = con.execute(
             """
             SELECT r.tenant_id, COALESCE(NULLIF(t.display_name, ''), 'Espace de travail') AS tenant_display_name,
-                   r.request_id, r.device_id, r.device_name, r.platform, r.requester_note,
+                   r.request_id, r.device_id, r.device_name, r.platform, r.requester_email,
+                   r.requester_note,
                    r.status, r.requested_at, r.decided_at, r.decided_by_user_id,
                    u.first_name AS decided_by_first_name, u.last_name AS decided_by_last_name,
                    u.email AS decided_by_email,
@@ -5770,6 +5907,7 @@ async def devices_enrollment_request(request: Request) -> dict[str, Any]:
     if not isinstance(payload, dict):
         payload = {}
 
+    requester_email = _normalize_email(payload.get("requesterEmail") or payload.get("email"))
     tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
     device_name = str(payload.get("deviceName") or "").strip()[:120] or "Terminal OpenIRN"
     platform = str(payload.get("platform") or "").strip()[:80]
@@ -5839,10 +5977,11 @@ async def devices_enrollment_request(request: Request) -> dict[str, Any]:
         con.execute(
             """
             INSERT INTO device_enrollment_requests(
-                tenant_id, request_id, device_id, device_name, platform, requester_note,
+                tenant_id, request_id, device_id, device_name, platform, requester_email,
+                requester_note,
                 requester_ip, status, requested_at, decided_at, decided_by_user_id,
                 decision_note, enrollment_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, NULL, NULL, '', NULL)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, NULL, NULL, '', NULL)
             """,
             (
                 tenant_id,
@@ -5850,6 +5989,7 @@ async def devices_enrollment_request(request: Request) -> dict[str, Any]:
                 requested_device_id,
                 device_name,
                 platform,
+                requester_email,
                 requester_note,
                 client_ip,
                 now,
@@ -5878,6 +6018,7 @@ async def devices_enrollment_request(request: Request) -> dict[str, Any]:
         "deviceId": requested_device_id,
         "deviceName": device_name,
         "platform": platform,
+        "requesterEmail": requester_email,
         "serverTime": _utc_now().isoformat(),
         "message": "Demande d’autorisation envoyée. Un Pilote IRN ou un administrateur doit maintenant la traiter.",
     }
@@ -6107,6 +6248,99 @@ async def devices_enrollment_request_approve(request_id: str, request: Request) 
         "enrollmentRequests": requests_list,
         "serverTime": _utc_now().isoformat(),
         "message": "Demande approuvée. Le code d’appairage peut être transmis au demandeur.",
+    }
+
+
+@app.post("/devices/enrollment/requests/{request_id}/send-code")
+async def devices_enrollment_request_send_code(
+    request_id: str,
+    request: Request,
+) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
+    auth_context = _require_campaign_manager_authorization(request, tenant_id)
+    actor_user_id = str(auth_context.get("userId") or "server").strip()[:120]
+    enrollment_id = str(payload.get("enrollmentId") or "").strip()[:160]
+    display_code = _format_enrollment_code(str(payload.get("code") or ""))
+    normalized_code = _normalize_enrollment_code(display_code)
+    if not enrollment_id or len(normalized_code) < 8:
+        raise HTTPException(status_code=400, detail="Code d’appairage incomplet")
+
+    with _db() as con:
+        row = con.execute(
+            """
+            SELECT r.status, r.requester_email, r.device_name, r.enrollment_id,
+                   c.code_hash, c.expires_at, c.consumed_at, c.revoked_at,
+                   COALESCE(NULLIF(t.display_name, ''), 'Espace de travail') AS tenant_display_name
+            FROM device_enrollment_requests r
+            JOIN device_enrollment_codes c
+              ON c.tenant_id = r.tenant_id AND c.enrollment_id = r.enrollment_id
+            LEFT JOIN tenants t ON t.id = r.tenant_id
+            WHERE r.tenant_id = ? AND r.request_id = ?
+            """,
+            (tenant_id, request_id),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Demande d’enrôlement introuvable")
+        if str(row["status"] or "") != "approved" or str(row["enrollment_id"] or "") != enrollment_id:
+            raise HTTPException(status_code=409, detail="Cette demande ne possède pas de code actif")
+        if row["consumed_at"] is not None or row["revoked_at"] is not None:
+            raise HTTPException(status_code=410, detail="Ce code d’appairage n’est plus actif")
+        expires_at = str(row["expires_at"] or "")
+        if not expires_at or _parse_datetime(expires_at) <= _utc_now():
+            raise HTTPException(status_code=410, detail="Ce code d’appairage a expiré")
+        expected_hash = str(row["code_hash"] or "")
+        actual_hash = _enrollment_code_hash(tenant_id, normalized_code)
+        if not expected_hash or not hmac.compare_digest(expected_hash, actual_hash):
+            raise HTTPException(status_code=400, detail="Code d’appairage invalide")
+        recipient = _normalize_email(row["requester_email"])
+        device_name = str(row["device_name"] or "Terminal OpenIRN").strip()[:120]
+        tenant_display_name = str(row["tenant_display_name"] or "Espace de travail").strip()[:255]
+
+    try:
+        await asyncio.to_thread(
+            _send_enrollment_code_email,
+            recipient=recipient,
+            code=display_code,
+            device_name=device_name,
+            tenant_display_name=tenant_display_name,
+            expires_at=expires_at,
+        )
+    except HTTPException:
+        raise
+    except (OSError, smtplib.SMTPException) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Le serveur SMTP n’a pas pu envoyer le code d’appairage",
+        ) from exc
+
+    with _db() as con:
+        _record_device_audit(
+            con,
+            tenant_id,
+            "enrollment_request.code_emailed",
+            payload={
+                "requestId": request_id,
+                "enrollmentId": enrollment_id,
+                "actorUserId": actor_user_id,
+            },
+        )
+        con.commit()
+
+    return {
+        "status": "sent",
+        "type": "openirn.deviceEnrollmentCodeEmailed",
+        "tenantId": tenant_id,
+        "requestId": request_id,
+        "enrollmentId": enrollment_id,
+        "serverTime": _utc_now().isoformat(),
+        "message": "Le code d’appairage a été envoyé par email au demandeur.",
     }
 
 

@@ -258,6 +258,24 @@ OPENIRN_SESSION_TTL_MINUTES=480
 OPENIRN_SESSION_IDLE_TIMEOUT_MINUTES=30
 ```
 
+Pour activer le bouton d’envoi du code d’enrôlement par email, ajouter la
+configuration SMTP au même fichier runtime. Ne versionner aucune valeur réelle :
+
+```text
+OPENIRN_SMTP_HOST=smtp.example.net
+OPENIRN_SMTP_PORT=587
+OPENIRN_SMTP_SECURITY=starttls
+OPENIRN_SMTP_FROM=openirn@example.net
+OPENIRN_SMTP_USERNAME=IDENTIFIANT_SMTP_À_REMPLACER
+OPENIRN_SMTP_PASSWORD=MOT_DE_PASSE_SMTP_À_REMPLACER
+OPENIRN_SMTP_TIMEOUT_SECONDS=10
+```
+
+`OPENIRN_SMTP_SECURITY` accepte `starttls`, `ssl` ou `plain`. Pour un relais
+SMTP sans authentification, omettre ensemble `OPENIRN_SMTP_USERNAME` et
+`OPENIRN_SMTP_PASSWORD`. Réserver `plain` à un relais local de confiance.
+Après modification, redémarrer `openirn-api`.
+
 Créer séparément le fichier de migration :
 
 ```bash

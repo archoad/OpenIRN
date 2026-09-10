@@ -43,6 +43,239 @@ class EnrollmentSecretTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status_code, 503)
 
+
+class EnrollmentRequesterEmailTests(unittest.IsolatedAsyncioTestCase):
+    async def test_enrollment_request_requires_a_valid_email_before_database_access(self):
+        for email in ("", "invalid", "alice@example"):
+            with self.subTest(email=email), patch.object(api, "_db") as database:
+                request = _JsonRequest(
+                    {
+                        "tenantId": "tenant-a",
+                        "deviceName": "Laptop Alice",
+                        "platform": "linux",
+                        "requesterEmail": email,
+                    }
+                )
+                with self.assertRaises(HTTPException) as raised:
+                    await api.devices_enrollment_request(request)
+
+                self.assertEqual(raised.exception.status_code, 400)
+                database.assert_not_called()
+
+    def test_email_is_trimmed_and_normalized(self):
+        self.assertEqual(
+            api._normalize_email("  Alice.Security@Example.TEST  "),
+            "alice.security@example.test",
+        )
+
+    async def test_valid_email_is_persisted_with_the_tenant_scoped_request(self):
+        statements: list[tuple[str, tuple[object, ...]]] = []
+
+        class Result:
+            rowcount = 1
+
+            def __init__(self, row=None):
+                self.row = row
+
+            def fetchone(self):
+                return self.row
+
+        class Connection:
+            def execute(self, sql, parameters=None):
+                normalized = " ".join(sql.split())
+                values = tuple(parameters or ())
+                statements.append((normalized, values))
+                if normalized.startswith("SELECT 1 FROM tenants"):
+                    return Result({"exists": 1})
+                if normalized.startswith("SELECT COUNT(*) AS total"):
+                    return Result({"total": 0})
+                return Result()
+
+            def commit(self):
+                return None
+
+        connection = Connection()
+
+        @contextmanager
+        def fake_db(*_args, **_kwargs):
+            yield connection
+
+        request = _JsonRequest(
+            {
+                "tenantId": "tenant-a",
+                "deviceName": "Laptop Alice",
+                "platform": "linux",
+                "requesterEmail": "Alice.Security@Example.TEST",
+            }
+        )
+        with (
+            patch.object(api, "_db", fake_db),
+            patch.object(api, "_resolve_tenant_id_for_request", return_value="tenant-a"),
+            patch.object(api, "_expire_stale_enrollment_requests", return_value=0),
+            patch.object(api, "_enforce_enrollment_rate_limit"),
+            patch.object(api, "_record_device_audit"),
+        ):
+            result = await api.devices_enrollment_request(request)
+
+        insertion = next(
+            parameters
+            for sql, parameters in statements
+            if sql.startswith("INSERT INTO device_enrollment_requests")
+        )
+        self.assertEqual(insertion[0], "tenant-a")
+        self.assertEqual(insertion[5], "alice.security@example.test")
+        self.assertEqual(result["requesterEmail"], "alice.security@example.test")
+
+
+class EnrollmentRequestEmailMigrationTests(unittest.TestCase):
+    def test_migration_adds_requester_email_and_is_recorded(self):
+        statements: list[tuple[str, tuple[object, ...]]] = []
+
+        class Result:
+            def fetchone(self):
+                return None
+
+        class Connection:
+            def execute(self, sql, parameters=None):
+                statements.append((" ".join(sql.split()), tuple(parameters or ())))
+                return Result()
+
+        with (
+            patch.object(api, "_table_exists", return_value=True),
+            patch.object(api, "_table_columns", return_value=set()),
+        ):
+            api._migrate_enrollment_request_email_schema(Connection())
+
+        self.assertTrue(
+            any(
+                "ADD COLUMN requester_email VARCHAR(254)" in sql
+                for sql, _parameters in statements
+            )
+        )
+        self.assertTrue(
+            any(
+                "schema_migrations" in sql
+                and parameters == (172, "enrollment_request_email")
+                for sql, parameters in statements
+            )
+        )
+
+
+class EnrollmentCodeEmailTests(unittest.IsolatedAsyncioTestCase):
+    def test_smtp_delivery_uses_starttls_and_authentication(self):
+        environment = {
+            "OPENIRN_SMTP_HOST": "smtp.example.test",
+            "OPENIRN_SMTP_PORT": "587",
+            "OPENIRN_SMTP_SECURITY": "starttls",
+            "OPENIRN_SMTP_FROM": "openirn@example.test",
+            "OPENIRN_SMTP_USERNAME": "openirn-user",
+            "OPENIRN_SMTP_PASSWORD": "smtp-secret",
+            "OPENIRN_SMTP_TIMEOUT_SECONDS": "10",
+        }
+        with (
+            patch.dict(os.environ, environment, clear=False),
+            patch.object(api.ssl, "create_default_context") as create_context,
+            patch.object(api.smtplib, "SMTP") as smtp_class,
+        ):
+            smtp = smtp_class.return_value
+            api._send_enrollment_code_email(
+                recipient="alice@example.test",
+                code="ABCD-EFGH-JKMN-PQ",
+                device_name="Laptop Alice",
+                tenant_display_name="Tenant A",
+                expires_at="2026-09-10T12:00:00+00:00",
+            )
+
+        smtp_class.assert_called_once_with("smtp.example.test", 587, timeout=10.0)
+        smtp.starttls.assert_called_once_with(context=create_context.return_value)
+        smtp.login.assert_called_once_with("openirn-user", "smtp-secret")
+        message = smtp.send_message.call_args.args[0]
+        self.assertEqual(message["To"], "alice@example.test")
+        self.assertIn("ABCD-EFGH-JKMN-PQ", message.get_content())
+
+    async def test_email_send_is_tenant_scoped_and_does_not_audit_code_or_email(self):
+        statements: list[tuple[str, tuple[object, ...]]] = []
+
+        class Result:
+            def __init__(self, row=None):
+                self.row = row
+
+            def fetchone(self):
+                return self.row
+
+        class Connection:
+            def execute(self, sql, parameters=None):
+                normalized = " ".join(sql.split())
+                values = tuple(parameters or ())
+                statements.append((normalized, values))
+                if normalized.startswith("SELECT r.status"):
+                    return Result(
+                        {
+                            "status": "approved",
+                            "requester_email": "alice@example.test",
+                            "device_name": "Laptop Alice",
+                            "enrollment_id": "enrollment-a",
+                            "code_hash": "expected-hash",
+                            "expires_at": "2999-09-10T12:00:00+00:00",
+                            "consumed_at": None,
+                            "revoked_at": None,
+                            "tenant_display_name": "Tenant A",
+                        }
+                    )
+                return Result()
+
+            def commit(self):
+                return None
+
+        connection = Connection()
+
+        @contextmanager
+        def fake_db(*_args, **_kwargs):
+            yield connection
+
+        audit_payloads: list[dict[str, object]] = []
+
+        def record_audit(_con, _tenant_id, _event_type, *, payload=None, **_kwargs):
+            audit_payloads.append(dict(payload or {}))
+
+        request = _JsonRequest(
+            {
+                "tenantId": "tenant-a",
+                "enrollmentId": "enrollment-a",
+                "code": "ABCD-EFGH-JKMN-PQ",
+            }
+        )
+        with (
+            patch.object(api, "_db", fake_db),
+            patch.object(
+                api,
+                "_require_campaign_manager_authorization",
+                return_value={"userId": "pilot-a"},
+            ),
+            patch.object(api, "_enrollment_code_hash", return_value="expected-hash"),
+            patch.object(api, "_send_enrollment_code_email") as send_email,
+            patch.object(api, "_record_device_audit", side_effect=record_audit),
+        ):
+            result = await api.devices_enrollment_request_send_code("request-a", request)
+
+        self.assertEqual(result["status"], "sent")
+        self.assertTrue(
+            any(
+                sql.startswith("SELECT r.status")
+                and parameters == ("tenant-a", "request-a")
+                for sql, parameters in statements
+            )
+        )
+        send_email.assert_called_once_with(
+            recipient="alice@example.test",
+            code="ABCD-EFGH-JKMN-PQ",
+            device_name="Laptop Alice",
+            tenant_display_name="Tenant A",
+            expires_at="2999-09-10T12:00:00+00:00",
+        )
+        self.assertNotIn("alice@example.test", str(audit_payloads))
+        self.assertNotIn("ABCD-EFGH", str(audit_payloads))
+
     def test_enrollment_hash_is_bound_to_deployment_secret(self):
         with patch.dict(os.environ, {api.ENROLLMENT_CODE_SECRET_ENV: "a" * 32}, clear=False):
             first = api._enrollment_code_hash("tenant-a", "ABCD-EFGH")

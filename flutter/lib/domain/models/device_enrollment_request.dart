@@ -5,6 +5,7 @@ class DeviceEnrollmentRequest {
   final String tenantDisplayName;
   final String deviceName;
   final String platform;
+  final String requesterEmail;
   final String requesterNote;
   final String status;
   final DateTime? requestedAt;
@@ -21,6 +22,7 @@ class DeviceEnrollmentRequest {
     this.tenantDisplayName = '',
     required this.deviceName,
     required this.platform,
+    this.requesterEmail = '',
     required this.requesterNote,
     required this.status,
     required this.requestedAt,
@@ -95,6 +97,8 @@ class DeviceEnrollmentRequest {
       tenantDisplayName: json['tenantDisplayName']?.toString().trim() ?? '',
       deviceName: json['deviceName']?.toString() ?? '',
       platform: json['platform']?.toString() ?? '',
+      requesterEmail:
+          json['requesterEmail']?.toString().trim().toLowerCase() ?? '',
       requesterNote: json['requesterNote']?.toString() ?? '',
       status: json['status']?.toString() ?? '',
       requestedAt: _parseDate(json['requestedAt']),
