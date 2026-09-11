@@ -48,6 +48,7 @@ coverage/
 /devsteps/
 AGENTS.md
 .agents/
+/web/
 
 # Generated release documentation
 /docs/pdf/*.pdf
