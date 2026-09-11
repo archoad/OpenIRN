@@ -788,6 +788,87 @@ class ReusableEnrollmentRevocationTests(unittest.TestCase):
         )
 
 
+class DeviceRevocationTests(unittest.TestCase):
+    def test_individual_device_revocation_revokes_its_active_sessions_first(self):
+        statements: list[tuple[str, tuple[object, ...]]] = []
+
+        class Result:
+            def __init__(self, row=None):
+                self.row = row
+
+            def fetchone(self):
+                return self.row
+
+        class Connection:
+            def execute(self, sql, parameters=None):
+                normalized = " ".join(sql.split())
+                values = tuple(parameters or ())
+                statements.append((normalized, values))
+                if normalized.startswith(
+                    "SELECT name, platform, status, last_seen_at"
+                ):
+                    return Result(
+                        {
+                            "name": "MacBook de test",
+                            "platform": "macos",
+                            "status": "active",
+                            "last_seen_at": "2026-09-11T12:00:00+00:00",
+                            "revoked_at": None,
+                            "invited_by_user_id": "administrator-a",
+                            "enrollment_id": "enrollment-a",
+                        }
+                    )
+                return Result()
+
+            def commit(self):
+                return None
+
+        connection = Connection()
+
+        @contextmanager
+        def fake_db(*_args, **_kwargs):
+            yield connection
+
+        request = _Request("192.0.2.10")
+        with (
+            patch.object(api, "_db", fake_db),
+            patch.object(
+                api,
+                "_resolve_tenant_id_for_request",
+                return_value="tenant-a",
+            ),
+            patch.object(
+                api,
+                "_require_campaign_manager_authorization",
+                return_value={"userId": "administrator-a"},
+            ),
+            patch.object(api, "_record_device_audit"),
+            patch.object(api, "_list_devices", return_value=[]),
+        ):
+            result = api.device_revoke(
+                "device-a",
+                request,
+                tenantId="tenant-a",
+            )
+
+        session_update_index = next(
+            index
+            for index, (sql, _parameters) in enumerate(statements)
+            if sql.startswith("UPDATE api_sessions SET revoked_at")
+        )
+        device_delete_index = next(
+            index
+            for index, (sql, _parameters) in enumerate(statements)
+            if sql.startswith("DELETE FROM authorized_devices")
+        )
+        self.assertLess(session_update_index, device_delete_index)
+        self.assertEqual(
+            statements[session_update_index][1][1:],
+            ("tenant-a", "device-a"),
+        )
+        self.assertEqual(result["deviceId"], "device-a")
+
+
 class RateLimitSqlTests(unittest.TestCase):
     def test_atomic_bucket_upsert_is_translated_for_mariadb(self):
         translated = api._translate_mysql_sql(

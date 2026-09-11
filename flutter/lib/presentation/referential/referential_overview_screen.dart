@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../l10n/openirn_localizations.dart';
 import '../../data/api/openirn_api_client.dart';
+import '../../data/repositories/api_irn_referential_repository.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/irn_referential.dart';
@@ -86,14 +87,22 @@ class _ReferentialOverviewScreenState extends State<ReferentialOverviewScreen> {
     } catch (error) {
       AppSyncCoordinator.instance.stop();
       final errorMessage = error.toString();
+      final requiresDeviceEnrollment =
+          error is ApiIrnReferentialException &&
+              error.requiresDeviceEnrollment ||
+          _isDeviceEnrollmentRequiredError(errorMessage);
+      var effectiveConfiguration = configuration;
+      if (requiresDeviceEnrollment) {
+        await _syncConfigurationRepository.clearDeviceAuthorization();
+        effectiveConfiguration = await _syncConfigurationRepository
+            .loadConfiguration();
+      }
       return _ReferentialBootstrap(
         referential: _emptyServerReferential(),
-        configuration: configuration,
+        configuration: effectiveConfiguration,
         referentialError: errorMessage,
         requiresTenantSelection: false,
-        requiresDeviceEnrollment: _isDeviceEnrollmentRequiredError(
-          errorMessage,
-        ),
+        requiresDeviceEnrollment: requiresDeviceEnrollment,
       );
     }
   }

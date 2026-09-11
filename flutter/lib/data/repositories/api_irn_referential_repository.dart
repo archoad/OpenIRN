@@ -32,14 +32,20 @@ class ApiIrnReferentialRepository implements IrnReferentialRepository {
       return referential;
     }
 
-    throw ApiIrnReferentialException('${result.title} — ${result.message}');
+    throw ApiIrnReferentialException(
+      '${result.title} — ${result.message}',
+      statusCode: result.statusCode,
+    );
   }
 }
 
 class ApiIrnReferentialException implements Exception {
   final String message;
+  final int? statusCode;
 
-  const ApiIrnReferentialException(this.message);
+  const ApiIrnReferentialException(this.message, {this.statusCode});
+
+  bool get requiresDeviceEnrollment => statusCode == 401 || statusCode == 403;
 
   @override
   String toString() => message;

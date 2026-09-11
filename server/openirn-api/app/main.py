@@ -6764,6 +6764,14 @@ def device_revoke(
         if row is None:
             raise HTTPException(status_code=404, detail="Device not found")
         con.execute(
+            """
+            UPDATE api_sessions
+            SET revoked_at = ?
+            WHERE tenant_id = ? AND device_id = ? AND revoked_at IS NULL
+            """,
+            (now, tenant_id, device_id),
+        )
+        con.execute(
             "DELETE FROM authorized_devices WHERE tenant_id = ? AND device_id = ?",
             (tenant_id, device_id),
         )

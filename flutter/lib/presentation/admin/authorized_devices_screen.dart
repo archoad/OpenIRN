@@ -381,15 +381,6 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
 
     if (success && isCurrentDevice) {
       await _configurationRepository.clearDeviceAuthorization();
-      final cleared =
-          SyncConfiguration.empty(
-            deviceId: state.configuration.deviceId,
-          ).copyWith(
-            tenantId: state.configuration.tenantId,
-            enabled: false,
-            apiToken: '',
-          );
-      await _configurationRepository.saveConfiguration(cleared);
       AppSyncCoordinator.instance.stop();
       if (!mounted) {
         return;
@@ -450,15 +441,6 @@ class _AuthorizedDevicesScreenState extends State<AuthorizedDevicesScreen> {
     }
 
     await _configurationRepository.clearDeviceAuthorization();
-    final cleared =
-        SyncConfiguration.empty(
-          deviceId: state.configuration.deviceId,
-        ).copyWith(
-          tenantId: state.configuration.tenantId,
-          enabled: false,
-          apiToken: '',
-        );
-    await _configurationRepository.saveConfiguration(cleared);
     AppSyncCoordinator.instance.stop();
   }
 
