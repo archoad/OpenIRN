@@ -63,7 +63,10 @@ class LocalAssessmentRepository {
     await _store.updateBundle(
       referentialId: referentialId,
       campaignId: resolvedCampaignId,
-      update: (bundle) => bundle.copyWith(criterionAnswers: cleanedAnswers),
+      update: (bundle) => bundle.copyWith(
+        criterionAnswers: cleanedAnswers,
+        replaceAssetAnswers: true,
+      ),
     );
   }
 
@@ -96,8 +99,10 @@ class LocalAssessmentRepository {
     await _store.updateBundle(
       referentialId: referentialId,
       campaignId: resolvedCampaignId,
-      update: (bundle) =>
-          bundle.copyWith(criterionAnswers: const <String, CriterionAnswer>{}),
+      update: (bundle) => bundle.copyWith(
+        criterionAnswers: const <String, CriterionAnswer>{},
+        replaceAssetAnswers: true,
+      ),
     );
   }
 }

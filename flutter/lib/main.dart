@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
@@ -20,10 +22,21 @@ Future<void> main() async {
   runApp(const OpenIrnApp());
 }
 
-class OpenIrnApp extends StatelessWidget {
+class OpenIrnApp extends StatefulWidget {
   final Widget? home;
 
   const OpenIrnApp({this.home, super.key});
+
+  @override
+  State<OpenIrnApp> createState() => _OpenIrnAppState();
+}
+
+class _OpenIrnAppState extends State<OpenIrnApp> {
+  @override
+  void reassemble() {
+    super.reassemble();
+    unawaited(OpenIrnLocalizations.instance.reloadCatalogs());
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -72,7 +85,7 @@ class OpenIrnApp extends StatelessWidget {
             );
           },
           home:
-              home ??
+              widget.home ??
               const ReferentialOverviewScreen(
                 repository: ApiIrnReferentialRepository(),
               ),

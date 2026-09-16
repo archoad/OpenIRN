@@ -53,6 +53,22 @@ class OpenIrnLocalizations extends ChangeNotifier {
     await setLanguage(OpenIrnLanguage.fromCode(storedCode), persist: false);
   }
 
+  Future<void> reloadCatalogs() async {
+    final activeLanguage = _language;
+    _catalogCache.clear();
+    for (final language in OpenIrnLanguage.values) {
+      rootBundle.evict('assets/i18n/${language.code}.json');
+    }
+    _frenchMessages = await _loadLanguage(OpenIrnLanguage.fr);
+    _frenchTextToKey = _buildReverseIndex(_frenchMessages);
+    await Future.wait(
+      OpenIrnLanguage.values
+          .where((language) => language != OpenIrnLanguage.fr)
+          .map(_loadLanguage),
+    );
+    await setLanguage(activeLanguage, persist: false);
+  }
+
   Future<void> setLanguage(
     OpenIrnLanguage language, {
     bool persist = true,

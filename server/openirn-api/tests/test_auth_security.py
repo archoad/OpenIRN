@@ -136,6 +136,66 @@ class DeviceAuthorizationTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 403)
 
 
+class CampaignHistoryAuthorizationTests(unittest.IsolatedAsyncioTestCase):
+    pilot_context = {
+        "authMode": "session",
+        "tenantId": "tenant-a",
+        "userId": "pilot-a",
+        "userRole": "campaign_manager",
+    }
+
+    def test_pilot_cannot_read_campaign_history_or_conflicts(self):
+        request = _Request()
+        calls = [
+            lambda: api.campaign_revisions(
+                request,
+                tenantId="tenant-a",
+                campaignId="campaign-a",
+                limit=10,
+            ),
+            lambda: api.campaign_conflicts(
+                request,
+                tenantId="tenant-a",
+                campaignId="campaign-a",
+                limit=10,
+            ),
+            lambda: api.campaign_revision(
+                request,
+                tenantId="tenant-a",
+                campaignId="campaign-a",
+                serverRevision=1,
+            ),
+        ]
+
+        with (
+            patch.object(api, "_request_auth_context", return_value=self.pilot_context),
+            patch.object(api, "_emit_authorization_denied"),
+        ):
+            for call in calls:
+                with self.subTest(endpoint=call):
+                    with self.assertRaises(HTTPException) as raised:
+                        call()
+                    self.assertEqual(raised.exception.status_code, 403)
+
+    async def test_pilot_cannot_restore_campaign_revision(self):
+        request = _Request(
+            {
+                "tenantId": "tenant-a",
+                "campaignId": "campaign-a",
+                "serverRevision": 1,
+            }
+        )
+
+        with (
+            patch.object(api, "_request_auth_context", return_value=self.pilot_context),
+            patch.object(api, "_emit_authorization_denied"),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                await api.campaign_restore(request)
+
+        self.assertEqual(raised.exception.status_code, 403)
+
+
 class BackupOperationEventTests(unittest.TestCase):
     def test_failed_api_backup_emits_sanitized_operation_event(self):
         with (

@@ -112,7 +112,7 @@ class AdministrationScreen extends StatelessWidget {
     if (!_accessPolicy.canViewCampaignHistory(activeUser)) {
       _showForbidden(
         context,
-        'L’historique des campagnes est réservé aux administrateurs et pilotes IRN.',
+        'L’historique des campagnes est réservé aux administrateurs.',
       );
       return;
     }

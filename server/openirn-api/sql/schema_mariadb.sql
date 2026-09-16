@@ -115,7 +115,9 @@ CREATE TABLE IF NOT EXISTS critical_functions (
 CREATE TABLE IF NOT EXISTS information_systems (
     tenant_id VARCHAR(80) NOT NULL,
     system_id VARCHAR(160) NOT NULL,
-    function_id VARCHAR(160) NOT NULL,
+    -- Colonne de compatibilite pour les installations anterieures a la migration 173.
+    -- Les rattachements de reference sont portes par critical_function_systems.
+    function_id VARCHAR(160) NULL,
     name VARCHAR(255) NOT NULL DEFAULT '',
     description TEXT NOT NULL,
     owner VARCHAR(255) NOT NULL DEFAULT '',
@@ -124,13 +126,15 @@ CREATE TABLE IF NOT EXISTS information_systems (
     PRIMARY KEY (tenant_id, system_id),
     KEY idx_information_systems_tenant_function (tenant_id, function_id),
     KEY idx_information_systems_tenant_name (tenant_id, name),
-    CONSTRAINT fk_information_systems_function FOREIGN KEY (tenant_id, function_id) REFERENCES critical_functions(tenant_id, function_id) ON DELETE CASCADE
+    CONSTRAINT fk_information_systems_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS information_assets (
     tenant_id VARCHAR(80) NOT NULL,
     asset_id VARCHAR(160) NOT NULL,
-    system_id VARCHAR(160) NOT NULL,
+    -- Colonne de compatibilite pour les installations anterieures a la migration 173.
+    -- Les rattachements de reference sont portes par information_system_assets.
+    system_id VARCHAR(160) NULL,
     name VARCHAR(255) NOT NULL DEFAULT '',
     asset_type VARCHAR(120) NOT NULL DEFAULT '',
     description TEXT NOT NULL,
@@ -140,7 +144,42 @@ CREATE TABLE IF NOT EXISTS information_assets (
     PRIMARY KEY (tenant_id, asset_id),
     KEY idx_information_assets_tenant_system (tenant_id, system_id),
     KEY idx_information_assets_tenant_name (tenant_id, name),
-    CONSTRAINT fk_information_assets_system FOREIGN KEY (tenant_id, system_id) REFERENCES information_systems(tenant_id, system_id) ON DELETE CASCADE
+    CONSTRAINT fk_information_assets_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS critical_function_systems (
+    tenant_id VARCHAR(80) NOT NULL,
+    function_id VARCHAR(160) NOT NULL,
+    system_id VARCHAR(160) NOT NULL,
+    created_at VARCHAR(40) NOT NULL,
+    PRIMARY KEY (tenant_id, function_id, system_id),
+    KEY idx_critical_function_systems_tenant_system (tenant_id, system_id),
+    CONSTRAINT fk_critical_function_systems_function FOREIGN KEY (tenant_id, function_id) REFERENCES critical_functions(tenant_id, function_id) ON DELETE CASCADE,
+    CONSTRAINT fk_critical_function_systems_system FOREIGN KEY (tenant_id, system_id) REFERENCES information_systems(tenant_id, system_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS information_system_assets (
+    tenant_id VARCHAR(80) NOT NULL,
+    system_id VARCHAR(160) NOT NULL,
+    asset_id VARCHAR(160) NOT NULL,
+    created_at VARCHAR(40) NOT NULL,
+    PRIMARY KEY (tenant_id, system_id, asset_id),
+    KEY idx_information_system_assets_tenant_asset (tenant_id, asset_id),
+    CONSTRAINT fk_information_system_assets_system FOREIGN KEY (tenant_id, system_id) REFERENCES information_systems(tenant_id, system_id) ON DELETE CASCADE,
+    CONSTRAINT fk_information_system_assets_asset FOREIGN KEY (tenant_id, asset_id) REFERENCES information_assets(tenant_id, asset_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS asset_assessment_answers (
+    tenant_id VARCHAR(80) NOT NULL,
+    asset_id VARCHAR(160) NOT NULL,
+    referential_id VARCHAR(160) NOT NULL,
+    criterion_id VARCHAR(191) NOT NULL,
+    answer_json LONGTEXT NOT NULL,
+    source_campaign_id VARCHAR(160) NOT NULL,
+    updated_at VARCHAR(40) NOT NULL,
+    PRIMARY KEY (tenant_id, asset_id, referential_id, criterion_id),
+    KEY idx_asset_assessment_answers_tenant_referential (tenant_id, referential_id, updated_at),
+    CONSTRAINT fk_asset_assessment_answers_asset FOREIGN KEY (tenant_id, asset_id) REFERENCES information_assets(tenant_id, asset_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS terminals (

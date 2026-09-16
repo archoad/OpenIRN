@@ -71,6 +71,8 @@ void main() {
     expect(service.canViewSecurityAudit(admin), isTrue);
     expect(service.canManageServerSessions(admin), isTrue);
     expect(service.canManageOfficialReferential(admin), isTrue);
+    expect(service.canViewCampaignHistory(admin), isTrue);
+    expect(service.canRestoreCampaignRevision(admin), isTrue);
     expect(service.canManageServerMaintenance(admin), isTrue);
   });
 
@@ -82,7 +84,8 @@ void main() {
       expect(service.canOpenAdministration(pilot), isTrue);
       expect(service.canManageCampaigns(pilot), isTrue);
       expect(service.canManageAssignments(pilot, campaign), isTrue);
-      expect(service.canViewCampaignHistory(pilot), isTrue);
+      expect(service.canViewCampaignHistory(pilot), isFalse);
+      expect(service.canRestoreCampaignRevision(pilot), isFalse);
       expect(service.canManageUsers(pilot), isFalse);
       expect(service.canManageAuthorizedDevices(pilot), isFalse);
       expect(service.canViewSecurityAudit(pilot), isFalse);

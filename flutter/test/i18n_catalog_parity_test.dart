@@ -90,6 +90,25 @@ void main() {
     }
   });
 
+  test('critical function system selector is explicit in every language', () {
+    expect(
+      _loadCatalog('assets/i18n/fr.json')['inventory.field.linked_systems'],
+      'Sélectionner un ou plusieurs SI',
+    );
+    expect(
+      _loadCatalog('assets/i18n/en.json')['inventory.field.linked_systems'],
+      'Select one or more information systems',
+    );
+    expect(
+      _loadCatalog('assets/i18n/es.json')['inventory.field.linked_systems'],
+      'Seleccionar uno o varios SI',
+    );
+    expect(
+      _loadCatalog('assets/i18n/de.json')['inventory.field.linked_systems'],
+      'Ein oder mehrere Informationssysteme auswählen',
+    );
+  });
+
   test('literal translation keys used by Dart sources exist', () {
     final french = _loadCatalog('assets/i18n/fr.json');
     final sourceFiles = Directory('lib')

@@ -27,7 +27,6 @@ class LocalCampaignRepository {
     String description = '',
     CampaignInformation information = const CampaignInformation(),
   }) async {
-    final bundles = await _store.loadBundles(referentialId: referentialId);
     final campaign = LocalCampaign.create(
       referentialId: referentialId,
       name: name,
@@ -36,10 +35,7 @@ class LocalCampaignRepository {
     );
     await _store.saveBundles(
       referentialId: referentialId,
-      bundles: <ServerCampaignBundle>[
-        ServerCampaignBundle(campaign: campaign),
-        ...bundles,
-      ],
+      bundles: <ServerCampaignBundle>[ServerCampaignBundle(campaign: campaign)],
     );
     return campaign;
   }

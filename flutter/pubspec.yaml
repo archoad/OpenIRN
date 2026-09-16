@@ -32,4 +32,5 @@ flutter:
     - assets/i18n/en.json
     - assets/i18n/es.json
     - assets/i18n/de.json
+    - assets/images/openirn_graph.webp
     - assets/legal/GPL-3.0.txt

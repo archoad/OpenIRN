@@ -497,17 +497,14 @@ class _CreateCampaignDialogState extends State<_CreateCampaignDialog> {
     return null;
   }
 
-  CriticalFunctionInfo? _functionForSystem(InformationSystemInfo system) {
+  List<CriticalFunctionInfo> _functionsForSystem(InformationSystemInfo system) {
     final inventory = _inventory;
     if (inventory == null) {
-      return null;
+      return const <CriticalFunctionInfo>[];
     }
-    for (final function in inventory.criticalFunctions) {
-      if (function.id == system.functionId) {
-        return function;
-      }
-    }
-    return null;
+    return inventory.criticalFunctions
+        .where((function) => system.functionIds.contains(function.id))
+        .toList(growable: false);
   }
 
   List<InformationAssetInfo> _assetsForSystem(InformationSystemInfo system) {
@@ -559,14 +556,15 @@ class _CreateCampaignDialogState extends State<_CreateCampaignDialog> {
     final system = _selectedSystem;
     CampaignInformation information = const CampaignInformation();
     if (system != null) {
-      final function = _functionForSystem(system);
+      final functions = _functionsForSystem(system);
       final assets = _assetsForSystem(system);
       information = CampaignInformation(
         systemName: system.name,
         systemDescription: system.description,
         projectDirectorLastName: system.owner,
-        criticalFunctionId: function?.id ?? '',
-        criticalFunctionName: function?.name ?? '',
+        criticalFunctionId: functions.isEmpty ? '' : functions.first.id,
+        criticalFunctionIds: functions.map((item) => item.id).toList(),
+        criticalFunctionName: functions.map((item) => item.name).join(', '),
         informationSystemId: system.id,
         assets: assets
             .map(
@@ -598,9 +596,9 @@ class _CreateCampaignDialogState extends State<_CreateCampaignDialog> {
     final selectedAssets = selectedSystem == null
         ? const <InformationAssetInfo>[]
         : _assetsForSystem(selectedSystem);
-    final selectedFunction = selectedSystem == null
-        ? null
-        : _functionForSystem(selectedSystem);
+    final selectedFunctions = selectedSystem == null
+        ? const <CriticalFunctionInfo>[]
+        : _functionsForSystem(selectedSystem);
 
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
@@ -679,7 +677,7 @@ class _CreateCampaignDialogState extends State<_CreateCampaignDialog> {
                   const SizedBox(height: 10),
                   _SelectedSystemPreview(
                     system: selectedSystem,
-                    function: selectedFunction,
+                    functions: selectedFunctions,
                     assetCount: selectedAssets.length,
                   ),
                 ],
@@ -770,12 +768,12 @@ class _InventoryUnavailableNotice extends StatelessWidget {
 
 class _SelectedSystemPreview extends StatelessWidget {
   final InformationSystemInfo system;
-  final CriticalFunctionInfo? function;
+  final List<CriticalFunctionInfo> functions;
   final int assetCount;
 
   const _SelectedSystemPreview({
     required this.system,
-    required this.function,
+    required this.functions,
     required this.assetCount,
   });
 
@@ -805,12 +803,12 @@ class _SelectedSystemPreview extends StatelessWidget {
                 'screen.campaign.manage.scope.function',
                 fallback: 'Fonction critique : {function}',
                 values: {
-                  'function':
-                      function?.name ??
-                      context.tr(
-                        'common.not_provided',
-                        fallback: 'non renseignée',
-                      ),
+                  'function': functions.isEmpty
+                      ? context.tr(
+                          'common.not_provided',
+                          fallback: 'non renseignée',
+                        )
+                      : functions.map((item) => item.name).join(', '),
                 },
               ),
             ),

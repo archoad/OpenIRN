@@ -12,6 +12,9 @@ REQUIRED_TABLES = (
     "critical_functions",
     "information_systems",
     "information_assets",
+    "critical_function_systems",
+    "information_system_assets",
+    "asset_assessment_answers",
     "terminals",
     "authorized_devices",
     "device_enrollment_requests",
@@ -36,6 +39,7 @@ REQUIRED_MIGRATIONS = {
     170: "enrollment_anti_abuse_rate_limit_buckets",
     171: "reusable_enrollment_invitations",
     172: "enrollment_request_email",
+    173: "shared_assets_and_canonical_assessments",
 }
 
 RUNTIME_REQUIRED_PRIVILEGES = frozenset({"SELECT", "INSERT", "UPDATE", "DELETE"})

@@ -198,20 +198,22 @@ Cette fonction est disponible pour l'administrateur et le Pilote IRN dans **Admi
 
 ## Créer un système d'information
 
-1. Ouvrir la fonction critique concernée.
-2. Ajouter un système d'information.
-3. Indiquer son nom, sa description et son responsable.
-4. Enregistrer.
+1. Dans la section **Systèmes d'information**, ajouter un SI.
+2. Indiquer son nom, sa description et son responsable.
+3. Sélectionner une ou plusieurs fonctions critiques, si elles existent déjà.
+4. Enregistrer. Les rattachements peuvent être complétés ultérieurement.
 
 ## Ajouter les actifs
 
-Pour chaque actif :
+L'actif est créé une seule fois dans le catalogue, même s'il contribue à plusieurs SI. Pour chaque actif :
 
-1. sélectionner le SI ;
-2. saisir un nom distinctif ;
-3. indiquer le type et une description utile ;
-4. attribuer une criticité ;
-5. enregistrer.
+1. dans la section **Catalogue des actifs**, saisir un nom distinctif ;
+2. indiquer le type et une description utile ;
+3. attribuer une criticité ;
+4. sélectionner les SI concernés, ou enregistrer l'actif sans rattachement ;
+5. utiliser **Gérer les actifs existants** depuis un SI pour compléter les rattachements.
+
+La notation IRN appartient à l'actif. Si cet actif est déjà noté dans une campagne, la même notation est automatiquement présentée dans les autres campagnes qui le référencent.
 
 Les niveaux de criticité sont :
 
@@ -224,7 +226,7 @@ Les niveaux de criticité sont :
 
 ## Importer ou exporter avec Excel
 
-L'écran permet d'exporter le modèle de l'espace, de le compléter puis de l'importer. Conserver les identifiants protégés du fichier, ne pas renommer arbitrairement les feuilles et examiner le rapport de validation avant de confirmer un import.
+L'écran permet d'exporter les actifs rattachés à un SI, de compléter le fichier puis de l'importer. Un identifiant existant rattache l'actif global au SI et met à jour ses métadonnées ; une ligne sans identifiant crée un actif. Un actif absent du fichier est seulement détaché du SI concerné, sans supprimer l'actif global ni sa notation. Conserver les identifiants protégés du fichier et ne pas renommer arbitrairement les feuilles.
 
 Un export constitue une copie contenant des informations de cartographie potentiellement sensibles. Il est nécessaire de le stocker selon la politique de sécurité de l'organisation.
 
@@ -236,7 +238,7 @@ Cette action appartient à l'administrateur ou au Pilote IRN.
 2. Vérifier que le SI et ses actifs existent dans l'inventaire.
 3. Ouvrir **Administration → Gérer les campagnes**.
 4. Choisir la création à partir d'un système d'information.
-5. Sélectionner la fonction critique puis le SI.
+5. Sélectionner le SI ; ses fonctions critiques et ses actifs rattachés sont affichés.
 6. Vérifier la liste des actifs et leur criticité.
 7. Saisir le nom, la description et les informations du responsable de projet.
 8. Créer la campagne.

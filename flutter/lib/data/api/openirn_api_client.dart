@@ -2870,6 +2870,7 @@ class OpenIrnApiClient {
     String? baseUrl,
     required String tenantId,
     String apiToken = '',
+    String functionId = '',
     required String name,
     String description = '',
   }) {
@@ -2879,6 +2880,7 @@ class OpenIrnApiClient {
       apiToken: apiToken,
       path: '/inventory/critical-functions',
       payload: <String, dynamic>{
+        if (functionId.trim().isNotEmpty) 'functionId': functionId.trim(),
         'name': name.trim(),
         'description': description.trim(),
       },
@@ -2926,7 +2928,7 @@ class OpenIrnApiClient {
     String? baseUrl,
     required String tenantId,
     String apiToken = '',
-    required String functionId,
+    List<String> functionIds = const <String>[],
     required String name,
     String description = '',
     String owner = '',
@@ -2937,7 +2939,7 @@ class OpenIrnApiClient {
       apiToken: apiToken,
       path: '/inventory/information-systems',
       payload: <String, dynamic>{
-        'functionId': functionId,
+        'functionIds': functionIds,
         'name': name.trim(),
         'description': description.trim(),
         'owner': owner.trim(),
@@ -2951,7 +2953,7 @@ class OpenIrnApiClient {
     required String tenantId,
     String apiToken = '',
     required String systemId,
-    required String functionId,
+    List<String> functionIds = const <String>[],
     required String name,
     String description = '',
     String owner = '',
@@ -2962,7 +2964,7 @@ class OpenIrnApiClient {
       apiToken: apiToken,
       path: '/inventory/information-systems/$systemId',
       payload: <String, dynamic>{
-        'functionId': functionId,
+        'functionIds': functionIds,
         'name': name.trim(),
         'description': description.trim(),
         'owner': owner.trim(),
@@ -2986,11 +2988,28 @@ class OpenIrnApiClient {
     );
   }
 
-  Future<OpenIrnApiInventoryResult> createInformationAsset({
+  Future<OpenIrnApiInventoryResult> replaceInformationSystemAssets({
     String? baseUrl,
     required String tenantId,
     String apiToken = '',
     required String systemId,
+    required List<String> assetIds,
+  }) {
+    return _patchInventory(
+      baseUrl: baseUrl,
+      tenantId: tenantId,
+      apiToken: apiToken,
+      path: '/inventory/information-systems/$systemId/assets',
+      payload: <String, dynamic>{'assetIds': assetIds},
+      successTitle: 'Actifs du système d’information mis à jour',
+    );
+  }
+
+  Future<OpenIrnApiInventoryResult> createInformationAsset({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    List<String> systemIds = const <String>[],
     required String name,
     String assetType = '',
     String description = '',
@@ -3002,7 +3021,7 @@ class OpenIrnApiClient {
       apiToken: apiToken,
       path: '/inventory/assets',
       payload: <String, dynamic>{
-        'systemId': systemId,
+        'systemIds': systemIds,
         'name': name.trim(),
         'assetType': assetType.trim(),
         'description': description.trim(),
@@ -3017,7 +3036,7 @@ class OpenIrnApiClient {
     required String tenantId,
     String apiToken = '',
     required String assetId,
-    required String systemId,
+    List<String> systemIds = const <String>[],
     required String name,
     String assetType = '',
     String description = '',
@@ -3029,7 +3048,7 @@ class OpenIrnApiClient {
       apiToken: apiToken,
       path: '/inventory/assets/$assetId',
       payload: <String, dynamic>{
-        'systemId': systemId,
+        'systemIds': systemIds,
         'name': name.trim(),
         'assetType': assetType.trim(),
         'description': description.trim(),

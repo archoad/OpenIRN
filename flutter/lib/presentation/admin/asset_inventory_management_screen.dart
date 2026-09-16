@@ -1,12 +1,14 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../data/api/openirn_api_client.dart';
-import '../../data/files/local_excel_file_service.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/irn_asset_inventory.dart';
 import '../../domain/models/sync_configuration.dart';
 import '../../domain/services/access_policy_service.dart';
+import '../../domain/utils/openirn_uuid.dart';
 import '../../l10n/openirn_localizations.dart';
 import '../common/openirn_app_bar.dart';
 import '../common/responsive_autofocus.dart';
@@ -26,11 +28,13 @@ class _AssetInventoryManagementScreenState
     extends State<AssetInventoryManagementScreen> {
   final _configurationRepository = const LocalSyncConfigurationRepository();
   final _apiClient = const OpenIrnApiClient();
-  final _excelFileService = const LocalExcelFileService();
   final _accessPolicy = const AccessPolicyService();
 
   late Future<_InventoryStateData> _future;
   bool _working = false;
+  bool _assetsSectionExpanded = false;
+  bool _systemsSectionExpanded = false;
+  bool _functionsSectionExpanded = false;
 
   @override
   void initState() {
@@ -110,19 +114,46 @@ class _AssetInventoryManagementScreenState
   Future<void> _createFunction(_InventoryStateData state) async {
     final form = await showDialog<_FunctionFormResult>(
       context: context,
-      builder: (context) => const _FunctionDialog(),
+      builder: (context) =>
+          _FunctionDialog(systems: state.inventory.informationSystems),
     );
     if (form == null) {
       return;
     }
+    setState(() {
+      _functionsSectionExpanded = true;
+    });
+    final functionId = newOpenIrnUuid();
     await _applyResult(
-      _apiClient.createCriticalFunction(
-        baseUrl: state.configuration.apiBaseUrl,
-        tenantId: state.configuration.tenantId,
-        apiToken: state.configuration.apiToken,
-        name: form.name,
-        description: form.description,
+      _createFunctionAndUpdateSystems(
+        state: state,
+        functionId: functionId,
+        form: form,
       ),
+    );
+  }
+
+  Future<OpenIrnApiInventoryResult> _createFunctionAndUpdateSystems({
+    required _InventoryStateData state,
+    required String functionId,
+    required _FunctionFormResult form,
+  }) async {
+    final createResult = await _apiClient.createCriticalFunction(
+      baseUrl: state.configuration.apiBaseUrl,
+      tenantId: state.configuration.tenantId,
+      apiToken: state.configuration.apiToken,
+      functionId: functionId,
+      name: form.name,
+      description: form.description,
+    );
+    if (!createResult.isAvailable) {
+      return createResult;
+    }
+    return _replaceFunctionSystems(
+      state: state,
+      result: createResult,
+      functionId: functionId,
+      selectedSystemIds: form.systemIds,
     );
   }
 
@@ -132,20 +163,99 @@ class _AssetInventoryManagementScreenState
   ) async {
     final form = await showDialog<_FunctionFormResult>(
       context: context,
-      builder: (context) => _FunctionDialog(function: function),
+      builder: (context) => _FunctionDialog(
+        function: function,
+        systems: state.inventory.informationSystems,
+        selectedSystemIds: state.inventory
+            .systemsForFunction(function.id)
+            .map((system) => system.id)
+            .toSet(),
+      ),
     );
     if (form == null) {
       return;
     }
+    setState(() {
+      _functionsSectionExpanded = true;
+    });
     await _applyResult(
-      _apiClient.updateCriticalFunction(
+      _updateFunctionAndSystems(state: state, function: function, form: form),
+    );
+  }
+
+  Future<OpenIrnApiInventoryResult> _updateFunctionAndSystems({
+    required _InventoryStateData state,
+    required CriticalFunctionInfo function,
+    required _FunctionFormResult form,
+  }) async {
+    final updateResult = await _apiClient.updateCriticalFunction(
+      baseUrl: state.configuration.apiBaseUrl,
+      tenantId: state.configuration.tenantId,
+      apiToken: state.configuration.apiToken,
+      functionId: function.id,
+      name: form.name,
+      description: form.description,
+    );
+    if (!updateResult.isAvailable) {
+      return updateResult;
+    }
+    return _replaceFunctionSystems(
+      state: state,
+      result: updateResult,
+      functionId: function.id,
+      selectedSystemIds: form.systemIds,
+    );
+  }
+
+  Future<OpenIrnApiInventoryResult> _replaceFunctionSystems({
+    required _InventoryStateData state,
+    required OpenIrnApiInventoryResult result,
+    required String functionId,
+    required List<String> selectedSystemIds,
+  }) async {
+    final selectedIds = selectedSystemIds.toSet();
+    final systems = List<InformationSystemInfo>.from(
+      result.inventory.informationSystems,
+    );
+    var currentResult = result;
+    for (final system in systems) {
+      final functionIds = system.functionIds.toSet();
+      final wasLinked = functionIds.contains(functionId);
+      final shouldBeLinked = selectedIds.contains(system.id);
+      if (wasLinked == shouldBeLinked) {
+        continue;
+      }
+      if (shouldBeLinked) {
+        functionIds.add(functionId);
+      } else {
+        functionIds.remove(functionId);
+      }
+      currentResult = await _apiClient.updateInformationSystem(
         baseUrl: state.configuration.apiBaseUrl,
         tenantId: state.configuration.tenantId,
         apiToken: state.configuration.apiToken,
-        functionId: function.id,
-        name: form.name,
-        description: form.description,
-      ),
+        systemId: system.id,
+        functionIds: functionIds.toList(growable: false),
+        name: system.name,
+        description: system.description,
+        owner: system.owner,
+      );
+      if (!currentResult.isAvailable) {
+        return currentResult;
+      }
+    }
+    if (identical(currentResult, result)) {
+      return result;
+    }
+    return OpenIrnApiInventoryResult(
+      status: currentResult.status,
+      url: result.url,
+      statusCode: result.statusCode,
+      title: result.title,
+      message: result.message,
+      tenantId: currentResult.tenantId,
+      inventory: currentResult.inventory,
+      responseBody: currentResult.responseBody,
     );
   }
 
@@ -173,16 +283,10 @@ class _AssetInventoryManagementScreenState
     );
   }
 
-  Future<void> _createSystem(
-    _InventoryStateData state,
-    CriticalFunctionInfo function,
-  ) async {
+  Future<void> _createSystem(_InventoryStateData state) async {
     final form = await showDialog<_SystemFormResult>(
       context: context,
-      builder: (context) => _SystemDialog(
-        functions: state.inventory.criticalFunctions,
-        initialFunctionId: function.id,
-      ),
+      builder: (context) => const _SystemDialog(),
     );
     if (form == null) {
       return;
@@ -192,7 +296,7 @@ class _AssetInventoryManagementScreenState
         baseUrl: state.configuration.apiBaseUrl,
         tenantId: state.configuration.tenantId,
         apiToken: state.configuration.apiToken,
-        functionId: form.functionId,
+        functionIds: const <String>[],
         name: form.name,
         description: form.description,
         owner: form.owner,
@@ -207,24 +311,46 @@ class _AssetInventoryManagementScreenState
     final form = await showDialog<_SystemFormResult>(
       context: context,
       builder: (context) => _SystemDialog(
-        functions: state.inventory.criticalFunctions,
         system: system,
+        assets: state.inventory.assets,
+        selectedAssetIds: state.inventory
+            .assetsForSystem(system.id)
+            .map((asset) => asset.id)
+            .toSet(),
       ),
     );
     if (form == null) {
       return;
     }
     await _applyResult(
-      _apiClient.updateInformationSystem(
-        baseUrl: state.configuration.apiBaseUrl,
-        tenantId: state.configuration.tenantId,
-        apiToken: state.configuration.apiToken,
-        systemId: system.id,
-        functionId: form.functionId,
-        name: form.name,
-        description: form.description,
-        owner: form.owner,
-      ),
+      _updateSystemAndAssets(state: state, system: system, form: form),
+    );
+  }
+
+  Future<OpenIrnApiInventoryResult> _updateSystemAndAssets({
+    required _InventoryStateData state,
+    required InformationSystemInfo system,
+    required _SystemFormResult form,
+  }) async {
+    final updateResult = await _apiClient.updateInformationSystem(
+      baseUrl: state.configuration.apiBaseUrl,
+      tenantId: state.configuration.tenantId,
+      apiToken: state.configuration.apiToken,
+      systemId: system.id,
+      functionIds: system.functionIds,
+      name: form.name,
+      description: form.description,
+      owner: form.owner,
+    );
+    if (!updateResult.isAvailable) {
+      return updateResult;
+    }
+    return _apiClient.replaceInformationSystemAssets(
+      baseUrl: state.configuration.apiBaseUrl,
+      tenantId: state.configuration.tenantId,
+      apiToken: state.configuration.apiToken,
+      systemId: system.id,
+      assetIds: form.assetIds,
     );
   }
 
@@ -252,16 +378,10 @@ class _AssetInventoryManagementScreenState
     );
   }
 
-  Future<void> _createAsset(
-    _InventoryStateData state,
-    InformationSystemInfo system,
-  ) async {
+  Future<void> _createAsset(_InventoryStateData state) async {
     final form = await showDialog<_AssetFormResult>(
       context: context,
-      builder: (context) => _AssetDialog(
-        systems: state.inventory.informationSystems,
-        initialSystemId: system.id,
-      ),
+      builder: (context) => const _AssetDialog(),
     );
     if (form == null) {
       return;
@@ -271,7 +391,7 @@ class _AssetInventoryManagementScreenState
         baseUrl: state.configuration.apiBaseUrl,
         tenantId: state.configuration.tenantId,
         apiToken: state.configuration.apiToken,
-        systemId: form.systemId,
+        systemIds: form.systemIds,
         name: form.name,
         assetType: form.assetType,
         criticality: form.criticality,
@@ -286,10 +406,7 @@ class _AssetInventoryManagementScreenState
   ) async {
     final form = await showDialog<_AssetFormResult>(
       context: context,
-      builder: (context) => _AssetDialog(
-        systems: state.inventory.informationSystems,
-        asset: asset,
-      ),
+      builder: (context) => _AssetDialog(asset: asset),
     );
     if (form == null) {
       return;
@@ -300,7 +417,7 @@ class _AssetInventoryManagementScreenState
         tenantId: state.configuration.tenantId,
         apiToken: state.configuration.apiToken,
         assetId: asset.id,
-        systemId: form.systemId,
+        systemIds: form.systemIds,
         name: form.name,
         assetType: form.assetType,
         criticality: form.criticality,
@@ -331,131 +448,6 @@ class _AssetInventoryManagementScreenState
         assetId: asset.id,
       ),
     );
-  }
-
-  Future<void> _exportSystemInventory(
-    _InventoryStateData state,
-    InformationSystemInfo system,
-  ) async {
-    setState(() {
-      _working = true;
-    });
-    try {
-      final result = await _apiClient.exportAssetInventoryExcel(
-        baseUrl: state.configuration.apiBaseUrl,
-        tenantId: state.configuration.tenantId,
-        apiToken: state.configuration.apiToken,
-        systemId: system.id,
-      );
-      if (!mounted) {
-        return;
-      }
-      if (!result.isAvailable || result.bytes == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '${context.trText(result.title)} — ${context.trText(result.message)}',
-            ),
-          ),
-        );
-        return;
-      }
-      final savedPath = await _excelFileService.saveExcel(
-        bytes: result.bytes!,
-        suggestedName: result.suggestedFileName,
-      );
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            savedPath == null
-                ? context.tr('inventory.excel.export_cancelled')
-                : context.tr(
-                    'inventory.excel.export_success',
-                    values: {'system': system.name, 'path': savedPath},
-                  ),
-          ),
-        ),
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _working = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _importSystemInventory(
-    _InventoryStateData state,
-    InformationSystemInfo system,
-  ) async {
-    final file = await _excelFileService.pickExcel();
-    if (file == null) {
-      return;
-    }
-    if (!mounted) {
-      return;
-    }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(context.tr('inventory.excel.import_system.title')),
-        content: Text(
-          context.tr(
-            'inventory.excel.import_system.message',
-            values: {'file': file.name, 'system': system.name},
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text(context.tr('action.cancel')),
-          ),
-          FilledButton.icon(
-            onPressed: () => Navigator.of(context).pop(true),
-            icon: const Icon(Icons.upload_file_outlined),
-            label: Text(context.tr('action.import')),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) {
-      return;
-    }
-    setState(() {
-      _working = true;
-    });
-    try {
-      final result = await _apiClient.importAssetInventoryExcel(
-        baseUrl: state.configuration.apiBaseUrl,
-        tenantId: state.configuration.tenantId,
-        apiToken: state.configuration.apiToken,
-        systemId: system.id,
-        bytes: file.bytes,
-      );
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '${context.trText(result.title)} — ${context.trText(result.message)}',
-          ),
-        ),
-      );
-      if (result.isAvailable) {
-        await _refresh();
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _working = false;
-        });
-      }
-    }
   }
 
   Future<bool> _confirmDelete({
@@ -519,17 +511,40 @@ class _AssetInventoryManagementScreenState
           return _InventoryContent(
             state: state,
             working: _working,
+            assetsSectionExpanded: _assetsSectionExpanded,
+            onAssetsSectionExpansionChanged: (expanded) {
+              if (_assetsSectionExpanded == expanded) {
+                return;
+              }
+              setState(() {
+                _assetsSectionExpanded = expanded;
+              });
+            },
             onCreateFunction: () => _createFunction(state),
             onEditFunction: (function) => _editFunction(state, function),
             onDeleteFunction: (function) => _deleteFunction(state, function),
-            onCreateSystem: (function) => _createSystem(state, function),
+            functionsSectionExpanded: _functionsSectionExpanded,
+            onFunctionsSectionExpansionChanged: (expanded) {
+              if (_functionsSectionExpanded == expanded) {
+                return;
+              }
+              setState(() {
+                _functionsSectionExpanded = expanded;
+              });
+            },
+            onCreateSystem: () => _createSystem(state),
             onEditSystem: (system) => _editSystem(state, system),
             onDeleteSystem: (system) => _deleteSystem(state, system),
-            onImportSystemInventory: (system) =>
-                _importSystemInventory(state, system),
-            onExportSystemInventory: (system) =>
-                _exportSystemInventory(state, system),
-            onCreateAsset: (system) => _createAsset(state, system),
+            systemsSectionExpanded: _systemsSectionExpanded,
+            onSystemsSectionExpansionChanged: (expanded) {
+              if (_systemsSectionExpanded == expanded) {
+                return;
+              }
+              setState(() {
+                _systemsSectionExpanded = expanded;
+              });
+            },
+            onCreateAsset: () => _createAsset(state),
             onEditAsset: (asset) => _editAsset(state, asset),
             onDeleteAsset: (asset) => _deleteAsset(state, asset),
           );
@@ -558,29 +573,37 @@ class _InventoryStateData {
 class _InventoryContent extends StatelessWidget {
   final _InventoryStateData state;
   final bool working;
+  final bool assetsSectionExpanded;
+  final ValueChanged<bool> onAssetsSectionExpansionChanged;
   final VoidCallback onCreateFunction;
   final ValueChanged<CriticalFunctionInfo> onEditFunction;
   final ValueChanged<CriticalFunctionInfo> onDeleteFunction;
-  final ValueChanged<CriticalFunctionInfo> onCreateSystem;
+  final bool functionsSectionExpanded;
+  final ValueChanged<bool> onFunctionsSectionExpansionChanged;
+  final VoidCallback onCreateSystem;
   final ValueChanged<InformationSystemInfo> onEditSystem;
   final ValueChanged<InformationSystemInfo> onDeleteSystem;
-  final ValueChanged<InformationSystemInfo> onImportSystemInventory;
-  final ValueChanged<InformationSystemInfo> onExportSystemInventory;
-  final ValueChanged<InformationSystemInfo> onCreateAsset;
+  final bool systemsSectionExpanded;
+  final ValueChanged<bool> onSystemsSectionExpansionChanged;
+  final VoidCallback onCreateAsset;
   final ValueChanged<InformationAssetInfo> onEditAsset;
   final ValueChanged<InformationAssetInfo> onDeleteAsset;
 
   const _InventoryContent({
     required this.state,
     required this.working,
+    required this.assetsSectionExpanded,
+    required this.onAssetsSectionExpansionChanged,
     required this.onCreateFunction,
     required this.onEditFunction,
     required this.onDeleteFunction,
+    required this.functionsSectionExpanded,
+    required this.onFunctionsSectionExpansionChanged,
     required this.onCreateSystem,
     required this.onEditSystem,
     required this.onDeleteSystem,
-    required this.onImportSystemInventory,
-    required this.onExportSystemInventory,
+    required this.systemsSectionExpanded,
+    required this.onSystemsSectionExpansionChanged,
     required this.onCreateAsset,
     required this.onEditAsset,
     required this.onDeleteAsset,
@@ -589,218 +612,296 @@ class _InventoryContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final inventory = state.inventory;
+    final overviewDetails = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          context.tr('inventory.overview.title'),
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        const SizedBox(height: 6),
+        Text(
+          context.tr(
+            'inventory.overview.workspace',
+            values: {
+              'workspace': inventory.tenantDisplayName.isEmpty
+                  ? state.configuration.tenantId
+                  : inventory.tenantDisplayName,
+            },
+          ),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            Chip(
+              label: Text(
+                context.tr(
+                  'inventory.count.critical_functions',
+                  values: {'count': inventory.criticalFunctions.length},
+                ),
+              ),
+            ),
+            Chip(
+              label: Text(
+                context.tr(
+                  'inventory.count.information_systems',
+                  values: {'count': inventory.informationSystems.length},
+                ),
+              ),
+            ),
+            Chip(
+              label: Text(
+                context.tr(
+                  'inventory.count.assets',
+                  values: {'count': inventory.assets.length},
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Text(context.tr('inventory.overview.shared_asset_model')),
+      ],
+    );
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 1100),
+        constraints: const BoxConstraints(maxWidth: 1200),
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(18),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      context.tr('inventory.overview.title'),
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      context.tr(
-                        'inventory.overview.workspace',
-                        values: {
-                          'workspace': inventory.tenantDisplayName.isEmpty
-                              ? state.configuration.tenantId
-                              : inventory.tenantDisplayName,
-                        },
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isPhone = constraints.maxWidth < 600;
+                    final isTablet = constraints.maxWidth < 900;
+                    final maxIllustrationWidth = isPhone
+                        ? 357.0
+                        : isTablet
+                        ? 612.0
+                        : 408.0;
+                    final illustrationWidth = math.min(
+                      constraints.maxWidth,
+                      maxIllustrationWidth,
+                    );
+                    final cacheWidth = math.min(
+                      1200,
+                      math.max(
+                        1,
+                        (illustrationWidth *
+                                MediaQuery.devicePixelRatioOf(context))
+                            .round(),
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+                    );
+                    final illustration = Image.asset(
+                      'assets/images/openirn_graph.webp',
+                      width: illustrationWidth,
+                      cacheWidth: cacheWidth,
+                      fit: BoxFit.contain,
+                      filterQuality: FilterQuality.medium,
+                      semanticLabel: context.tr(
+                        'inventory.overview.graph_semantics',
+                      ),
+                    );
+                    if (isTablet) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          overviewDetails,
+                          const SizedBox(height: 18),
+                          Center(child: illustration),
+                        ],
+                      );
+                    }
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        Chip(
-                          label: Text(
-                            context.tr(
-                              'inventory.count.critical_functions',
-                              values: {
-                                'count': inventory.criticalFunctions.length,
-                              },
-                            ),
-                          ),
-                        ),
-                        Chip(
-                          label: Text(
-                            context.tr(
-                              'inventory.count.information_systems',
-                              values: {
-                                'count': inventory.informationSystems.length,
-                              },
-                            ),
-                          ),
-                        ),
-                        Chip(
-                          label: Text(
-                            context.tr(
-                              'inventory.count.assets',
-                              values: {'count': inventory.assets.length},
-                            ),
-                          ),
-                        ),
+                        Expanded(child: overviewDetails),
+                        const SizedBox(width: 28),
+                        illustration,
                       ],
-                    ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        FilledButton.icon(
-                          onPressed: working ? null : onCreateFunction,
-                          icon: const Icon(Icons.add),
-                          label: Text(
-                            context.tr('inventory.action.add_function'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+                    );
+                  },
                 ),
               ),
             ),
             const SizedBox(height: 12),
-            if (inventory.criticalFunctions.isEmpty)
-              const _EmptyInventoryCard()
-            else
-              for (final function in inventory.criticalFunctions) ...[
-                _FunctionCard(
-                  function: function,
-                  systems: inventory.systemsForFunction(function.id),
-                  inventory: inventory,
-                  working: working,
-                  onEditFunction: () => onEditFunction(function),
-                  onDeleteFunction: () => onDeleteFunction(function),
-                  onCreateSystem: () => onCreateSystem(function),
-                  onEditSystem: onEditSystem,
-                  onDeleteSystem: onDeleteSystem,
-                  onImportSystemInventory: onImportSystemInventory,
-                  onExportSystemInventory: onExportSystemInventory,
-                  onCreateAsset: onCreateAsset,
-                  onEditAsset: onEditAsset,
-                  onDeleteAsset: onDeleteAsset,
-                ),
-                const SizedBox(height: 12),
+            _InventorySection(
+              storageKey: const PageStorageKey<String>(
+                'inventory-assets-section',
+              ),
+              icon: Icons.inventory_2_outlined,
+              title: context.tr('inventory.section.assets.title'),
+              description: context.tr('inventory.section.assets.description'),
+              initiallyExpanded: assetsSectionExpanded,
+              onExpansionChanged: onAssetsSectionExpansionChanged,
+              actionLabel: context.tr('inventory.action.add_asset'),
+              onAction: working ? null : onCreateAsset,
+              emptyLabel: context.tr('inventory.empty.asset_catalog'),
+              children: [
+                for (final asset in inventory.assets)
+                  ListTile(
+                    leading: const Icon(Icons.inventory_2_outlined),
+                    title: Text(asset.name),
+                    subtitle: Text(
+                      [
+                        if (asset.assetType.isNotEmpty) asset.assetType,
+                        _assetCriticalityLabel(context, asset.criticality),
+                        context.tr(
+                          'inventory.count.linked_systems',
+                          values: {'count': asset.systemIds.length},
+                        ),
+                        context.tr(
+                          asset.isAssessed
+                              ? 'inventory.asset.assessment.assessed'
+                              : 'inventory.asset.assessment.not_assessed',
+                        ),
+                        if (asset.description.isNotEmpty) asset.description,
+                      ].join(' — '),
+                    ),
+                    trailing: Wrap(
+                      spacing: 4,
+                      children: [
+                        IconButton(
+                          onPressed: working ? null : () => onEditAsset(asset),
+                          tooltip: context.tr('inventory.tooltip.edit_asset'),
+                          icon: const Icon(Icons.edit_outlined),
+                        ),
+                        IconButton(
+                          onPressed: working || asset.systemIds.isNotEmpty
+                              ? null
+                              : () => onDeleteAsset(asset),
+                          tooltip: context.tr('inventory.tooltip.delete_asset'),
+                          icon: const Icon(Icons.delete_outline),
+                        ),
+                      ],
+                    ),
+                  ),
               ],
+            ),
+            const SizedBox(height: 12),
+            _InventorySection(
+              storageKey: const PageStorageKey<String>(
+                'inventory-systems-section',
+              ),
+              icon: Icons.dns_outlined,
+              title: context.tr('inventory.section.systems.title'),
+              description: context.tr('inventory.section.systems.description'),
+              initiallyExpanded: systemsSectionExpanded,
+              onExpansionChanged: onSystemsSectionExpansionChanged,
+              actionLabel: context.tr('inventory.action.add_system'),
+              onAction: working ? null : onCreateSystem,
+              emptyLabel: context.tr('inventory.empty.system_catalog'),
+              children: [
+                for (final system in inventory.informationSystems)
+                  ListTile(
+                    leading: const Icon(Icons.dns_outlined),
+                    title: Text(system.name),
+                    subtitle: Text(
+                      [
+                        if (system.owner.isNotEmpty)
+                          context.tr(
+                            'inventory.system.owner',
+                            values: {'owner': system.owner},
+                          ),
+                        context.tr(
+                          'inventory.count.linked_functions',
+                          values: {'count': system.functionIds.length},
+                        ),
+                        context.tr(
+                          'inventory.count.assets',
+                          values: {
+                            'count': inventory
+                                .assetsForSystem(system.id)
+                                .length,
+                          },
+                        ),
+                        if (system.description.isNotEmpty) system.description,
+                      ].join(' — '),
+                    ),
+                    trailing: Wrap(
+                      spacing: 4,
+                      children: [
+                        IconButton(
+                          onPressed: working
+                              ? null
+                              : () => onEditSystem(system),
+                          tooltip: context.tr('action.edit'),
+                          icon: const Icon(Icons.edit_outlined),
+                        ),
+                        IconButton(
+                          onPressed: working || system.functionIds.isNotEmpty
+                              ? null
+                              : () => onDeleteSystem(system),
+                          tooltip: context.tr('action.delete'),
+                          icon: const Icon(Icons.delete_outline),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _InventorySection(
+              storageKey: const PageStorageKey<String>(
+                'inventory-functions-section',
+              ),
+              icon: Icons.account_tree_outlined,
+              title: context.tr('inventory.section.functions.title'),
+              description: context.tr(
+                'inventory.section.functions.description',
+              ),
+              initiallyExpanded: functionsSectionExpanded,
+              onExpansionChanged: onFunctionsSectionExpansionChanged,
+              actionLabel: context.tr('inventory.action.add_function'),
+              onAction: working ? null : onCreateFunction,
+              emptyLabel: context.tr('inventory.empty.functions'),
+              children: [
+                for (final function in inventory.criticalFunctions)
+                  ListTile(
+                    leading: const Icon(Icons.account_tree_outlined),
+                    title: Text(function.name),
+                    subtitle: Text(
+                      [
+                        context.tr(
+                          'inventory.count.systems_short',
+                          values: {
+                            'count': inventory
+                                .systemsForFunction(function.id)
+                                .length,
+                          },
+                        ),
+                        if (function.description.isNotEmpty)
+                          function.description,
+                      ].join(' — '),
+                    ),
+                    trailing: Wrap(
+                      spacing: 4,
+                      children: [
+                        IconButton(
+                          onPressed: working
+                              ? null
+                              : () => onEditFunction(function),
+                          tooltip: context.tr('action.edit'),
+                          icon: const Icon(Icons.edit_outlined),
+                        ),
+                        IconButton(
+                          onPressed: working
+                              ? null
+                              : () => onDeleteFunction(function),
+                          tooltip: context.tr('action.delete'),
+                          icon: const Icon(Icons.delete_outline),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _FunctionCard extends StatelessWidget {
-  final CriticalFunctionInfo function;
-  final List<InformationSystemInfo> systems;
-  final IrnAssetInventory inventory;
-  final bool working;
-  final VoidCallback onEditFunction;
-  final VoidCallback onDeleteFunction;
-  final VoidCallback onCreateSystem;
-  final ValueChanged<InformationSystemInfo> onEditSystem;
-  final ValueChanged<InformationSystemInfo> onDeleteSystem;
-  final ValueChanged<InformationSystemInfo> onImportSystemInventory;
-  final ValueChanged<InformationSystemInfo> onExportSystemInventory;
-  final ValueChanged<InformationSystemInfo> onCreateAsset;
-  final ValueChanged<InformationAssetInfo> onEditAsset;
-  final ValueChanged<InformationAssetInfo> onDeleteAsset;
-
-  const _FunctionCard({
-    required this.function,
-    required this.systems,
-    required this.inventory,
-    required this.working,
-    required this.onEditFunction,
-    required this.onDeleteFunction,
-    required this.onCreateSystem,
-    required this.onEditSystem,
-    required this.onDeleteSystem,
-    required this.onImportSystemInventory,
-    required this.onExportSystemInventory,
-    required this.onCreateAsset,
-    required this.onEditAsset,
-    required this.onDeleteAsset,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: ExpansionTile(
-        initiallyExpanded: true,
-        leading: const Icon(Icons.account_tree_outlined),
-        title: Text(function.name),
-        subtitle: Text(
-          function.description.isEmpty
-              ? context.tr(
-                  'inventory.count.systems_short',
-                  values: {'count': systems.length},
-                )
-              : context.tr(
-                  'inventory.count.systems_with_description',
-                  values: {
-                    'count': systems.length,
-                    'description': function.description,
-                  },
-                ),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        children: [
-          Row(
-            children: [
-              TextButton.icon(
-                onPressed: working ? null : onEditFunction,
-                icon: const Icon(Icons.edit_outlined),
-                label: Text(context.tr('action.edit')),
-              ),
-              const SizedBox(width: 8),
-              TextButton.icon(
-                onPressed: working ? null : onDeleteFunction,
-                icon: const Icon(Icons.delete_outline),
-                label: Text(context.tr('action.delete')),
-              ),
-              const Spacer(),
-              FilledButton.icon(
-                onPressed: working ? null : onCreateSystem,
-                icon: const Icon(Icons.add),
-                label: Text(context.tr('inventory.action.add_system')),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          if (systems.isEmpty)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(context.tr('inventory.empty.systems')),
-            )
-          else
-            for (final system in systems) ...[
-              _SystemTile(
-                system: system,
-                assets: inventory.assetsForSystem(system.id),
-                working: working,
-                onEdit: () => onEditSystem(system),
-                onDelete: () => onDeleteSystem(system),
-                onImportAssets: () => onImportSystemInventory(system),
-                onExportAssets: () => onExportSystemInventory(system),
-                onCreateAsset: () => onCreateAsset(system),
-                onEditAsset: onEditAsset,
-                onDeleteAsset: onDeleteAsset,
-              ),
-              const SizedBox(height: 8),
-            ],
-        ],
       ),
     );
   }
@@ -820,121 +921,55 @@ String _assetCriticalityLabel(BuildContext context, String value) {
   return context.tr('inventory.asset.criticality.missing');
 }
 
-class _SystemTile extends StatelessWidget {
-  final InformationSystemInfo system;
-  final List<InformationAssetInfo> assets;
-  final bool working;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
-  final VoidCallback onImportAssets;
-  final VoidCallback onExportAssets;
-  final VoidCallback onCreateAsset;
-  final ValueChanged<InformationAssetInfo> onEditAsset;
-  final ValueChanged<InformationAssetInfo> onDeleteAsset;
+class _InventorySection extends StatelessWidget {
+  final PageStorageKey<String> storageKey;
+  final IconData icon;
+  final String title;
+  final String description;
+  final bool initiallyExpanded;
+  final ValueChanged<bool>? onExpansionChanged;
+  final String actionLabel;
+  final VoidCallback? onAction;
+  final String emptyLabel;
+  final List<Widget> children;
 
-  const _SystemTile({
-    required this.system,
-    required this.assets,
-    required this.working,
-    required this.onEdit,
-    required this.onDelete,
-    required this.onImportAssets,
-    required this.onExportAssets,
-    required this.onCreateAsset,
-    required this.onEditAsset,
-    required this.onDeleteAsset,
+  const _InventorySection({
+    required this.storageKey,
+    required this.icon,
+    required this.title,
+    required this.description,
+    this.initiallyExpanded = false,
+    this.onExpansionChanged,
+    required this.actionLabel,
+    required this.onAction,
+    required this.emptyLabel,
+    required this.children,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Card.outlined(
+    return Card(
+      clipBehavior: Clip.antiAlias,
       child: ExpansionTile(
-        leading: const Icon(Icons.dns_outlined),
-        title: Text(system.name),
-        subtitle: Text(
-          [
-            if (system.owner.isNotEmpty)
-              context.tr(
-                'inventory.system.owner',
-                values: {'owner': system.owner},
-              ),
-            context.tr(
-              'inventory.count.assets',
-              values: {'count': assets.length},
-            ),
-          ].join(' — '),
-        ),
+        key: storageKey,
+        initiallyExpanded: initiallyExpanded,
+        onExpansionChanged: onExpansionChanged,
+        controlAffinity: ListTileControlAffinity.trailing,
+        leading: Icon(icon),
+        title: Text(title, style: Theme.of(context).textTheme.titleLarge),
+        subtitle: Text(description),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         children: [
-          if (system.description.isNotEmpty)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(system.description),
+          Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton.icon(
+              onPressed: onAction,
+              icon: const Icon(Icons.add),
+              label: Text(actionLabel),
             ),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              TextButton.icon(
-                onPressed: working ? null : onEdit,
-                icon: const Icon(Icons.edit_outlined),
-                label: Text(context.tr('action.edit')),
-              ),
-              TextButton.icon(
-                onPressed: working ? null : onDelete,
-                icon: const Icon(Icons.delete_outline),
-                label: Text(context.tr('action.delete')),
-              ),
-              TextButton.icon(
-                onPressed: working ? null : onImportAssets,
-                icon: const Icon(Icons.upload_file_outlined),
-                label: Text(context.tr('inventory.action.import_excel')),
-              ),
-              TextButton.icon(
-                onPressed: working ? null : onExportAssets,
-                icon: const Icon(Icons.download_outlined),
-                label: Text(context.tr('inventory.action.export_excel')),
-              ),
-              FilledButton.icon(
-                onPressed: working ? null : onCreateAsset,
-                icon: const Icon(Icons.add),
-                label: Text(context.tr('inventory.action.add_asset')),
-              ),
-            ],
           ),
-          if (assets.isEmpty)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(context.tr('inventory.empty.assets')),
-            )
-          else
-            for (final asset in assets)
-              ListTile(
-                leading: const Icon(Icons.inventory_2_outlined),
-                title: Text(asset.name),
-                subtitle: Text(
-                  [
-                    if (asset.assetType.isNotEmpty) asset.assetType,
-                    _assetCriticalityLabel(context, asset.criticality),
-                    if (asset.description.isNotEmpty) asset.description,
-                  ].join(' — '),
-                ),
-                trailing: Wrap(
-                  spacing: 4,
-                  children: [
-                    IconButton(
-                      onPressed: working ? null : () => onEditAsset(asset),
-                      tooltip: context.tr('inventory.tooltip.edit_asset'),
-                      icon: const Icon(Icons.edit_outlined),
-                    ),
-                    IconButton(
-                      onPressed: working ? null : () => onDeleteAsset(asset),
-                      tooltip: context.tr('inventory.tooltip.delete_asset'),
-                      icon: const Icon(Icons.delete_outline),
-                    ),
-                  ],
-                ),
-              ),
+          const Divider(height: 24),
+          if (children.isEmpty) Text(emptyLabel) else ...children,
         ],
       ),
     );
@@ -971,31 +1006,28 @@ class _InventoryErrorCard extends StatelessWidget {
   }
 }
 
-class _EmptyInventoryCard extends StatelessWidget {
-  const _EmptyInventoryCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Text(context.tr('inventory.empty.functions')),
-      ),
-    );
-  }
-}
-
 class _FunctionFormResult {
+  final List<String> systemIds;
   final String name;
   final String description;
 
-  const _FunctionFormResult({required this.name, required this.description});
+  const _FunctionFormResult({
+    required this.systemIds,
+    required this.name,
+    required this.description,
+  });
 }
 
 class _FunctionDialog extends StatefulWidget {
   final CriticalFunctionInfo? function;
+  final List<InformationSystemInfo> systems;
+  final Set<String> selectedSystemIds;
 
-  const _FunctionDialog({this.function});
+  const _FunctionDialog({
+    this.function,
+    required this.systems,
+    this.selectedSystemIds = const <String>{},
+  });
 
   @override
   State<_FunctionDialog> createState() => _FunctionDialogState();
@@ -1005,10 +1037,12 @@ class _FunctionDialogState extends State<_FunctionDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
   late final TextEditingController _descriptionController;
+  late Set<String> _selectedSystemIds;
 
   @override
   void initState() {
     super.initState();
+    _selectedSystemIds = Set<String>.from(widget.selectedSystemIds);
     _nameController = TextEditingController(text: widget.function?.name ?? '');
     _descriptionController = TextEditingController(
       text: widget.function?.description ?? '',
@@ -1028,6 +1062,7 @@ class _FunctionDialogState extends State<_FunctionDialog> {
     }
     Navigator.of(context).pop(
       _FunctionFormResult(
+        systemIds: _selectedSystemIds.toList(growable: false),
         name: _nameController.text.trim(),
         description: _descriptionController.text.trim(),
       ),
@@ -1045,11 +1080,11 @@ class _FunctionDialogState extends State<_FunctionDialog> {
             : context.tr('inventory.dialog.function.create_title'),
       ),
       content: ResponsiveDialogContent(
-        maxWidth: 560,
+        maxWidth: 680,
         child: Form(
           key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+          child: ListView(
+            shrinkWrap: true,
             children: [
               TextFormField(
                 controller: _nameController,
@@ -1072,6 +1107,63 @@ class _FunctionDialogState extends State<_FunctionDialog> {
                   prefixIcon: const Icon(Icons.notes_outlined),
                 ),
               ),
+              FormField<Set<String>>(
+                initialValue: Set<String>.from(_selectedSystemIds),
+                validator: (systemIds) =>
+                    (systemIds ?? const <String>{}).isEmpty
+                    ? context.tr('inventory.validation.system_required')
+                    : null,
+                builder: (field) => Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Divider(height: 32),
+                    Text(
+                      context.tr('inventory.field.linked_systems'),
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    if (widget.systems.isEmpty)
+                      Text(context.tr('inventory.empty.system_catalog'))
+                    else
+                      for (final system in widget.systems)
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          controlAffinity: ListTileControlAffinity.leading,
+                          value: _selectedSystemIds.contains(system.id),
+                          title: Text(system.name),
+                          subtitle: system.owner.isEmpty
+                              ? null
+                              : Text(
+                                  context.tr(
+                                    'inventory.system.owner',
+                                    values: {'owner': system.owner},
+                                  ),
+                                ),
+                          onChanged: (selected) {
+                            setState(() {
+                              if (selected == true) {
+                                _selectedSystemIds.add(system.id);
+                              } else {
+                                _selectedSystemIds.remove(system.id);
+                              }
+                            });
+                            field.didChange(
+                              Set<String>.from(_selectedSystemIds),
+                            );
+                          },
+                        ),
+                    if (field.hasError) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        field.errorText!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ],
           ),
         ),
@@ -1092,13 +1184,13 @@ class _FunctionDialogState extends State<_FunctionDialog> {
 }
 
 class _SystemFormResult {
-  final String functionId;
+  final List<String> assetIds;
   final String name;
   final String description;
   final String owner;
 
   const _SystemFormResult({
-    required this.functionId,
+    required this.assetIds,
     required this.name,
     required this.description,
     required this.owner,
@@ -1106,14 +1198,14 @@ class _SystemFormResult {
 }
 
 class _SystemDialog extends StatefulWidget {
-  final List<CriticalFunctionInfo> functions;
   final InformationSystemInfo? system;
-  final String initialFunctionId;
+  final List<InformationAssetInfo> assets;
+  final Set<String> selectedAssetIds;
 
   const _SystemDialog({
-    required this.functions,
     this.system,
-    this.initialFunctionId = '',
+    this.assets = const <InformationAssetInfo>[],
+    this.selectedAssetIds = const <String>{},
   });
 
   @override
@@ -1125,15 +1217,12 @@ class _SystemDialogState extends State<_SystemDialog> {
   late final TextEditingController _nameController;
   late final TextEditingController _descriptionController;
   late final TextEditingController _ownerController;
-  late String _functionId;
+  late Set<String> _selectedAssetIds;
 
   @override
   void initState() {
     super.initState();
-    _functionId = widget.system?.functionId ?? widget.initialFunctionId;
-    if (_functionId.isEmpty && widget.functions.isNotEmpty) {
-      _functionId = widget.functions.first.id;
-    }
+    _selectedAssetIds = Set<String>.from(widget.selectedAssetIds);
     _nameController = TextEditingController(text: widget.system?.name ?? '');
     _descriptionController = TextEditingController(
       text: widget.system?.description ?? '',
@@ -1155,7 +1244,7 @@ class _SystemDialogState extends State<_SystemDialog> {
     }
     Navigator.of(context).pop(
       _SystemFormResult(
-        functionId: _functionId,
+        assetIds: _selectedAssetIds.toList(growable: false),
         name: _nameController.text.trim(),
         description: _descriptionController.text.trim(),
         owner: _ownerController.text.trim(),
@@ -1174,32 +1263,12 @@ class _SystemDialogState extends State<_SystemDialog> {
             : context.tr('inventory.dialog.system.create_title'),
       ),
       content: ResponsiveDialogContent(
-        maxWidth: 620,
+        maxWidth: 680,
         child: Form(
           key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+          child: ListView(
+            shrinkWrap: true,
             children: [
-              DropdownButtonFormField<String>(
-                initialValue: _functionId.isEmpty ? null : _functionId,
-                items: widget.functions
-                    .map(
-                      (function) => DropdownMenuItem<String>(
-                        value: function.id,
-                        child: Text(function.name),
-                      ),
-                    )
-                    .toList(growable: false),
-                decoration: InputDecoration(
-                  labelText: context.tr('inventory.field.parent_function'),
-                  prefixIcon: const Icon(Icons.account_tree_outlined),
-                ),
-                validator: (value) => (value ?? '').isEmpty
-                    ? context.tr('inventory.validation.function_required')
-                    : null,
-                onChanged: (value) => setState(() => _functionId = value ?? ''),
-              ),
-              const SizedBox(height: 12),
               TextFormField(
                 controller: _nameController,
                 autofocus: shouldAutofocusTextField(context),
@@ -1229,6 +1298,41 @@ class _SystemDialogState extends State<_SystemDialog> {
                   prefixIcon: const Icon(Icons.notes_outlined),
                 ),
               ),
+              if (editing) ...[
+                const Divider(height: 32),
+                Text(
+                  context.tr('inventory.action.manage_assets'),
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 6),
+                Text(context.tr('inventory.dialog.system_assets.help')),
+                const SizedBox(height: 8),
+                if (widget.assets.isEmpty)
+                  Text(context.tr('inventory.empty.asset_catalog'))
+                else
+                  for (final asset in widget.assets)
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      value: _selectedAssetIds.contains(asset.id),
+                      title: Text(asset.name),
+                      subtitle: Text(
+                        [
+                          if (asset.assetType.isNotEmpty) asset.assetType,
+                          _assetCriticalityLabel(context, asset.criticality),
+                        ].join(' — '),
+                      ),
+                      onChanged: (selected) {
+                        setState(() {
+                          if (selected == true) {
+                            _selectedAssetIds.add(asset.id);
+                          } else {
+                            _selectedAssetIds.remove(asset.id);
+                          }
+                        });
+                      },
+                    ),
+              ],
             ],
           ),
         ),
@@ -1249,14 +1353,14 @@ class _SystemDialogState extends State<_SystemDialog> {
 }
 
 class _AssetFormResult {
-  final String systemId;
+  final List<String> systemIds;
   final String name;
   final String assetType;
   final String criticality;
   final String description;
 
   const _AssetFormResult({
-    required this.systemId,
+    required this.systemIds,
     required this.name,
     required this.assetType,
     required this.criticality,
@@ -1265,15 +1369,9 @@ class _AssetFormResult {
 }
 
 class _AssetDialog extends StatefulWidget {
-  final List<InformationSystemInfo> systems;
   final InformationAssetInfo? asset;
-  final String initialSystemId;
 
-  const _AssetDialog({
-    required this.systems,
-    this.asset,
-    this.initialSystemId = '',
-  });
+  const _AssetDialog({this.asset});
 
   @override
   State<_AssetDialog> createState() => _AssetDialogState();
@@ -1284,16 +1382,11 @@ class _AssetDialogState extends State<_AssetDialog> {
   late final TextEditingController _nameController;
   late final TextEditingController _typeController;
   late final TextEditingController _descriptionController;
-  late String _systemId;
   late String _criticality;
 
   @override
   void initState() {
     super.initState();
-    _systemId = widget.asset?.systemId ?? widget.initialSystemId;
-    if (_systemId.isEmpty && widget.systems.isNotEmpty) {
-      _systemId = widget.systems.first.id;
-    }
     final existingCriticality = widget.asset?.criticality.trim() ?? '';
     _criticality = <String>{'1', '2', '3', '4'}.contains(existingCriticality)
         ? existingCriticality
@@ -1321,7 +1414,7 @@ class _AssetDialogState extends State<_AssetDialog> {
     }
     Navigator.of(context).pop(
       _AssetFormResult(
-        systemId: _systemId,
+        systemIds: widget.asset?.systemIds ?? const <String>[],
         name: _nameController.text.trim(),
         assetType: _typeController.text.trim(),
         criticality: _criticality,
@@ -1347,26 +1440,6 @@ class _AssetDialogState extends State<_AssetDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              DropdownButtonFormField<String>(
-                initialValue: _systemId.isEmpty ? null : _systemId,
-                items: widget.systems
-                    .map(
-                      (system) => DropdownMenuItem<String>(
-                        value: system.id,
-                        child: Text(system.name),
-                      ),
-                    )
-                    .toList(growable: false),
-                decoration: InputDecoration(
-                  labelText: context.tr('inventory.field.system'),
-                  prefixIcon: const Icon(Icons.dns_outlined),
-                ),
-                validator: (value) => (value ?? '').isEmpty
-                    ? context.tr('inventory.validation.system_required')
-                    : null,
-                onChanged: (value) => setState(() => _systemId = value ?? ''),
-              ),
-              const SizedBox(height: 12),
               TextFormField(
                 controller: _nameController,
                 autofocus: shouldAutofocusTextField(context),

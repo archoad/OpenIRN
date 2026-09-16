@@ -84,8 +84,6 @@ class AccessPolicyService {
       OpenIrnPermission.manageTenantUsers,
       OpenIrnPermission.manageTenantAuthorizedDevices,
       OpenIrnPermission.manageInformationAssets,
-      OpenIrnPermission.viewCampaignHistory,
-      OpenIrnPermission.restoreCampaignRevision,
     },
     AppUserRole.evaluator: {
       OpenIrnPermission.viewReferentialCatalog,

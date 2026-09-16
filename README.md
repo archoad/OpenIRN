@@ -120,17 +120,17 @@ OpenIRN prend en charge :
 
 ### Inventaire SI et notation par actif
 
-OpenIRN intègre un modèle métier permettant de rattacher les évaluations à un système d’information.
+OpenIRN utilise l'actif comme élément métier de base et comme source unique de notation.
 
 Le modèle est structuré ainsi :
 
 ```text
-Fonction critique
-└── Système d’information
-    └── Actif
+Actif + notation IRN
+└── rattaché à un ou plusieurs systèmes d’information
+    └── rattachés à une ou plusieurs fonctions critiques
 ```
 
-Chaque actif peut porter une criticité de 1 à 4. Une campagne créée depuis un système d’information conserve la fonction critique, le SI et la liste des actifs évalués.
+Chaque actif porte une criticité de 1 à 4. Un même actif peut être partagé par plusieurs SI : sa notation canonique est alors automatiquement utilisée dans toutes les campagnes et fonctions critiques qui le référencent.
 
 La notation peut alors être conduite actif par actif, avec un calcul consolidé de maturité pour le système d’information.
 

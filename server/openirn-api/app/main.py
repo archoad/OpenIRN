@@ -1629,6 +1629,7 @@ def _apply_schema(migration_mysql_url: str) -> None:
         _record_migration(con, 170, "enrollment_anti_abuse_rate_limit_buckets")
         _migrate_reusable_enrollment_codes_schema(con)
         _migrate_enrollment_request_email_schema(con)
+        _migrate_shared_assets_schema(con)
         _ensure_tenant(con, DEFAULT_TENANT_ID)
         _backfill_default_tenant_display_name(con)
         _sync_solution_administrators_to_all_tenants(con)
@@ -1740,6 +1741,21 @@ def _table_columns(con: Any, table_name: str) -> set[str]:
         (table_name,),
     ).fetchall()
     return {str(row[0]) for row in rows}
+
+
+def _foreign_key_exists(con: Any, table_name: str, constraint_name: str) -> bool:
+    row = con.execute(
+        """
+        SELECT constraint_name
+        FROM information_schema.table_constraints
+        WHERE table_schema = DATABASE()
+          AND table_name = ?
+          AND constraint_name = ?
+          AND constraint_type = 'FOREIGN KEY'
+        """,
+        (table_name, constraint_name),
+    ).fetchone()
+    return row is not None
 
 
 def _migrate_tenants_schema(con: Any) -> None:
@@ -1870,6 +1886,104 @@ def _migrate_enrollment_request_email_schema(con: Any) -> None:
             """
         )
     _record_migration(con, 172, "enrollment_request_email")
+
+
+def _migrate_shared_assets_schema(con: Any) -> None:
+    """Normalize inventory links and make asset answers canonical per tenant."""
+    if _migration_applied(con, 173):
+        return
+    now = _utc_now().isoformat()
+    con.execute(
+        """
+        INSERT IGNORE INTO critical_function_systems(
+            tenant_id, function_id, system_id, created_at
+        )
+        SELECT tenant_id, function_id, system_id, ?
+        FROM information_systems
+        WHERE function_id IS NOT NULL AND function_id <> ''
+        """,
+        (now,),
+    )
+    con.execute(
+        """
+        INSERT IGNORE INTO information_system_assets(
+            tenant_id, system_id, asset_id, created_at
+        )
+        SELECT tenant_id, system_id, asset_id, ?
+        FROM information_assets
+        WHERE system_id IS NOT NULL AND system_id <> ''
+        """,
+        (now,),
+    )
+
+    if _foreign_key_exists(
+        con,
+        "information_systems",
+        "fk_information_systems_function",
+    ):
+        con.execute(
+            "ALTER TABLE information_systems "
+            "DROP FOREIGN KEY fk_information_systems_function"
+        )
+    if _foreign_key_exists(
+        con,
+        "information_assets",
+        "fk_information_assets_system",
+    ):
+        con.execute(
+            "ALTER TABLE information_assets "
+            "DROP FOREIGN KEY fk_information_assets_system"
+        )
+    if not _foreign_key_exists(
+        con,
+        "information_systems",
+        "fk_information_systems_tenant",
+    ):
+        con.execute(
+            "ALTER TABLE information_systems "
+            "ADD CONSTRAINT fk_information_systems_tenant "
+            "FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE"
+        )
+    if not _foreign_key_exists(
+        con,
+        "information_assets",
+        "fk_information_assets_tenant",
+    ):
+        con.execute(
+            "ALTER TABLE information_assets "
+            "ADD CONSTRAINT fk_information_assets_tenant "
+            "FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE"
+        )
+
+    con.execute(
+        "ALTER TABLE information_systems "
+        "MODIFY COLUMN function_id VARCHAR(160) NULL"
+    )
+    con.execute(
+        "ALTER TABLE information_assets "
+        "MODIFY COLUMN system_id VARCHAR(160) NULL"
+    )
+
+    rows = con.execute(
+        """
+        SELECT tenant_id, campaign_id, updated_at, payload_json
+        FROM campaign_states
+        ORDER BY received_at ASC, updated_at ASC, campaign_id ASC
+        """
+    ).fetchall()
+    for row in rows:
+        payload = _parse_json(row["payload_json"], {})
+        if not isinstance(payload, dict):
+            continue
+        _replace_canonical_asset_answers(
+            con,
+            str(row["tenant_id"] or ""),
+            payload,
+            source_campaign_id=str(row["campaign_id"] or ""),
+            updated_at=str(row["updated_at"] or now),
+            replace_existing=True,
+        )
+    _record_migration(con, 173, "shared_assets_and_canonical_assessments")
 
 
 def _alias_target(con: Any, entity_type: str, old_id: str, scope_id: str = "") -> str:
@@ -4796,7 +4910,237 @@ def _campaign_expected_revision(raw_campaign: dict[str, Any], campaign_id: str) 
 def _campaign_payload_for_storage(raw_campaign: dict[str, Any]) -> dict[str, Any]:
     stored = dict(raw_campaign)
     stored.pop("expectedServerRevision", None)
+    stored.pop("replaceAssetAnswers", None)
     return stored
+
+
+def _campaign_referential_id(raw_campaign: dict[str, Any]) -> str:
+    campaign = _campaign_record(raw_campaign)
+    return str(campaign.get("referentialId") or "").strip()
+
+
+def _campaign_scope_asset_ids(raw_campaign: dict[str, Any]) -> list[str]:
+    campaign = _campaign_record(raw_campaign)
+    information = campaign.get("information")
+    if not isinstance(information, dict):
+        information = campaign
+    scope = information.get("inventoryScope")
+    if not isinstance(scope, dict):
+        scope = information
+    raw_assets = scope.get("assets")
+    if not isinstance(raw_assets, list):
+        return []
+    asset_ids: list[str] = []
+    for raw_asset in raw_assets:
+        if not isinstance(raw_asset, dict):
+            continue
+        asset_id = str(raw_asset.get("assetId") or raw_asset.get("id") or "").strip()
+        if asset_id and asset_id not in asset_ids:
+            asset_ids.append(asset_id)
+    return asset_ids
+
+
+def _asset_answer_identity(value: Any) -> tuple[str, str] | None:
+    if not isinstance(value, dict):
+        return None
+    answer_key = str(value.get("criterionId") or "").strip()
+    match = re.fullmatch(r"asset:([^:]+):criterion:(.+)", answer_key)
+    if match is None:
+        return None
+    asset_id = match.group(1).strip()
+    criterion_id = match.group(2).strip()
+    if not asset_id or not criterion_id:
+        return None
+    return asset_id, criterion_id
+
+
+def _replace_canonical_asset_answers(
+    con: Any,
+    tenant_id: str,
+    raw_campaign: dict[str, Any],
+    *,
+    source_campaign_id: str,
+    updated_at: str,
+    replace_existing: bool = False,
+) -> None:
+    referential_id = _campaign_referential_id(raw_campaign)
+    scoped_asset_ids = _campaign_scope_asset_ids(raw_campaign)
+    if not tenant_id or not referential_id or not scoped_asset_ids:
+        return
+
+    existing_rows = con.execute(
+        "SELECT asset_id FROM information_assets WHERE tenant_id = ?",
+        (tenant_id,),
+    ).fetchall()
+    existing_asset_ids = {str(row["asset_id"] or "") for row in existing_rows}
+    writable_asset_ids = [
+        asset_id for asset_id in scoped_asset_ids if asset_id in existing_asset_ids
+    ]
+    if not writable_asset_ids:
+        return
+
+    answers_by_asset: dict[str, list[tuple[str, dict[str, Any]]]] = {
+        asset_id: [] for asset_id in writable_asset_ids
+    }
+    raw_answers = raw_campaign.get("answers")
+    if isinstance(raw_answers, list):
+        for raw_answer in raw_answers:
+            identity = _asset_answer_identity(raw_answer)
+            if identity is None:
+                continue
+            asset_id, criterion_id = identity
+            if asset_id not in answers_by_asset or not isinstance(raw_answer, dict):
+                continue
+            answer = dict(raw_answer)
+            answer["criterionId"] = f"asset:{asset_id}:criterion:{criterion_id}"
+            answers_by_asset[asset_id].append((criterion_id, answer))
+
+    for asset_id in writable_asset_ids:
+        if replace_existing:
+            con.execute(
+                """
+                DELETE FROM asset_assessment_answers
+                WHERE tenant_id = ? AND asset_id = ? AND referential_id = ?
+                """,
+                (tenant_id, asset_id, referential_id),
+            )
+        for criterion_id, answer in answers_by_asset[asset_id]:
+            con.execute(
+                """
+                INSERT INTO asset_assessment_answers(
+                    tenant_id, asset_id, referential_id, criterion_id,
+                    answer_json, source_campaign_id, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(tenant_id, asset_id, referential_id, criterion_id)
+                DO UPDATE SET
+                    answer_json = excluded.answer_json,
+                    source_campaign_id = excluded.source_campaign_id,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    tenant_id,
+                    asset_id,
+                    referential_id,
+                    criterion_id,
+                    _canonical_json(answer),
+                    source_campaign_id,
+                    updated_at,
+                ),
+            )
+
+
+def _campaign_payload_with_canonical_asset_answers(
+    con: Any,
+    tenant_id: str,
+    raw_campaign: dict[str, Any],
+) -> dict[str, Any]:
+    raw_campaign = _campaign_payload_with_current_asset_scope(
+        con,
+        tenant_id,
+        raw_campaign,
+    )
+    referential_id = _campaign_referential_id(raw_campaign)
+    scoped_asset_ids = _campaign_scope_asset_ids(raw_campaign)
+    if not referential_id or not scoped_asset_ids:
+        return raw_campaign
+
+    canonical_answers: list[dict[str, Any]] = []
+    for asset_id in scoped_asset_ids:
+        rows = con.execute(
+            """
+            SELECT answer_json
+            FROM asset_assessment_answers
+            WHERE tenant_id = ? AND asset_id = ? AND referential_id = ?
+            ORDER BY criterion_id ASC
+            """,
+            (tenant_id, asset_id, referential_id),
+        ).fetchall()
+        for row in rows:
+            answer = _parse_json(row["answer_json"], {})
+            if isinstance(answer, dict):
+                canonical_answers.append(answer)
+
+    scoped_set = set(scoped_asset_ids)
+    preserved_answers: list[Any] = []
+    raw_answers = raw_campaign.get("answers")
+    if isinstance(raw_answers, list):
+        for raw_answer in raw_answers:
+            identity = _asset_answer_identity(raw_answer)
+            if identity is None or identity[0] not in scoped_set:
+                preserved_answers.append(raw_answer)
+
+    merged = dict(raw_campaign)
+    merged["answers"] = [*preserved_answers, *canonical_answers]
+    return merged
+
+
+def _campaign_payload_with_current_asset_scope(
+    con: Any,
+    tenant_id: str,
+    raw_campaign: dict[str, Any],
+) -> dict[str, Any]:
+    campaign = _campaign_record(raw_campaign)
+    information = campaign.get("information")
+    if not isinstance(information, dict):
+        return raw_campaign
+    scope = information.get("inventoryScope")
+    if not isinstance(scope, dict):
+        return raw_campaign
+    system_id = str(scope.get("informationSystemId") or "").strip()
+    if not system_id:
+        return raw_campaign
+
+    rows = con.execute(
+        """
+        SELECT a.asset_id, a.name, a.asset_type, a.description, a.criticality
+        FROM information_system_assets isa
+        INNER JOIN information_assets a
+          ON a.tenant_id = isa.tenant_id AND a.asset_id = isa.asset_id
+        WHERE isa.tenant_id = ? AND isa.system_id = ?
+        ORDER BY a.name ASC, a.created_at ASC, a.asset_id ASC
+        """,
+        (tenant_id, system_id),
+    ).fetchall()
+    assets = [
+        {
+            "assetId": row["asset_id"],
+            "name": row["name"],
+            "assetType": row["asset_type"],
+            "description": row["description"],
+            "criticality": row["criticality"],
+        }
+        for row in rows
+    ]
+    function_rows = con.execute(
+        """
+        SELECT f.function_id, f.name
+        FROM critical_function_systems cfs
+        INNER JOIN critical_functions f
+          ON f.tenant_id = cfs.tenant_id AND f.function_id = cfs.function_id
+        WHERE cfs.tenant_id = ? AND cfs.system_id = ?
+        ORDER BY f.name ASC, f.created_at ASC, f.function_id ASC
+        """,
+        (tenant_id, system_id),
+    ).fetchall()
+    function_ids = [str(row["function_id"] or "") for row in function_rows]
+    function_names = [str(row["name"] or "") for row in function_rows]
+
+    scope_copy = dict(scope)
+    scope_copy["assets"] = assets
+    scope_copy["criticalFunctionIds"] = function_ids
+    scope_copy["criticalFunctionId"] = function_ids[0] if function_ids else ""
+    scope_copy["criticalFunctionName"] = ", ".join(
+        name for name in function_names if name
+    )
+    information_copy = dict(information)
+    information_copy["inventoryScope"] = scope_copy
+    campaign_copy = dict(campaign)
+    campaign_copy["information"] = information_copy
+    if campaign is raw_campaign:
+        return campaign_copy
+    merged = dict(raw_campaign)
+    merged["campaign"] = campaign_copy
+    return merged
 
 
 def _raise_campaign_revision_conflict(
@@ -4833,6 +5177,7 @@ def _record_campaign_revisions(
             skipped_without_id += 1
             continue
         expected_revision = _campaign_expected_revision(raw_campaign, original_cid)
+        replace_asset_answers = raw_campaign.get("replaceAssetAnswers") is True
         stored_campaign = _campaign_payload_for_storage(raw_campaign)
         cid = _campaign_id_for_save(con, tenant_id, original_cid)
         if cid != original_cid:
@@ -4857,6 +5202,15 @@ def _record_campaign_revisions(
             _raise_campaign_revision_conflict(cid, expected_revision, current_revision)
 
         if existing and str(existing["payload_sha256"] or "") == campaign_payload_sha256:
+            if replace_asset_answers:
+                _replace_canonical_asset_answers(
+                    con,
+                    tenant_id,
+                    stored_campaign,
+                    source_campaign_id=cid,
+                    updated_at=updated_at,
+                    replace_existing=True,
+                )
             continue
 
         next_revision = current_revision + 1
@@ -4881,6 +5235,15 @@ def _record_campaign_revisions(
                 campaign_payload_sha256,
                 _canonical_json(stored_campaign),
             ),
+        )
+
+        _replace_canonical_asset_answers(
+            con,
+            tenant_id,
+            stored_campaign,
+            source_campaign_id=cid,
+            updated_at=updated_at,
+            replace_existing=replace_asset_answers,
         )
 
         con.execute(
@@ -4979,7 +5342,12 @@ def _campaign_title_from_payload(payload: Any, fallback: str) -> str:
     return fallback
 
 
-def _public_campaign_state_from_row(row: Any, *, include_payload: bool = False) -> dict[str, Any]:
+def _public_campaign_state_from_row(
+    row: Any,
+    *,
+    include_payload: bool = False,
+    con: Any | None = None,
+) -> dict[str, Any]:
     payload = _parse_json(row["payload_json"], {})
     campaign_id = str(row["campaign_id"] or "")
     public = {
@@ -4996,6 +5364,12 @@ def _public_campaign_state_from_row(row: Any, *, include_payload: bool = False) 
         "conflictPolicy": row["conflict_policy"],
     }
     if include_payload:
+        if isinstance(payload, dict) and con is not None:
+            payload = _campaign_payload_with_canonical_asset_answers(
+                con,
+                str(row["tenant_id"] or ""),
+                payload,
+            )
         public["payload"] = payload if isinstance(payload, dict) else None
     return public
 
@@ -7805,7 +8179,13 @@ def _inventory_asset_criticality(value: Any, *, default: str = "") -> str:
     raise HTTPException(status_code=400, detail="La criticité de l'actif doit être comprise entre 1 et 4")
 
 
-def _inventory_row_public(row: Any, *, kind: str) -> dict[str, Any]:
+def _inventory_row_public(
+    row: Any,
+    *,
+    kind: str,
+    relation_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    relation_ids = relation_ids or []
     if kind == "function":
         return {
             "id": row["function_id"],
@@ -7820,7 +8200,8 @@ def _inventory_row_public(row: Any, *, kind: str) -> dict[str, Any]:
         return {
             "id": row["system_id"],
             "systemId": row["system_id"],
-            "functionId": row["function_id"],
+            "functionId": relation_ids[0] if relation_ids else "",
+            "functionIds": relation_ids,
             "tenantId": row["tenant_id"],
             "name": row["name"],
             "description": row["description"],
@@ -7831,7 +8212,8 @@ def _inventory_row_public(row: Any, *, kind: str) -> dict[str, Any]:
     return {
         "id": row["asset_id"],
         "assetId": row["asset_id"],
-        "systemId": row["system_id"],
+        "systemId": relation_ids[0] if relation_ids else "",
+        "systemIds": relation_ids,
         "tenantId": row["tenant_id"],
         "name": row["name"],
         "assetType": row["asset_type"],
@@ -7854,7 +8236,7 @@ def _inventory_payload(con: Any, tenant_id: str) -> dict[str, Any]:
     ).fetchall()
     system_rows = con.execute(
         """
-        SELECT tenant_id, system_id, function_id, name, description, owner, created_at, updated_at
+        SELECT tenant_id, system_id, name, description, owner, created_at, updated_at
         FROM information_systems
         WHERE tenant_id = ?
         ORDER BY name ASC, created_at ASC
@@ -7863,16 +8245,78 @@ def _inventory_payload(con: Any, tenant_id: str) -> dict[str, Any]:
     ).fetchall()
     asset_rows = con.execute(
         """
-        SELECT tenant_id, asset_id, system_id, name, asset_type, description, criticality, created_at, updated_at
+        SELECT tenant_id, asset_id, name, asset_type, description, criticality, created_at, updated_at
         FROM information_assets
         WHERE tenant_id = ?
         ORDER BY name ASC, created_at ASC
         """,
         (tenant_id,),
     ).fetchall()
+    function_link_rows = con.execute(
+        """
+        SELECT function_id, system_id
+        FROM critical_function_systems
+        WHERE tenant_id = ?
+        ORDER BY created_at ASC, function_id ASC, system_id ASC
+        """,
+        (tenant_id,),
+    ).fetchall()
+    asset_link_rows = con.execute(
+        """
+        SELECT system_id, asset_id
+        FROM information_system_assets
+        WHERE tenant_id = ?
+        ORDER BY created_at ASC, system_id ASC, asset_id ASC
+        """,
+        (tenant_id,),
+    ).fetchall()
+    assessment_rows = con.execute(
+        """
+        SELECT asset_id, COUNT(*) AS answer_count, MAX(updated_at) AS assessment_updated_at
+        FROM asset_assessment_answers
+        WHERE tenant_id = ?
+        GROUP BY asset_id
+        """,
+        (tenant_id,),
+    ).fetchall()
+    function_ids_by_system: dict[str, list[str]] = {}
+    system_ids_by_asset: dict[str, list[str]] = {}
+    for row in function_link_rows:
+        function_ids_by_system.setdefault(str(row["system_id"]), []).append(
+            str(row["function_id"])
+        )
+    for row in asset_link_rows:
+        system_ids_by_asset.setdefault(str(row["asset_id"]), []).append(
+            str(row["system_id"])
+        )
     functions = [_inventory_row_public(row, kind="function") for row in function_rows]
-    systems = [_inventory_row_public(row, kind="system") for row in system_rows]
-    assets = [_inventory_row_public(row, kind="asset") for row in asset_rows]
+    systems = [
+        _inventory_row_public(
+            row,
+            kind="system",
+            relation_ids=function_ids_by_system.get(str(row["system_id"]), []),
+        )
+        for row in system_rows
+    ]
+    assets = [
+        _inventory_row_public(
+            row,
+            kind="asset",
+            relation_ids=system_ids_by_asset.get(str(row["asset_id"]), []),
+        )
+        for row in asset_rows
+    ]
+    assessment_by_asset = {
+        str(row["asset_id"]): {
+            "assessmentAnswerCount": int(row["answer_count"] or 0),
+            "assessmentUpdatedAt": str(row["assessment_updated_at"] or ""),
+        }
+        for row in assessment_rows
+    }
+    for asset in assets:
+        assessment = assessment_by_asset.get(str(asset["assetId"]), {})
+        asset.update(assessment)
+        asset["isAssessed"] = int(asset.get("assessmentAnswerCount") or 0) > 0
     return {
         "status": "ok",
         "type": "openirn.assetInventory",
@@ -7960,8 +8404,9 @@ def _inventory_system_export_context(con: Any, tenant_id: str, system_id: str) -
     system = next((item for item in inventory["informationSystems"] if item["systemId"] == system_id), None)
     if system is None:
         raise HTTPException(status_code=404, detail="Système d'information introuvable")
-    function = next((item for item in inventory["criticalFunctions"] if item["functionId"] == system["functionId"]), {})
-    assets = [item for item in inventory["assets"] if item["systemId"] == system_id]
+    function_ids = set(system.get("functionIds") or [])
+    function = next((item for item in inventory["criticalFunctions"] if item["functionId"] in function_ids), {})
+    assets = [item for item in inventory["assets"] if system_id in (item.get("systemIds") or [])]
     return function, system, assets
 
 
@@ -8136,8 +8581,8 @@ def _inventory_import_from_excel_bytes(con: Any, tenant_id: str, system_id: str,
         raise HTTPException(status_code=400, detail="La feuille Actifs SI ne contient aucune ligne importable")
 
     existing_asset_rows = con.execute(
-        "SELECT asset_id, criticality FROM information_assets WHERE tenant_id = ? AND system_id = ?",
-        (tenant_id, system_id),
+        "SELECT asset_id, criticality FROM information_assets WHERE tenant_id = ?",
+        (tenant_id,),
     ).fetchall()
     existing_asset_ids = {str(row["asset_id"]) for row in existing_asset_rows}
     existing_criticalities = {str(row["asset_id"]): str(row["criticality"] or "").strip() for row in existing_asset_rows}
@@ -8162,7 +8607,7 @@ def _inventory_import_from_excel_bytes(con: Any, tenant_id: str, system_id: str,
             if raw_asset_id not in existing_asset_ids:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Ligne {index}: ID actif inconnu pour ce SI. Pour créer un nouvel actif, laissez la colonne ID actif vide.",
+                    detail=f"Ligne {index}: ID actif inconnu dans cet espace. Pour créer un nouvel actif, laissez la colonne ID actif vide.",
                 )
             asset_id = raw_asset_id
         else:
@@ -8183,14 +8628,30 @@ def _inventory_import_from_excel_bytes(con: Any, tenant_id: str, system_id: str,
         used_asset_ids.add(asset_id)
         assets.append((asset_id, asset_name, asset_type, asset_criticality, asset_description))
 
-    con.execute("DELETE FROM information_assets WHERE tenant_id = ? AND system_id = ?", (tenant_id, system_id))
+    con.execute(
+        "DELETE FROM information_system_assets WHERE tenant_id = ? AND system_id = ?",
+        (tenant_id, system_id),
+    )
     for asset_id, name, asset_type, criticality, description in assets:
         con.execute(
             """
             INSERT INTO information_assets(tenant_id, asset_id, system_id, name, asset_type, description, criticality, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(tenant_id, asset_id) DO UPDATE SET
+                name = excluded.name,
+                asset_type = excluded.asset_type,
+                description = excluded.description,
+                criticality = excluded.criticality,
+                updated_at = excluded.updated_at
             """,
             (tenant_id, asset_id, system_id, name, asset_type, description, criticality, now, now),
+        )
+        con.execute(
+            """
+            INSERT INTO information_system_assets(tenant_id, system_id, asset_id, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (tenant_id, system_id, asset_id, now),
         )
     return {"assets": len(assets)}
 
@@ -8211,6 +8672,77 @@ def _require_information_system(con: Any, tenant_id: str, system_id: str) -> Non
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="Système d'information introuvable")
+
+
+def _require_information_asset(con: Any, tenant_id: str, asset_id: str) -> None:
+    row = con.execute(
+        "SELECT 1 FROM information_assets WHERE tenant_id = ? AND asset_id = ?",
+        (tenant_id, asset_id),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Actif introuvable")
+
+
+def _inventory_relation_ids(payload: dict[str, Any], plural_key: str, legacy_key: str) -> list[str]:
+    raw = payload.get(plural_key)
+    if raw is None:
+        raw = [payload.get(legacy_key)] if payload.get(legacy_key) else []
+    if not isinstance(raw, list):
+        raise HTTPException(status_code=400, detail=f"Le champ {plural_key} doit être une liste")
+    result: list[str] = []
+    for value in raw:
+        relation_id = _normalize_uuid(value)
+        if not relation_id:
+            raise HTTPException(status_code=400, detail=f"Identifiant invalide dans {plural_key}")
+        if relation_id not in result:
+            result.append(relation_id)
+    return result
+
+
+def _replace_system_function_links(
+    con: Any,
+    tenant_id: str,
+    system_id: str,
+    function_ids: list[str],
+    now: str,
+) -> None:
+    for function_id in function_ids:
+        _require_function(con, tenant_id, function_id)
+    con.execute(
+        "DELETE FROM critical_function_systems WHERE tenant_id = ? AND system_id = ?",
+        (tenant_id, system_id),
+    )
+    for function_id in function_ids:
+        con.execute(
+            """
+            INSERT INTO critical_function_systems(tenant_id, function_id, system_id, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (tenant_id, function_id, system_id, now),
+        )
+
+
+def _replace_asset_system_links(
+    con: Any,
+    tenant_id: str,
+    asset_id: str,
+    system_ids: list[str],
+    now: str,
+) -> None:
+    for system_id in system_ids:
+        _require_information_system(con, tenant_id, system_id)
+    con.execute(
+        "DELETE FROM information_system_assets WHERE tenant_id = ? AND asset_id = ?",
+        (tenant_id, asset_id),
+    )
+    for system_id in system_ids:
+        con.execute(
+            """
+            INSERT INTO information_system_assets(tenant_id, system_id, asset_id, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (tenant_id, system_id, asset_id, now),
+        )
 
 
 
@@ -8385,27 +8917,26 @@ async def information_system_create(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Payload must be a JSON object")
     tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
     auth_context = _require_campaign_manager_authorization(request, tenant_id)
-    function_id = str(payload.get("functionId") or "").strip()
+    function_ids = _inventory_relation_ids(payload, "functionIds", "functionId")
     name = _inventory_text(payload.get("name"), 255)
     description = _inventory_text(payload.get("description"), 4000)
     owner = _inventory_text(payload.get("owner"), 255)
-    if not function_id:
-        raise HTTPException(status_code=400, detail="La fonction critique est obligatoire")
     if not name:
         raise HTTPException(status_code=400, detail="Le nom du système d'information est obligatoire")
     now = _utc_now().isoformat()
     system_id = _normalize_uuid(payload.get("systemId") or payload.get("id")) or _new_uuid()
     with _db() as con:
         with con:
-            _require_function(con, tenant_id, function_id)
+            _ensure_tenant(con, tenant_id)
             con.execute(
                 """
                 INSERT INTO information_systems(tenant_id, system_id, function_id, name, description, owner, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (tenant_id, system_id, function_id, name, description, owner, now, now),
+                (tenant_id, system_id, function_ids[0] if function_ids else None, name, description, owner, now, now),
             )
-            _record_device_audit(con, tenant_id, "inventory.information_system.created", device_id=str(auth_context.get("deviceId") or ""), payload={"systemId": system_id, "functionId": function_id, "name": name, "actorUserId": auth_context.get("userId") or ""})
+            _replace_system_function_links(con, tenant_id, system_id, function_ids, now)
+            _record_device_audit(con, tenant_id, "inventory.information_system.created", device_id=str(auth_context.get("deviceId") or ""), payload={"systemId": system_id, "functionIds": function_ids, "name": name, "actorUserId": auth_context.get("userId") or ""})
             result = _inventory_payload(con, tenant_id)
     return result
 
@@ -8420,28 +8951,26 @@ async def information_system_update(system_id: str, request: Request) -> dict[st
         raise HTTPException(status_code=400, detail="Payload must be a JSON object")
     tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
     auth_context = _require_campaign_manager_authorization(request, tenant_id)
-    function_id = str(payload.get("functionId") or "").strip()
+    function_ids = _inventory_relation_ids(payload, "functionIds", "functionId")
     name = _inventory_text(payload.get("name"), 255)
     description = _inventory_text(payload.get("description"), 4000)
     owner = _inventory_text(payload.get("owner"), 255)
-    if not function_id:
-        raise HTTPException(status_code=400, detail="La fonction critique est obligatoire")
     if not name:
         raise HTTPException(status_code=400, detail="Le nom du système d'information est obligatoire")
     now = _utc_now().isoformat()
     with _db() as con:
         with con:
             _require_information_system(con, tenant_id, system_id)
-            _require_function(con, tenant_id, function_id)
             con.execute(
                 """
                 UPDATE information_systems
                 SET function_id = ?, name = ?, description = ?, owner = ?, updated_at = ?
                 WHERE tenant_id = ? AND system_id = ?
                 """,
-                (function_id, name, description, owner, now, tenant_id, system_id),
+                (function_ids[0] if function_ids else None, name, description, owner, now, tenant_id, system_id),
             )
-            _record_device_audit(con, tenant_id, "inventory.information_system.updated", device_id=str(auth_context.get("deviceId") or ""), payload={"systemId": system_id, "functionId": function_id, "name": name, "actorUserId": auth_context.get("userId") or ""})
+            _replace_system_function_links(con, tenant_id, system_id, function_ids, now)
+            _record_device_audit(con, tenant_id, "inventory.information_system.updated", device_id=str(auth_context.get("deviceId") or ""), payload={"systemId": system_id, "functionIds": function_ids, "name": name, "actorUserId": auth_context.get("userId") or ""})
             result = _inventory_payload(con, tenant_id)
     return result
 
@@ -8463,6 +8992,50 @@ def information_system_delete(
     return result
 
 
+@app.patch("/inventory/information-systems/{system_id}/assets")
+async def information_system_assets_replace(system_id: str, request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Payload must be a JSON object")
+    tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
+    auth_context = _require_campaign_manager_authorization(request, tenant_id)
+    asset_ids = _inventory_relation_ids(payload, "assetIds", "assetId")
+    now = _utc_now().isoformat()
+    with _db() as con:
+        with con:
+            _require_information_system(con, tenant_id, system_id)
+            for asset_id in asset_ids:
+                _require_information_asset(con, tenant_id, asset_id)
+            con.execute(
+                "DELETE FROM information_system_assets WHERE tenant_id = ? AND system_id = ?",
+                (tenant_id, system_id),
+            )
+            for asset_id in asset_ids:
+                con.execute(
+                    """
+                    INSERT INTO information_system_assets(tenant_id, system_id, asset_id, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (tenant_id, system_id, asset_id, now),
+                )
+            _record_device_audit(
+                con,
+                tenant_id,
+                "inventory.information_system.assets_replaced",
+                device_id=str(auth_context.get("deviceId") or ""),
+                payload={
+                    "systemId": system_id,
+                    "assetIds": asset_ids,
+                    "actorUserId": auth_context.get("userId") or "",
+                },
+            )
+            result = _inventory_payload(con, tenant_id)
+    return result
+
+
 @app.post("/inventory/assets")
 async def information_asset_create(request: Request) -> dict[str, Any]:
     try:
@@ -8473,13 +9046,11 @@ async def information_asset_create(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Payload must be a JSON object")
     tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
     auth_context = _require_campaign_manager_authorization(request, tenant_id)
-    system_id = str(payload.get("systemId") or "").strip()
+    system_ids = _inventory_relation_ids(payload, "systemIds", "systemId")
     name = _inventory_text(payload.get("name"), 255)
     asset_type = _inventory_text(payload.get("assetType") or payload.get("type"), 120)
     description = _inventory_text(payload.get("description"), 4000)
     criticality = _inventory_asset_criticality(payload.get("criticality"))
-    if not system_id:
-        raise HTTPException(status_code=400, detail="Le système d'information est obligatoire")
     if not name:
         raise HTTPException(status_code=400, detail="Le nom de l'actif est obligatoire")
     if not criticality:
@@ -8488,15 +9059,16 @@ async def information_asset_create(request: Request) -> dict[str, Any]:
     asset_id = _normalize_uuid(payload.get("assetId") or payload.get("id")) or _new_uuid()
     with _db() as con:
         with con:
-            _require_information_system(con, tenant_id, system_id)
+            _ensure_tenant(con, tenant_id)
             con.execute(
                 """
                 INSERT INTO information_assets(tenant_id, asset_id, system_id, name, asset_type, description, criticality, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (tenant_id, asset_id, system_id, name, asset_type, description, criticality, now, now),
+                (tenant_id, asset_id, system_ids[0] if system_ids else None, name, asset_type, description, criticality, now, now),
             )
-            _record_device_audit(con, tenant_id, "inventory.asset.created", device_id=str(auth_context.get("deviceId") or ""), payload={"assetId": asset_id, "systemId": system_id, "name": name, "actorUserId": auth_context.get("userId") or ""})
+            _replace_asset_system_links(con, tenant_id, asset_id, system_ids, now)
+            _record_device_audit(con, tenant_id, "inventory.asset.created", device_id=str(auth_context.get("deviceId") or ""), payload={"assetId": asset_id, "systemIds": system_ids, "name": name, "actorUserId": auth_context.get("userId") or ""})
             result = _inventory_payload(con, tenant_id)
     return result
 
@@ -8511,13 +9083,11 @@ async def information_asset_update(asset_id: str, request: Request) -> dict[str,
         raise HTTPException(status_code=400, detail="Payload must be a JSON object")
     tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
     auth_context = _require_campaign_manager_authorization(request, tenant_id)
-    system_id = str(payload.get("systemId") or "").strip()
+    system_ids = _inventory_relation_ids(payload, "systemIds", "systemId")
     name = _inventory_text(payload.get("name"), 255)
     asset_type = _inventory_text(payload.get("assetType") or payload.get("type"), 120)
     description = _inventory_text(payload.get("description"), 4000)
     criticality = _inventory_asset_criticality(payload.get("criticality"))
-    if not system_id:
-        raise HTTPException(status_code=400, detail="Le système d'information est obligatoire")
     if not name:
         raise HTTPException(status_code=400, detail="Le nom de l'actif est obligatoire")
     if not criticality:
@@ -8528,16 +9098,16 @@ async def information_asset_update(asset_id: str, request: Request) -> dict[str,
             row = con.execute("SELECT 1 FROM information_assets WHERE tenant_id = ? AND asset_id = ?", (tenant_id, asset_id)).fetchone()
             if row is None:
                 raise HTTPException(status_code=404, detail="Actif introuvable")
-            _require_information_system(con, tenant_id, system_id)
             con.execute(
                 """
                 UPDATE information_assets
                 SET system_id = ?, name = ?, asset_type = ?, description = ?, criticality = ?, updated_at = ?
                 WHERE tenant_id = ? AND asset_id = ?
                 """,
-                (system_id, name, asset_type, description, criticality, now, tenant_id, asset_id),
+                (system_ids[0] if system_ids else None, name, asset_type, description, criticality, now, tenant_id, asset_id),
             )
-            _record_device_audit(con, tenant_id, "inventory.asset.updated", device_id=str(auth_context.get("deviceId") or ""), payload={"assetId": asset_id, "systemId": system_id, "name": name, "actorUserId": auth_context.get("userId") or ""})
+            _replace_asset_system_links(con, tenant_id, asset_id, system_ids, now)
+            _record_device_audit(con, tenant_id, "inventory.asset.updated", device_id=str(auth_context.get("deviceId") or ""), payload={"assetId": asset_id, "systemIds": system_ids, "name": name, "actorUserId": auth_context.get("userId") or ""})
             result = _inventory_payload(con, tenant_id)
     return result
 
@@ -8933,11 +9503,14 @@ def campaigns(
                 (tenant_id,),
             ).fetchone()[0]
         )
-
-    items = [
-        _public_campaign_state_from_row(row, include_payload=includePayload)
-        for row in rows
-    ]
+        items = [
+            _public_campaign_state_from_row(
+                row,
+                include_payload=includePayload,
+                con=con,
+            )
+            for row in rows
+        ]
     return {
         "status": "ok",
         "type": "openirn.campaignStates",
@@ -9114,7 +9687,7 @@ def campaign_revisions(
     limit: int = Query(default=50, ge=1, le=200),
 ) -> dict[str, Any]:
     tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
-    _require_campaign_manager_authorization(request, tenant_id)
+    _require_admin_authorization(request, tenant_id)
     campaign_id = str(campaignId or "").strip()
 
     with _db() as con:
@@ -9167,7 +9740,7 @@ def campaign_conflicts(
     limit: int = Query(default=50, ge=1, le=200),
 ) -> dict[str, Any]:
     tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
-    _require_campaign_manager_authorization(request, tenant_id)
+    _require_admin_authorization(request, tenant_id)
     campaign_id = str(campaignId or "").strip()
 
     with _db() as con:
@@ -9220,7 +9793,7 @@ def campaign_revision(
     serverRevision: int = Query(ge=1),
 ) -> dict[str, Any]:
     tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
-    _require_campaign_manager_authorization(request, tenant_id)
+    _require_admin_authorization(request, tenant_id)
     campaign_id = str(campaignId or "").strip()
 
     with _db() as con:
@@ -9261,7 +9834,7 @@ async def campaign_restore(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Payload must be a JSON object")
 
     tenant_id = _resolve_tenant_id_for_request(payload.get("tenantId"), DEFAULT_TENANT_ID)
-    auth_context = _require_campaign_manager_authorization(request, tenant_id)
+    auth_context = _require_admin_authorization(request, tenant_id)
     campaign_id = str(payload.get("campaignId") or "").strip()
     restored_by_user_id = str(payload.get("restoredByUserId") or "").strip()
     reason = str(payload.get("reason") or "admin_restore").strip()[:240] or "admin_restore"
@@ -9433,6 +10006,15 @@ async def campaign_restore(request: Request) -> dict[str, Any]:
                     source_sha256,
                     _canonical_json(source_payload),
                 ),
+            )
+
+            _replace_canonical_asset_answers(
+                con,
+                tenant_id,
+                source_payload,
+                source_campaign_id=campaign_id,
+                updated_at=restored_at,
+                replace_existing=True,
             )
 
             con.execute(

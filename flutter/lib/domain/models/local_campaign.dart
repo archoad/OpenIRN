@@ -161,6 +161,7 @@ class CampaignInformation {
   final String projectDirectorLastName;
   final String projectDirectorEmail;
   final String criticalFunctionId;
+  final List<String> criticalFunctionIds;
   final String criticalFunctionName;
   final String informationSystemId;
   final List<CampaignInformationAsset> assets;
@@ -172,6 +173,7 @@ class CampaignInformation {
     this.projectDirectorLastName = '',
     this.projectDirectorEmail = '',
     this.criticalFunctionId = '',
+    this.criticalFunctionIds = const <String>[],
     this.criticalFunctionName = '',
     this.informationSystemId = '',
     this.assets = const <CampaignInformationAsset>[],
@@ -246,6 +248,10 @@ class CampaignInformation {
           scope['criticalFunctionId']?.toString().trim() ??
           json['criticalFunctionId']?.toString().trim() ??
           '',
+      criticalFunctionIds: _campaignRelationIds(
+        scope['criticalFunctionIds'],
+        scope['criticalFunctionId'] ?? json['criticalFunctionId'],
+      ),
       criticalFunctionName:
           scope['criticalFunctionName']?.toString().trim() ??
           json['criticalFunctionName']?.toString().trim() ??
@@ -265,6 +271,7 @@ class CampaignInformation {
     String? projectDirectorLastName,
     String? projectDirectorEmail,
     String? criticalFunctionId,
+    List<String>? criticalFunctionIds,
     String? criticalFunctionName,
     String? informationSystemId,
     List<CampaignInformationAsset>? assets,
@@ -279,6 +286,7 @@ class CampaignInformation {
       projectDirectorEmail:
           projectDirectorEmail?.trim() ?? this.projectDirectorEmail,
       criticalFunctionId: criticalFunctionId?.trim() ?? this.criticalFunctionId,
+      criticalFunctionIds: criticalFunctionIds ?? this.criticalFunctionIds,
       criticalFunctionName:
           criticalFunctionName?.trim() ?? this.criticalFunctionName,
       informationSystemId:
@@ -296,6 +304,12 @@ class CampaignInformation {
       'projectDirectorEmail': projectDirectorEmail.trim(),
       'inventoryScope': <String, dynamic>{
         'criticalFunctionId': criticalFunctionId.trim(),
+        'criticalFunctionIds': criticalFunctionIds.isEmpty
+            ? <String>[
+                if (criticalFunctionId.trim().isNotEmpty)
+                  criticalFunctionId.trim(),
+              ]
+            : criticalFunctionIds,
         'criticalFunctionName': criticalFunctionName.trim(),
         'informationSystemId': informationSystemId.trim(),
         'assets': assets.map((asset) => asset.toJson()).toList(growable: false),
@@ -493,6 +507,10 @@ class LocalCampaign {
           scope['criticalFunctionId']?.toString().trim() ??
           json['criticalFunctionId']?.toString().trim() ??
           '',
+      criticalFunctionIds: _campaignRelationIds(
+        scope['criticalFunctionIds'],
+        scope['criticalFunctionId'] ?? json['criticalFunctionId'],
+      ),
       criticalFunctionName:
           scope['criticalFunctionName']?.toString().trim() ??
           json['criticalFunctionName']?.toString().trim() ??
@@ -512,4 +530,21 @@ class LocalCampaign {
     }
     return DateTime.tryParse(raw)?.toUtc();
   }
+}
+
+List<String> _campaignRelationIds(Object? values, Object? legacyValue) {
+  final result = <String>[];
+  if (values is List) {
+    for (final value in values) {
+      final id = value?.toString().trim() ?? '';
+      if (id.isNotEmpty && !result.contains(id)) {
+        result.add(id);
+      }
+    }
+  }
+  final legacyId = legacyValue?.toString().trim() ?? '';
+  if (legacyId.isNotEmpty && !result.contains(legacyId)) {
+    result.add(legacyId);
+  }
+  return List<String>.unmodifiable(result);
 }

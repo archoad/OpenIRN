@@ -13,6 +13,7 @@ class ServerCampaignBundle {
   final Map<String, CriterionAnswer> criterionAnswers;
   final List<CriterionAssignment> assignments;
   final List<LocalActivityEvent> activityEvents;
+  final bool replaceAssetAnswers;
 
   const ServerCampaignBundle({
     required this.campaign,
@@ -20,6 +21,7 @@ class ServerCampaignBundle {
     this.criterionAnswers = const <String, CriterionAnswer>{},
     this.assignments = const <CriterionAssignment>[],
     this.activityEvents = const <LocalActivityEvent>[],
+    this.replaceAssetAnswers = false,
   });
 
   ServerCampaignBundle copyWith({
@@ -28,6 +30,7 @@ class ServerCampaignBundle {
     Map<String, CriterionAnswer>? criterionAnswers,
     List<CriterionAssignment>? assignments,
     List<LocalActivityEvent>? activityEvents,
+    bool? replaceAssetAnswers,
   }) {
     return ServerCampaignBundle(
       campaign: campaign ?? this.campaign,
@@ -35,6 +38,7 @@ class ServerCampaignBundle {
       criterionAnswers: criterionAnswers ?? this.criterionAnswers,
       assignments: assignments ?? this.assignments,
       activityEvents: activityEvents ?? this.activityEvents,
+      replaceAssetAnswers: replaceAssetAnswers ?? this.replaceAssetAnswers,
     );
   }
 }
@@ -240,13 +244,11 @@ class ServerCampaignStore {
   }) async {
     final bundles = await loadBundles(referentialId: referentialId);
     var found = false;
-    final updated = <ServerCampaignBundle>[];
+    ServerCampaignBundle? updated;
     for (final bundle in bundles) {
       if (bundle.campaign.id == campaignId) {
-        updated.add(update(bundle));
+        updated = update(bundle);
         found = true;
-      } else {
-        updated.add(bundle);
       }
     }
     if (!found) {
@@ -254,7 +256,10 @@ class ServerCampaignStore {
         'Campagne inconnue côté serveur : $campaignId',
       );
     }
-    await saveBundles(referentialId: referentialId, bundles: updated);
+    await saveBundles(
+      referentialId: referentialId,
+      bundles: <ServerCampaignBundle>[updated!],
+    );
   }
 
   Map<String, dynamic> _buildPayload({
@@ -320,6 +325,7 @@ class ServerCampaignStore {
           )
           .map(_answerToJson)
           .toList(growable: false),
+      if (bundle.replaceAssetAnswers) 'replaceAssetAnswers': true,
       'assignments': bundle.assignments
           .map((assignment) => assignment.toJson())
           .toList(growable: false),

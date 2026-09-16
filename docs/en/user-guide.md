@@ -198,20 +198,22 @@ This function is available to Administrators and IRN Managers under **Administra
 
 ## Create an information system
 
-1. Open the relevant critical function.
-2. Add an information system.
-3. Enter its name, description, and owner.
-4. Save.
+1. Add an IS from the **Information systems** section.
+2. Enter its name, description, and owner.
+3. Select one or more critical functions if they already exist.
+4. Save. Links can be completed later.
 
 ## Add assets
 
-For each asset:
+Create an asset once in the catalogue even when it contributes to several information systems. For each asset:
 
-1. select the IS;
-2. enter a distinctive name;
-3. specify its type and a useful description;
-4. assign a criticality level;
-5. save.
+1. enter a distinctive name in the **Asset catalogue** section;
+2. specify its type and a useful description;
+3. assign a criticality level;
+4. select the relevant information systems, or save it without a link;
+5. use **Manage existing assets** from an IS to complete its links.
+
+The IRN rating belongs to the asset. When an asset has already been rated in one campaign, the same rating is automatically presented in every other campaign that references it.
 
 The criticality levels are:
 
@@ -224,7 +226,7 @@ The criticality levels are:
 
 ## Import or export with Excel
 
-The screen can export the workspace template, which can then be completed and imported. Preserve protected identifiers in the file, do not rename worksheets arbitrarily, and review the validation report before confirming an import.
+The screen exports the assets linked to an IS. An existing identifier links the global asset to that IS and updates its metadata; a row without an identifier creates an asset. An asset missing from the file is only unlinked from the selected IS, without deleting the global asset or its rating. Preserve protected identifiers and do not rename worksheets arbitrarily.
 
 An export is a copy that may contain sensitive mapping information. Store it according to the organization's security policy.
 
@@ -236,7 +238,7 @@ This action is available to an Administrator or IRN Manager.
 2. Check that the IS and its assets exist in the inventory.
 3. Open **Administration → Manage campaigns**.
 4. Choose to create a campaign from an information system.
-5. Select the critical function and then the IS.
+5. Select the IS; its linked critical functions and assets are displayed.
 6. Check the asset list and criticality levels.
 7. Enter the campaign name, description, and project manager information.
 8. Create the campaign.

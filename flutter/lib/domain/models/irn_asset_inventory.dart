@@ -34,7 +34,7 @@ class CriticalFunctionInfo {
 class InformationSystemInfo {
   final String id;
   final String tenantId;
-  final String functionId;
+  final List<String> functionIds;
   final String name;
   final String description;
   final String owner;
@@ -44,7 +44,7 @@ class InformationSystemInfo {
   const InformationSystemInfo({
     required this.id,
     required this.tenantId,
-    required this.functionId,
+    required this.functionIds,
     required this.name,
     required this.description,
     required this.owner,
@@ -52,11 +52,13 @@ class InformationSystemInfo {
     this.updatedAt,
   });
 
+  String get functionId => functionIds.isEmpty ? '' : functionIds.first;
+
   factory InformationSystemInfo.fromJson(Map<String, dynamic> json) {
     return InformationSystemInfo(
       id: json['systemId']?.toString() ?? json['id']?.toString() ?? '',
       tenantId: json['tenantId']?.toString() ?? '',
-      functionId: json['functionId']?.toString() ?? '',
+      functionIds: _relationIds(json['functionIds'], json['functionId']),
       name: json['name']?.toString().trim() ?? '',
       description: json['description']?.toString().trim() ?? '',
       owner: json['owner']?.toString().trim() ?? '',
@@ -73,35 +75,47 @@ class InformationSystemInfo {
 class InformationAssetInfo {
   final String id;
   final String tenantId;
-  final String systemId;
+  final List<String> systemIds;
   final String name;
   final String assetType;
   final String description;
   final String criticality;
+  final int assessmentAnswerCount;
+  final DateTime? assessmentUpdatedAt;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
   const InformationAssetInfo({
     required this.id,
     required this.tenantId,
-    required this.systemId,
+    required this.systemIds,
     required this.name,
     required this.assetType,
     required this.description,
     required this.criticality,
+    this.assessmentAnswerCount = 0,
+    this.assessmentUpdatedAt,
     this.createdAt,
     this.updatedAt,
   });
+
+  String get systemId => systemIds.isEmpty ? '' : systemIds.first;
+  bool get isAssessed => assessmentAnswerCount > 0;
 
   factory InformationAssetInfo.fromJson(Map<String, dynamic> json) {
     return InformationAssetInfo(
       id: json['assetId']?.toString() ?? json['id']?.toString() ?? '',
       tenantId: json['tenantId']?.toString() ?? '',
-      systemId: json['systemId']?.toString() ?? '',
+      systemIds: _relationIds(json['systemIds'], json['systemId']),
       name: json['name']?.toString().trim() ?? '',
       assetType: json['assetType']?.toString().trim() ?? '',
       description: json['description']?.toString().trim() ?? '',
       criticality: json['criticality']?.toString().trim() ?? '',
+      assessmentAnswerCount:
+          int.tryParse(json['assessmentAnswerCount']?.toString() ?? '') ?? 0,
+      assessmentUpdatedAt: DateTime.tryParse(
+        json['assessmentUpdatedAt']?.toString() ?? '',
+      )?.toUtc(),
       createdAt: DateTime.tryParse(
         json['createdAt']?.toString() ?? '',
       )?.toUtc(),
@@ -185,13 +199,30 @@ class IrnAssetInventory {
 
   List<InformationSystemInfo> systemsForFunction(String functionId) {
     return informationSystems
-        .where((system) => system.functionId == functionId)
+        .where((system) => system.functionIds.contains(functionId))
         .toList(growable: false);
   }
 
   List<InformationAssetInfo> assetsForSystem(String systemId) {
     return assets
-        .where((asset) => asset.systemId == systemId)
+        .where((asset) => asset.systemIds.contains(systemId))
         .toList(growable: false);
   }
+}
+
+List<String> _relationIds(Object? values, Object? legacyValue) {
+  final result = <String>[];
+  if (values is List) {
+    for (final value in values) {
+      final id = value?.toString().trim() ?? '';
+      if (id.isNotEmpty && !result.contains(id)) {
+        result.add(id);
+      }
+    }
+  }
+  final legacyId = legacyValue?.toString().trim() ?? '';
+  if (legacyId.isNotEmpty && !result.contains(legacyId)) {
+    result.add(legacyId);
+  }
+  return List<String>.unmodifiable(result);
 }
