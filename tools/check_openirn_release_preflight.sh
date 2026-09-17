@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# OpenIRN release preflight — Android signé + Windows direct et Microsoft Store.
+# OpenIRN release preflight — Android, Windows, Microsoft Store et Apple Store.
 # Ce script ne lit ni n'affiche les secrets.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -10,7 +10,7 @@ cd "$ROOT_DIR"
 EXPECTED_TAG=""
 REQUIRE_SECRETS=false
 STRICT=false
-WITH_APPLE=false
+WITH_APPLE=true
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -37,7 +37,7 @@ Usage: tools/check_openirn_release_preflight.sh [options]
 Options:
   --tag vX.Y.Z          Vérifie que le tag correspond à la version Flutter publique.
   --require-secrets    Échoue si les secrets Android/Azure/Partner Center sont absents localement ou dans GitHub.
-  --with-apple         Vérifie aussi les prérequis macOS/iOS Apple, optionnels pour l'instant.
+  --with-apple         Option conservée pour compatibilité ; Apple est désormais toujours vérifié.
   --strict             Transforme certains avertissements en erreurs.
   -h, --help           Affiche cette aide.
 
@@ -100,6 +100,9 @@ forbidden_grep() {
 GITHUB_SECRET_NAMES_CACHE=""
 GITHUB_SECRET_NAMES_LOADED=false
 GITHUB_SECRET_NAMES_ENVIRONMENT=""
+GITHUB_VARIABLE_NAMES_CACHE=""
+GITHUB_VARIABLE_NAMES_LOADED=false
+GITHUB_VARIABLE_NAMES_ENVIRONMENT=""
 
 load_github_secret_names() {
   local environment="${1:-}"
@@ -152,6 +155,50 @@ check_secret() {
   fi
 }
 
+load_github_variable_names() {
+  local environment="${1:-}"
+  if [[ "$GITHUB_VARIABLE_NAMES_LOADED" == true && "$GITHUB_VARIABLE_NAMES_ENVIRONMENT" == "$environment" ]]; then
+    return 0
+  fi
+  GITHUB_VARIABLE_NAMES_LOADED=true
+  GITHUB_VARIABLE_NAMES_ENVIRONMENT="$environment"
+  GITHUB_VARIABLE_NAMES_CACHE=""
+
+  if ! command -v gh >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [[ -n "$environment" ]]; then
+    GITHUB_VARIABLE_NAMES_CACHE="$(gh variable list --env "$environment" --json name --jq '.[].name' 2>/dev/null || true)"
+  else
+    GITHUB_VARIABLE_NAMES_CACHE="$(gh variable list --json name --jq '.[].name' 2>/dev/null || true)"
+  fi
+}
+
+github_variable_exists() {
+  local name="$1"
+  local environment="${2:-}"
+  load_github_variable_names "$environment"
+  [[ -n "$GITHUB_VARIABLE_NAMES_CACHE" ]] && grep -Fxq "$name" <<<"$GITHUB_VARIABLE_NAMES_CACHE"
+}
+
+check_variable() {
+  local name="$1"
+  local required="$2"
+  local github_environment="${3:-}"
+  if [[ -n "${!name:-}" ]]; then
+    ok "variable ${name} disponible"
+  elif github_variable_exists "$name" "$github_environment"; then
+    ok "variable GitHub ${github_environment} ${name} configurée"
+  else
+    if [[ "$REQUIRE_SECRETS" == true && "$required" == true ]]; then
+      fail "variable GitHub ${github_environment} ${name} manquante"
+    else
+      warn "variable ${name} non présente dans l'environnement courant"
+    fi
+  fi
+}
+
 public_version_from_pubspec() {
   local raw
   raw="$(grep -E '^version:' flutter/pubspec.yaml | head -n1 | awk '{print $2}')"
@@ -164,7 +211,7 @@ build_number_from_pubspec() {
   if [[ "$raw" == *+* ]]; then printf '%s' "${raw#*+}"; else printf ''; fi
 }
 
-printf '\n== OpenIRN — préflight release Android / Windows ==\n\n'
+printf '\n== OpenIRN — préflight release Android / Windows / Apple ==\n\n'
 
 printf '== Structure du dépôt ==\n'
 require_file README.md README
@@ -176,7 +223,7 @@ require_file flutter/pubspec.yaml 'pubspec Flutter'
 require_file server/openirn-api/app/main.py 'API serveur'
 require_file server/openirn-api/app/version.py 'version API serveur'
 require_dir .github/workflows 'workflows GitHub Actions'
-require_file .github/workflows/release.yml 'workflow release signé Android / Windows'
+require_file .github/workflows/release.yml 'workflow release signé Android / Windows / Apple'
 require_file .github/workflows/build_artifacts.yml 'workflow artefacts manuel'
 require_file tools/check_release_signing_setup.sh 'contrôle de la chaîne de signature'
 require_file tools/check_open_source_readiness.sh 'contrôle publication open source'
@@ -258,8 +305,23 @@ require_grep '^[[:space:]]*texlive-fonts-recommended[[:space:]]*\\' .github/work
 require_grep 'path:[[:space:]]*docs/pdf/openirn-documentation-fr-en\.zip' .github/workflows/release.yml 'archive documentaire bilingue publiée comme artefact unique'
 require_grep 'archive_path=.*openirn-documentation-fr-en\.zip' tools/build_docs.sh 'archive documentaire bilingue générée localement'
 forbidden_grep 'WINDOWS_CERTIFICATE_BASE64|WINDOWS_CERTIFICATE_PASSWORD|openirn-windows-codesign\.pfx' .github/workflows/release.yml 'ancienne chaîne Windows PFX'
-forbidden_grep 'MACOS_CERTIFICATE_BASE64|notarytool|flutter build macos' .github/workflows/release.yml 'release macOS Apple dans le profil courant'
-forbidden_grep 'IOS_CERTIFICATE_BASE64|IOS_PROVISIONING_PROFILE_BASE64|flutter build ipa' .github/workflows/release.yml 'release iOS Apple dans le profil courant'
+require_grep '^  ios_app_store:' .github/workflows/release.yml 'job iOS App Store configuré'
+require_grep '^  macos_app_store:' .github/workflows/release.yml 'job macOS App Store configuré'
+require_grep 'runs-on:[[:space:]]*macos-26' .github/workflows/release.yml 'runner Apple macOS 26 configuré'
+require_grep 'environment:[[:space:]]*apple-store' .github/workflows/release.yml 'environnement GitHub Apple Store configuré'
+require_grep 'flutter build ios' .github/workflows/release.yml 'configuration Flutter iOS configurée'
+require_grep 'flutter build macos' .github/workflows/release.yml 'configuration Flutter macOS configurée'
+require_grep '[[:space:]]-exportArchive' .github/workflows/release.yml 'export Xcode Apple configuré'
+require_grep '<string>upload</string>' .github/workflows/release.yml 'destination App Store Connect configurée'
+require_grep 'APP_STORE_CONNECT_PRIVATE_KEY_P8' .github/workflows/release.yml 'clé API App Store Connect référencée'
+require_grep 'IOS_DISTRIBUTION_P12_BASE64' .github/workflows/release.yml 'certificat iOS référencé'
+require_grep 'IOS_APP_STORE_PROFILE_BASE64' .github/workflows/release.yml 'profil iOS App Store référencé'
+require_grep 'MAC_APP_DISTRIBUTION_P12_BASE64' .github/workflows/release.yml 'certificat application macOS référencé'
+require_grep 'MAC_INSTALLER_DISTRIBUTION_P12_BASE64' .github/workflows/release.yml 'certificat installateur macOS référencé'
+require_grep 'MAC_APP_STORE_PROFILE_BASE64' .github/workflows/release.yml 'profil macOS App Store référencé'
+require_grep '[[:space:]]+- ios_app_store' .github/workflows/release.yml 'publication GitHub dépend de l envoi iOS'
+require_grep '[[:space:]]+- macos_app_store' .github/workflows/release.yml 'publication GitHub dépend de l envoi macOS'
+forbidden_grep 'notarytool|Developer ID Application|Developer ID Installer' .github/workflows/release.yml 'circuit Developer ID hors App Store'
 require_grep 'gh release create|gh release upload|softprops/action-gh-release' .github/workflows/release.yml 'publication GitHub Release configurée'
 require_grep 'workflow_dispatch' .github/workflows/build_artifacts.yml 'build_artifacts déclenchable manuellement'
 if grep -Eq 'push:[[:space:]]*$' .github/workflows/build_artifacts.yml; then warn "build_artifacts.yml semble encore déclenché automatiquement par push"; else ok "build_artifacts.yml ne publie pas automatiquement d'artefacts non signés"; fi
@@ -288,21 +350,24 @@ require_grep 'Get-AppxPackage -Name archoadFR\.OpenIRN' docs/deploiement-applica
 require_grep 'apps\.microsoft\.com/detail/9N63P1KPCMMZ' docs/deploiement-applications.md 'publication Microsoft Store documentée en français'
 require_grep 'apps\.microsoft\.com/detail/9N63P1KPCMMZ' docs/en/application-deployment.md 'publication Microsoft Store documentée en anglais'
 
-printf '\n== Apple optionnel ==\n'
+printf '\n== Apple Store ==\n'
 if [[ "$WITH_APPLE" == true ]]; then
   require_dir flutter/macos 'projet macOS Flutter'
   require_dir flutter/ios 'projet iOS Flutter'
-  check_secret MACOS_CERTIFICATE_BASE64 true
-  check_secret MACOS_CERTIFICATE_PASSWORD true
-  check_secret MACOS_KEYCHAIN_PASSWORD true
-  check_secret APPLE_ID true
-  check_secret APPLE_TEAM_ID true
-  check_secret APPLE_APP_SPECIFIC_PASSWORD true
-  check_secret IOS_CERTIFICATE_BASE64 true
-  check_secret IOS_CERTIFICATE_PASSWORD true
-  check_secret IOS_PROVISIONING_PROFILE_BASE64 true
+  check_variable APP_STORE_CONNECT_KEY_ID true apple-store
+  check_variable APP_STORE_CONNECT_ISSUER_ID true apple-store
+  check_variable APPLE_TEAM_ID true apple-store
+  check_secret APP_STORE_CONNECT_PRIVATE_KEY_P8 true apple-store
+  check_secret IOS_DISTRIBUTION_P12_BASE64 true apple-store
+  check_secret IOS_DISTRIBUTION_P12_PASSWORD true apple-store
+  check_secret IOS_APP_STORE_PROFILE_BASE64 true apple-store
+  check_secret MAC_APP_DISTRIBUTION_P12_BASE64 true apple-store
+  check_secret MAC_APP_DISTRIBUTION_P12_PASSWORD true apple-store
+  check_secret MAC_INSTALLER_DISTRIBUTION_P12_BASE64 true apple-store
+  check_secret MAC_INSTALLER_DISTRIBUTION_P12_PASSWORD true apple-store
+  check_secret MAC_APP_STORE_PROFILE_BASE64 true apple-store
 else
-  ok "macOS/iOS non requis dans le profil actuel Android / Windows"
+  fail "contrôle Apple désactivé alors que la release Apple est obligatoire"
 fi
 
 printf '\n== Secrets de signature attendus ==\n'
@@ -339,7 +404,7 @@ for pattern in \
 done
 
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  TRACKED_SECRETS="$(git ls-files | grep -E '(^|/)(secrets/|key\.properties|.*\.(jks|keystore|pfx|p12|pem|key|p8|mobileprovision))$' || true)"
+  TRACKED_SECRETS="$(git ls-files | grep -E '(^|/)(secrets/|key\.properties|.*\.(jks|keystore|pfx|p12|pem|key|p8|mobileprovision|provisionprofile))$' || true)"
   if [[ -n "$TRACKED_SECRETS" ]]; then
     printf '%s\n' "$TRACKED_SECRETS" >&2
     fail "des fichiers de signature ou secrets semblent suivis par Git"
@@ -356,5 +421,5 @@ fi
 if [[ "$WARNINGS" -gt 0 ]]; then
   printf '[OK AVEC AVERTISSEMENTS] %d avertissement(s).\n' "$WARNINGS"
 else
-  printf '[OK] préflight release Android / Windows réussi.\n'
+  printf '[OK] préflight release Android / Windows / Apple réussi.\n'
 fi

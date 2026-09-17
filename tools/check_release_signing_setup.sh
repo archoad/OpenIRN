@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
-echo "[OpenIRN] Vérification de la release Android / Windows directe et Microsoft Store"
+echo "[OpenIRN] Vérification de la release Android / Windows / Apple et Microsoft Store"
 
 required_files=(
   ".github/workflows/release.yml"
@@ -97,6 +97,33 @@ require_pattern '^[[:space:]]*lmodern[[:space:]]*\\' 'dépendance LaTeX lmodern 
 require_pattern '^[[:space:]]*texlive-fonts-recommended[[:space:]]*\\' 'polices TeX recommandées configurées pour les PDF'
 require_pattern 'LICENSE\.txt' 'licence applicative incluse dans les artefacts de release'
 
+require_pattern '^  ios_app_store:' 'job iOS App Store configuré'
+require_pattern '^  macos_app_store:' 'job macOS App Store configuré'
+require_pattern 'runs-on:[[:space:]]*macos-26' 'runner Apple macOS 26 configuré'
+require_pattern 'environment:[[:space:]]*apple-store' 'environnement GitHub Apple Store configuré'
+require_pattern 'APP_STORE_CONNECT_KEY_ID' 'variable App Store Connect Key ID référencée'
+require_pattern 'APP_STORE_CONNECT_ISSUER_ID' 'variable App Store Connect Issuer ID référencée'
+require_pattern 'APPLE_TEAM_ID' 'variable Apple Team ID référencée'
+require_pattern 'APP_STORE_CONNECT_PRIVATE_KEY_P8' 'clé privée API App Store Connect référencée'
+require_pattern 'IOS_DISTRIBUTION_P12_BASE64' 'certificat de distribution iOS référencé'
+require_pattern 'IOS_APP_STORE_PROFILE_BASE64' 'profil iOS App Store référencé'
+require_pattern 'MAC_APP_DISTRIBUTION_P12_BASE64' 'certificat Mac App Distribution référencé'
+require_pattern 'MAC_INSTALLER_DISTRIBUTION_P12_BASE64' 'certificat Mac Installer Distribution référencé'
+require_pattern 'MAC_APP_STORE_PROFILE_BASE64' 'profil Mac App Store référencé'
+require_pattern 'flutter build ios' 'configuration Flutter iOS configurée'
+require_pattern 'flutter build macos' 'configuration Flutter macOS configurée'
+require_pattern '[[:space:]]-exportArchive' 'export Xcode App Store configuré'
+require_pattern '<string>upload</string>' 'téléversement App Store Connect configuré'
+require_pattern '[[:space:]]+- ios_app_store' 'publication GitHub dépend de l envoi iOS'
+require_pattern '[[:space:]]+- macos_app_store' 'publication GitHub dépend de l envoi macOS'
+
+if grep -Eq 'notarytool|Developer ID Application|Developer ID Installer' .github/workflows/release.yml; then
+  echo "[ERREUR] circuit Developer ID hors App Store détecté dans release.yml" >&2
+  exit 1
+fi
+
+echo "[OK] publication iOS et macOS vers App Store Connect configurée"
+
 if grep -Eq 'WINDOWS_CERTIFICATE_BASE64|WINDOWS_CERTIFICATE_PASSWORD|openirn-windows-codesign\.pfx' .github/workflows/release.yml; then
   echo "[ERREUR] ancienne chaîne Windows PFX encore référencée dans release.yml" >&2
   exit 1
@@ -115,5 +142,4 @@ if ! grep -Eq '^[[:space:]]*msix:[[:space:]]*\^?[0-9]' flutter/pubspec.yaml; the
 fi
 
 echo "[OK] dépendance MSIX présente"
-echo "[OK] configuration de release Android / Windows directe et Microsoft Store présente"
-echo "[NOTE] macOS et iOS restent volontairement hors périmètre du profil courant."
+echo "[OK] configuration de release Android / Windows / Apple et Microsoft Store présente"

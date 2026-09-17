@@ -59,7 +59,7 @@ check_absent_find() {
   shift
   local matches
   matches=$(find . \
-    \( -name .git -o -path './flutter/build' -o -path './flutter/.dart_tool' -o -path './server/openirn-api/.venv' -o -path './node_modules' \) -prune -o \
+    \( -name .git -o -path './secrets' -o -path './flutter/build' -o -path './flutter/.dart_tool' -o -path './server/openirn-api/.venv' -o -path './node_modules' \) -prune -o \
     "$@" -print | sort)
   if [[ -n "$matches" ]]; then
     fail "$description détecté :"
@@ -141,8 +141,10 @@ check_absent_find "secret potentiel" -type f \( \
   -name '.env.*' -o \
   -name '*.pem' -o \
   -name '*.key' -o \
+  -name '*.p8' -o \
   -name '*.p12' -o \
-  -name '*.mobileprovision' \
+  -name '*.mobileprovision' -o \
+  -name '*.provisionprofile' \
 \)
 
 # Since patch 123B / 138C, the Flutter application must not embed the

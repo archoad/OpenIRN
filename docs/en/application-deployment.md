@@ -6,14 +6,14 @@ author: "OpenIRN Project"
 
 # Read this before deployment
 
-OpenIRN GitHub releases currently publish signed applications for **Android** and **Windows**. The release pipeline does not yet publish a macOS or iOS application.
+OpenIRN GitHub releases publish signed applications for **Android** and **Windows**. In parallel, the release pipeline signs the **iOS/iPadOS** and **macOS** builds and uploads them to App Store Connect. Submission to App Review remains manual.
 
 | Platform | Artifact currently published | Deployment from a GitHub release |
 |---|---|---|
 | Android | `openirn-android.apk`, `openirn-android.aab` | yes |
 | Windows x64 | `openirn-windows-x64.msix`, `openirn-windows-signed.zip`, or Microsoft Store | yes |
-| macOS | no signed/notarized artifact | no |
-| iOS/iPadOS | no IPA or TestFlight link | no |
+| macOS | application distributed through the Mac App Store | App Store only |
+| iOS/iPadOS | application distributed through the App Store | App Store only |
 
 > The current official clients use the fixed API `https://www.archoad.io/api`. A client for another server URL must be built after changing `SyncConfiguration.fixedApiBaseUrl`; generic release binaries do not allow users to enter a different URL.
 
@@ -179,15 +179,21 @@ Do not move `OpenIRN.exe` on its own. The ZIP contains required libraries alongs
 
 ## Current status
 
-The GitHub release does not include a signed and notarized `.dmg`, `.pkg`, or `.app`. There is therefore currently no macOS deployment procedure **from a GitHub release**.
+OpenIRN is distributed through the Mac App Store. The GitHub release does not attach the submission `.pkg`, because that package is signed specifically for App Store Connect and is not intended for direct installation.
 
-The limitation is not functional. It concerns Apple signing and the Keychain entitlements used to store the device token securely.
+For every `vX.Y.Z` tag, GitHub Actions builds a universal `arm64`/`x86_64` archive, signs it with the Mac App Distribution and Mac Installer Distribution certificates, verifies its permissions, and uploads it to App Store Connect. A successful job confirms the upload; submission to App Review and public availability remain controlled in App Store Connect.
+
+Install or update OpenIRN through the macOS **App Store** application. Direct distribution outside the Store would require a separate Developer ID and notarization workflow, which is not part of this pipeline.
 
 # 5. Deploy on iOS or iPadOS
 
 ## Current status
 
-The GitHub release provides neither a signed IPA nor a TestFlight link. An unmanaged iPhone or iPad therefore cannot receive OpenIRN from the current release.
+OpenIRN is distributed through the iOS/iPadOS App Store. The submission IPA is not attached to the GitHub Release.
+
+For every `vX.Y.Z` tag, GitHub Actions signs the build with the Apple Distribution certificate and the OpenIRN App Store profile, then uploads it to App Store Connect. A successful job confirms the upload; submission to App Review and public availability remain controlled in App Store Connect.
+
+Install or update OpenIRN through the device's **App Store** application. TestFlight can be enabled in App Store Connect from the same Apple-processed build.
 
 # 6. Prepare the server before first launch
 
