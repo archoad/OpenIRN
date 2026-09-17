@@ -10,6 +10,9 @@ required_files=(
   ".github/workflows/release.yml"
   "flutter/android/app/build.gradle.kts"
   "flutter/pubspec.yaml"
+  "flutter/ios/Flutter/Release.xcconfig"
+  "flutter/macos/Runner.xcodeproj/project.pbxproj"
+  "flutter/macos/Runner/Configs/AppInfo.xcconfig"
   "flutter/windows/runner/resources/msix_logo.png"
   "tools/Test-MsixIconTransparency.ps1"
   "docs/deploiement-applications.md"
@@ -112,10 +115,32 @@ require_pattern 'MAC_INSTALLER_DISTRIBUTION_P12_BASE64' 'certificat Mac Installe
 require_pattern 'MAC_APP_STORE_PROFILE_BASE64' 'profil Mac App Store référencé'
 require_pattern 'flutter build ios' 'configuration Flutter iOS configurée'
 require_pattern 'flutter build macos' 'configuration Flutter macOS configurée'
+require_pattern 'ios/Flutter/ephemeral/CI-AppStore\.xcconfig' 'configuration de signature iOS limitée à Runner'
+require_pattern 'macos/Flutter/ephemeral/CI-AppStore\.xcconfig' 'configuration de signature macOS limitée à Runner'
 require_pattern '[[:space:]]-exportArchive' 'export Xcode App Store configuré'
 require_pattern '<string>upload</string>' 'téléversement App Store Connect configuré'
 require_pattern '[[:space:]]+- ios_app_store' 'publication GitHub dépend de l envoi iOS'
 require_pattern '[[:space:]]+- macos_app_store' 'publication GitHub dépend de l envoi macOS'
+
+if grep -Eq '^[[:space:]]+(CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE_SPECIFIER|OTHER_CODE_SIGN_FLAGS)=' .github/workflows/release.yml; then
+  echo "[ERREUR] réglage de signature Xcode global détecté ; il contaminerait les cibles Swift Package" >&2
+  exit 1
+fi
+echo "[OK] aucun réglage de signature Xcode global dans les commandes d archive"
+
+if ! grep -Fq '#include? "ephemeral/CI-AppStore.xcconfig"' flutter/ios/Flutter/Release.xcconfig; then
+  echo "[ERREUR] inclusion de signature CI iOS limitée à Runner absente" >&2
+  exit 1
+fi
+if ! grep -Fq '#include? "../../Flutter/ephemeral/CI-AppStore.xcconfig"' flutter/macos/Runner/Configs/AppInfo.xcconfig; then
+  echo "[ERREUR] inclusion de signature CI macOS limitée à Runner absente" >&2
+  exit 1
+fi
+if ! grep -Fq 'PROVISIONING_PROFILE_SPECIFIER = "$(OPENIRN_PROVISIONING_PROFILE_SPECIFIER)";' flutter/macos/Runner.xcodeproj/project.pbxproj; then
+  echo "[ERREUR] profil de signature CI macOS non limité à la configuration Runner" >&2
+  exit 1
+fi
+echo "[OK] configurations de signature Apple limitées aux cibles Runner"
 
 if grep -Eq 'notarytool|Developer ID Application|Developer ID Installer' .github/workflows/release.yml; then
   echo "[ERREUR] circuit Developer ID hors App Store détecté dans release.yml" >&2

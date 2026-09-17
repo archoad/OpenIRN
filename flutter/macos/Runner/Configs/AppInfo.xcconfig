@@ -12,3 +12,13 @@ PRODUCT_BUNDLE_IDENTIFIER = io.archoad.openirn
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 Michel Dubois / Archoad.
+
+// Defaults used outside the App Store CI job.
+OPENIRN_CODE_SIGN_STYLE = Automatic
+OPENIRN_CODE_SIGN_IDENTITY = Apple Development
+OPENIRN_PROVISIONING_PROFILE_SPECIFIER =
+OPENIRN_OTHER_CODE_SIGN_FLAGS =
+
+// Generated only by the App Store CI job. Keeping this include target-scoped
+// prevents Runner provisioning settings from leaking into Swift Package targets.
+#include? "../../Flutter/ephemeral/CI-AppStore.xcconfig"

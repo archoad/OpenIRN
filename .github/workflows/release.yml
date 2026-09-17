@@ -331,6 +331,22 @@ jobs:
             --build-name '${{ steps.version.outputs.name }}' \
             --build-number '${{ steps.version.outputs.number }}'
 
+      - name: Configure iOS Runner signing
+        working-directory: flutter
+        shell: bash
+        run: |
+          set -euo pipefail
+          signing_config="$GITHUB_WORKSPACE/flutter/ios/Flutter/ephemeral/CI-AppStore.xcconfig"
+          mkdir -p "$(dirname "$signing_config")"
+          umask 077
+          {
+            printf 'CODE_SIGN_STYLE = Manual\n'
+            printf 'CODE_SIGN_IDENTITY = %s\n' "$IOS_DISTRIBUTION_CERTIFICATE_SHA1"
+            printf 'PROVISIONING_PROFILE_SPECIFIER = %s\n' "$IOS_PROFILE_NAME"
+            printf 'OTHER_CODE_SIGN_FLAGS = --keychain %s\n' "$APPLE_KEYCHAIN_PATH"
+          } > "$signing_config"
+          echo "IOS_SIGNING_XCCONFIG=$signing_config" >> "$GITHUB_ENV"
+
       - name: Archive signed iOS application
         working-directory: flutter
         shell: bash
@@ -343,12 +359,8 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/OpenIRN-iOS.xcarchive" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="$IOS_DISTRIBUTION_CERTIFICATE_SHA1" \
-            PROVISIONING_PROFILE_SPECIFIER="$IOS_PROFILE_NAME" \
             FLUTTER_BUILD_NAME='${{ steps.version.outputs.name }}' \
             FLUTTER_BUILD_NUMBER='${{ steps.version.outputs.number }}' \
-            OTHER_CODE_SIGN_FLAGS="--keychain $APPLE_KEYCHAIN_PATH" \
             archive
 
           ios_app="$(find "$RUNNER_TEMP/OpenIRN-iOS.xcarchive/Products/Applications" -maxdepth 1 -name '*.app' -print -quit)"
@@ -417,6 +429,9 @@ jobs:
           fi
           if [[ -n "${APP_STORE_CONNECT_KEY_PATH:-}" ]]; then
             rm -f "$APP_STORE_CONNECT_KEY_PATH"
+          fi
+          if [[ -n "${IOS_SIGNING_XCCONFIG:-}" ]]; then
+            rm -f "$IOS_SIGNING_XCCONFIG"
           fi
 
   macos_app_store:
@@ -603,6 +618,22 @@ jobs:
             --build-name '${{ steps.version.outputs.name }}' \
             --build-number '${{ steps.version.outputs.number }}'
 
+      - name: Configure macOS Runner signing
+        working-directory: flutter
+        shell: bash
+        run: |
+          set -euo pipefail
+          signing_config="$GITHUB_WORKSPACE/flutter/macos/Flutter/ephemeral/CI-AppStore.xcconfig"
+          mkdir -p "$(dirname "$signing_config")"
+          umask 077
+          {
+            printf 'OPENIRN_CODE_SIGN_STYLE = Manual\n'
+            printf 'OPENIRN_CODE_SIGN_IDENTITY = %s\n' "$MAC_APP_DISTRIBUTION_CERTIFICATE_SHA1"
+            printf 'OPENIRN_PROVISIONING_PROFILE_SPECIFIER = %s\n' "$MACOS_PROFILE_NAME"
+            printf 'OPENIRN_OTHER_CODE_SIGN_FLAGS = --keychain %s\n' "$APPLE_KEYCHAIN_PATH"
+          } > "$signing_config"
+          echo "MACOS_SIGNING_XCCONFIG=$signing_config" >> "$GITHUB_ENV"
+
       - name: Archive signed universal macOS application
         working-directory: flutter
         shell: bash
@@ -616,12 +647,8 @@ jobs:
             -destination 'generic/platform=macOS' \
             -archivePath "$RUNNER_TEMP/OpenIRN-macOS.xcarchive" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="$MAC_APP_DISTRIBUTION_CERTIFICATE_SHA1" \
-            PROVISIONING_PROFILE_SPECIFIER="$MACOS_PROFILE_NAME" \
             FLUTTER_BUILD_NAME='${{ steps.version.outputs.name }}' \
             FLUTTER_BUILD_NUMBER='${{ steps.version.outputs.number }}' \
-            OTHER_CODE_SIGN_FLAGS="--keychain $APPLE_KEYCHAIN_PATH" \
             archive
 
           macos_app="$(find "$RUNNER_TEMP/OpenIRN-macOS.xcarchive/Products/Applications" -maxdepth 1 -name '*.app' -print -quit)"
@@ -706,6 +733,9 @@ jobs:
           fi
           if [[ -n "${APP_STORE_CONNECT_KEY_PATH:-}" ]]; then
             rm -f "$APP_STORE_CONNECT_KEY_PATH"
+          fi
+          if [[ -n "${MACOS_SIGNING_XCCONFIG:-}" ]]; then
+            rm -f "$MACOS_SIGNING_XCCONFIG"
           fi
 
   windows:
