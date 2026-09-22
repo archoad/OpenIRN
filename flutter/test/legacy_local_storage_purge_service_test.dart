@@ -95,6 +95,20 @@ void main() {
     },
   );
 
+  test('preserves the interface language preference across purges', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'openirn.sync.configuration': '{}',
+      'openirn.sync.deviceId': 'device-1',
+      'openirn.interface_language': 'en',
+    });
+
+    final report = await const LegacyLocalStoragePurgeService().purge();
+    final preferences = await SharedPreferences.getInstance();
+
+    expect(report.hasUnexpectedOpenIrnKeys, isFalse);
+    expect(preferences.getString('openirn.interface_language'), 'en');
+  });
+
   test(
     'removes every non-authorized OpenIRN key to prevent local business storage regressions',
     () async {

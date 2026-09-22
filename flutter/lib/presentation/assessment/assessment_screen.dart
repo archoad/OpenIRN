@@ -174,6 +174,12 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   final _appSyncCoordinator = AppSyncCoordinator.instance;
   final Map<String, CriterionAnswer> _criterionAnswers =
       <String, CriterionAnswer>{};
+  // Snapshot of `_criterionAnswers` as last loaded or successfully saved,
+  // before any subsequent local edit. Used as the merge base so a save only
+  // overwrites the criteria this screen actually edited, instead of clobbering
+  // criteria another evaluator may have saved concurrently.
+  Map<String, CriterionAnswer> _lastSyncedCriterionAnswers =
+      <String, CriterionAnswer>{};
   final Map<String, AppUser> _usersById = <String, AppUser>{};
   final Map<String, CriterionAssignment> _assignmentsByCriterionId =
       <String, CriterionAssignment>{};
@@ -192,6 +198,12 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   String? _lastRemoteEventServerSyncId;
   bool _autoSyncRunning = false;
   int _lastAppliedSyncSerial = 0;
+  // Tracks whether `_localStatusMessage` is a locally-authored error/warning
+  // that should keep the persistence card visible, independent of the
+  // message's (now localized) text — `_shouldShowPersistenceCard` used to
+  // detect this by matching French prefixes, which broke under any other
+  // locale.
+  bool _localStatusNeedsAttention = false;
 
   List<CampaignInformationAsset> get _scopedAssets =>
       _campaign.information.assets;
@@ -199,17 +211,19 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   bool get _isAssetScopedCampaign => _campaign.information.isAssetScoped;
 
   bool get _shouldShowPersistenceCard {
-    final status = _localStatusMessage?.trim() ?? '';
     if (_isSavingAnswers) {
       return true;
     }
+    if (_localStatusNeedsAttention) {
+      return true;
+    }
+    final status = _localStatusMessage?.trim() ?? '';
     if (status.isEmpty) {
       return false;
     }
-    return status.startsWith('Erreur') ||
-        status.startsWith('Impossible') ||
-        status.startsWith('Mode hors ligne') ||
-        status.startsWith('Synchronisation automatique publiée') ||
+    // These two statuses are passed straight through from
+    // `SyncAutomationService`'s own (not yet localized) messages.
+    return status.startsWith('Synchronisation automatique publiée') ||
         status.startsWith('La version serveur');
   }
 
@@ -464,6 +478,9 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
           _criterionAnswers
             ..clear()
             ..addAll(currentData.criterionAnswers);
+          _lastSyncedCriterionAnswers = Map<String, CriterionAnswer>.of(
+            currentData.criterionAnswers,
+          );
         }
         _assignmentsByCriterionId
           ..clear()
@@ -481,17 +498,38 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       _isLoadingAnswers = false;
       _isLoadingAssignments = false;
       if (campaignError != null) {
-        _localStatusMessage =
-            'Impossible de restaurer l’évaluation : $campaignError';
+        _localStatusNeedsAttention = true;
+        _localStatusMessage = context.tr(
+          'assessment.status.restore_failed',
+          fallback: 'Impossible de restaurer l’évaluation : {error}',
+          values: {'error': campaignError},
+        );
       } else if (usersError != null) {
-        _localStatusMessage =
-            'Impossible de charger les affectations : $usersError';
+        _localStatusNeedsAttention = true;
+        _localStatusMessage = context.tr(
+          'assessment.status.assignments_load_failed',
+          fallback: 'Impossible de charger les affectations : {error}',
+          values: {'error': usersError},
+        );
       } else if (successMessage != null) {
+        _localStatusNeedsAttention = false;
         _localStatusMessage = successMessage;
       } else if (replaceAnswers) {
+        _localStatusNeedsAttention = false;
         _localStatusMessage = _criterionAnswers.isEmpty
-            ? 'Aucune évaluation enregistrée.'
-            : 'Évaluation restaurée (${_criterionAnswers.length} critère(s), $_justificationCount justification(s)).';
+            ? context.tr(
+                'assessment.status.no_answers',
+                fallback: 'Aucune évaluation enregistrée.',
+              )
+            : context.tr(
+                'assessment.status.restored',
+                fallback:
+                    'Évaluation restaurée ({count} critère(s), {justifications} justification(s)).',
+                values: {
+                  'count': _criterionAnswers.length,
+                  'justifications': _justificationCount,
+                },
+              );
       }
     });
   }
@@ -560,7 +598,12 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       } else if (result.outcome == SyncAutomationOutcome.offline ||
           result.outcome == SyncAutomationOutcome.failed) {
         setState(() {
-          _localStatusMessage = 'Mode hors ligne temporaire : ${result.title}';
+          _localStatusNeedsAttention = true;
+          _localStatusMessage = context.tr(
+            'assessment.status.offline_temporary',
+            fallback: 'Mode hors ligne temporaire : {title}',
+            values: {'title': result.title},
+          );
         });
       }
     } finally {
@@ -588,7 +631,12 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
 
   Future<void> _openAssignments() async {
     if (!_accessPolicy.canManageAssignments(widget.activeUser, _campaign)) {
-      _showForbidden('Votre rôle ne permet pas de modifier les affectations.');
+      _showForbidden(
+        context.tr(
+          'assessment.forbidden.manage_assignments',
+          fallback: 'Votre rôle ne permet pas de modifier les affectations.',
+        ),
+      );
       return;
     }
 
@@ -624,7 +672,11 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     setState(() {
       _upsertCriterionAnswer(updated);
       _isSavingAnswers = true;
-      _localStatusMessage = 'Sauvegarde en cours…';
+      _localStatusNeedsAttention = false;
+      _localStatusMessage = context.tr(
+        'assessment.status.saving',
+        fallback: 'Sauvegarde en cours…',
+      );
     });
 
     final saved = await _saveOrRollback(previousAnswers);
@@ -662,7 +714,11 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     setState(() {
       _upsertCriterionAnswer(updated);
       _isSavingAnswers = true;
-      _localStatusMessage = 'Sauvegarde de la justification en cours…';
+      _localStatusNeedsAttention = false;
+      _localStatusMessage = context.tr(
+        'assessment.status.saving_justification',
+        fallback: 'Sauvegarde de la justification en cours…',
+      );
     });
 
     final saved = await _saveOrRollback(previousAnswers);
@@ -697,20 +753,38 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     Map<String, CriterionAnswer> previousAnswers,
   ) async {
     try {
-      await _assessmentRepository.saveCriterionAnswers(
+      final savedAnswers = await _assessmentRepository.saveCriterionAnswers(
         referentialId: widget.referential.id,
         campaignId: _campaign.id,
         answers: _criterionAnswers,
+        baseAnswers: _lastSyncedCriterionAnswers,
       );
       if (!mounted) {
         return true;
       }
       setState(() {
+        _lastSyncedCriterionAnswers = Map<String, CriterionAnswer>.of(
+          savedAnswers,
+        );
         _isSavingAnswers = false;
+        _localStatusNeedsAttention = false;
         final asset = _activeAsset;
         _localStatusMessage = asset == null
-            ? 'Évaluation sauvegardée localement ($_justificationCount justification(s)).'
-            : 'Évaluation de l’actif « ${asset.displayLabel} » sauvegardée ($_justificationCount justification(s)).';
+            ? context.tr(
+                'assessment.status.saved_campaign',
+                fallback:
+                    'Évaluation sauvegardée localement ({count} justification(s)).',
+                values: {'count': _justificationCount},
+              )
+            : context.tr(
+                'assessment.status.saved_asset',
+                fallback:
+                    'Évaluation de l’actif « {asset} » sauvegardée ({count} justification(s)).',
+                values: {
+                  'asset': asset.displayLabel,
+                  'count': _justificationCount,
+                },
+              );
       });
       return true;
     } catch (error) {
@@ -722,7 +796,12 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
           ..clear()
           ..addAll(previousAnswers);
         _isSavingAnswers = false;
-        _localStatusMessage = 'Erreur de sauvegarde : $error';
+        _localStatusNeedsAttention = true;
+        _localStatusMessage = context.tr(
+          'assessment.status.save_error',
+          fallback: 'Erreur de sauvegarde : {error}',
+          values: {'error': error},
+        );
       });
       return false;
     }
@@ -770,7 +849,11 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     setState(() {
       _criterionAnswers.clear();
       _isSavingAnswers = true;
-      _localStatusMessage = 'Réinitialisation locale en cours…';
+      _localStatusNeedsAttention = false;
+      _localStatusMessage = context.tr(
+        'assessment.status.resetting',
+        fallback: 'Réinitialisation locale en cours…',
+      );
     });
 
     try {
@@ -782,8 +865,12 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
         return;
       }
       setState(() {
+        _lastSyncedCriterionAnswers = <String, CriterionAnswer>{};
         _isSavingAnswers = false;
-        _localStatusMessage = 'Évaluation locale réinitialisée.';
+        _localStatusMessage = context.tr(
+          'assessment.status.reset_done',
+          fallback: 'Évaluation locale réinitialisée.',
+        );
       });
       await _recordActivity(
         type: LocalActivityType.answersReset,
@@ -800,7 +887,12 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
           ..clear()
           ..addAll(previousAnswers);
         _isSavingAnswers = false;
-        _localStatusMessage = 'Erreur de réinitialisation locale : $error';
+        _localStatusNeedsAttention = true;
+        _localStatusMessage = context.tr(
+          'assessment.status.reset_error',
+          fallback: 'Erreur de réinitialisation locale : {error}',
+          values: {'error': error},
+        );
       });
     }
   }
@@ -864,27 +956,48 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
 
   String _disabledReasonForCriterion(IrnCriterion criterion) {
     if (_campaign.isReadOnly) {
-      return 'La campagne est en lecture seule.';
+      return context.tr(
+        'assessment.disabled.read_only_campaign',
+        fallback: 'La campagne est en lecture seule.',
+      );
     }
     if (!widget.activeUser.active) {
-      return 'La session active correspond à un utilisateur inactif.';
+      return context.tr(
+        'assessment.disabled.inactive_user',
+        fallback: 'La session active correspond à un utilisateur inactif.',
+      );
     }
     if (widget.activeUser.role == AppUserRole.reader) {
-      return 'Lecture seule : rôle Lecteur.';
+      return context.tr(
+        'assessment.disabled.reader_role',
+        fallback: 'Lecture seule : rôle Lecteur.',
+      );
     }
     if (widget.activeUser.role == AppUserRole.reviewer) {
-      return 'Lecture seule : rôle Validateur.';
+      return context.tr(
+        'assessment.disabled.reviewer_role',
+        fallback: 'Lecture seule : rôle Validateur.',
+      );
     }
     if (widget.activeUser.role == AppUserRole.evaluator) {
       final assignment = _assignmentsByCriterionId[criterion.id];
       if (assignment == null) {
-        return 'Ce critère n’est pas affecté à votre profil évaluateur.';
+        return context.tr(
+          'assessment.disabled.not_assigned_to_evaluator',
+          fallback: 'Ce critère n’est pas affecté à votre profil évaluateur.',
+        );
       }
       if (assignment.userId != widget.activeUser.id) {
-        return 'Critère affecté à un autre évaluateur.';
+        return context.tr(
+          'assessment.disabled.assigned_to_other_evaluator',
+          fallback: 'Critère affecté à un autre évaluateur.',
+        );
       }
     }
-    return 'Modification non autorisée pour la session active.';
+    return context.tr(
+      'assessment.disabled.unauthorized',
+      fallback: 'Modification non autorisée pour la session active.',
+    );
   }
 
   void _showForbidden(String message) {
@@ -903,8 +1016,15 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     )) {
       _showForbidden(
         _campaign.isReadOnly
-            ? 'La campagne est en lecture seule.'
-            : 'Seuls les administrateurs et pilotes IRN peuvent modifier les informations de campagne.',
+            ? context.tr(
+                'assessment.disabled.read_only_campaign',
+                fallback: 'La campagne est en lecture seule.',
+              )
+            : context.tr(
+                'assessment.forbidden.edit_campaign_information',
+                fallback:
+                    'Seuls les administrateurs et pilotes IRN peuvent modifier les informations de campagne.',
+              ),
       );
       return;
     }
@@ -913,7 +1033,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       context: context,
       builder: (_) => _CampaignInformationDialog(campaign: _campaign),
     );
-    if (result == null) {
+    if (result == null || !mounted) {
       return;
     }
 
@@ -924,13 +1044,17 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       description: result.description,
       information: result.information,
     );
-    if (updatedCampaign == null) {
+    if (updatedCampaign == null || !mounted) {
       return;
     }
 
     setState(() {
       _campaign = updatedCampaign;
-      _localStatusMessage = 'Informations de campagne sauvegardées.';
+      _localStatusNeedsAttention = false;
+      _localStatusMessage = context.tr(
+        'assessment.status.campaign_information_saved',
+        fallback: 'Informations de campagne sauvegardées.',
+      );
     });
 
     await _recordActivity(
@@ -958,7 +1082,12 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
 
   Future<void> _openExport() async {
     if (!_accessPolicy.canExportCampaign(widget.activeUser)) {
-      _showForbidden('Votre profil ne permet pas d’exporter cette campagne.');
+      _showForbidden(
+        context.tr(
+          'assessment.forbidden.export_campaign',
+          fallback: 'Votre profil ne permet pas d’exporter cette campagne.',
+        ),
+      );
       return;
     }
     await Navigator.of(context).push(
@@ -999,7 +1128,11 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   Future<void> _openActivityLog() async {
     if (!_accessPolicy.canViewCampaignActivityLog(widget.activeUser)) {
       _showForbidden(
-        'Votre profil ne permet pas de consulter le journal de campagne.',
+        context.tr(
+          'assessment.forbidden.view_activity_log',
+          fallback:
+              'Votre profil ne permet pas de consulter le journal de campagne.',
+        ),
       );
       return;
     }
@@ -1008,6 +1141,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
         builder: (_) => ActivityLogScreen(
           referential: widget.referential,
           campaign: _campaign,
+          activeUser: widget.activeUser,
         ),
       ),
     );

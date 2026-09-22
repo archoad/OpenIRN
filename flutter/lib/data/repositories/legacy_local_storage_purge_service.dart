@@ -8,6 +8,7 @@ class LegacyLocalStoragePurgeService {
   static const Set<String> allowedOpenIrnKeys = <String>{
     'openirn.sync.configuration',
     'openirn.sync.deviceId',
+    'openirn.interface_language',
   };
 
   static const Set<String> legacyExactKeys = <String>{

@@ -437,7 +437,13 @@ class _MissingAnswersCard extends StatelessWidget {
               ]
             : [
                 for (final criterion in criteria)
-                  _CriterionQualityTile(criterion: criterion, trailing: 'N.C.'),
+                  _CriterionQualityTile(
+                    criterion: criterion,
+                    trailing: context.tr(
+                      'assessment.answer.not_answered.help',
+                      fallback: IrnAnswer.notAnswered.longLabel,
+                    ),
+                  ),
               ],
       ),
     );

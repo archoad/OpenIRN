@@ -1210,7 +1210,19 @@ class _SessionStatusCard extends StatelessWidget {
                 style: theme.textTheme.titleLarge,
               ),
               const SizedBox(height: 6),
-              Text('$displayName — ${user.role.label}'),
+              Text(
+                context.tr(
+                  'home.session.identity',
+                  fallback: '{name} — {role}',
+                  values: {
+                    'name': displayName,
+                    'role': context.tr(
+                      'role.${user.role.jsonValue}',
+                      fallback: user.role.label,
+                    ),
+                  },
+                ),
+              ),
               if (effectiveTenantLabel.isNotEmpty) ...[
                 const SizedBox(height: 4),
                 Text(
@@ -1683,7 +1695,12 @@ class _AdministrationAuthenticationDialog extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                        subtitle: Text(user.role.label),
+                        subtitle: Text(
+                          context.tr(
+                            'role.${user.role.jsonValue}',
+                            fallback: user.role.label,
+                          ),
+                        ),
                         trailing: Icon(trailingIcon),
                         onTap: () => Navigator.of(context).pop(user),
                       ),
@@ -1827,7 +1844,12 @@ class _AdministrationPinAuthenticationDialogState
                 overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 6),
-              Text(widget.user.role.label),
+              Text(
+                context.tr(
+                  'role.${widget.user.role.jsonValue}',
+                  fallback: widget.user.role.label,
+                ),
+              ),
               const SizedBox(height: 16),
               if (useSecureMobilePinPad)
                 _AdministrationMobilePinPad(

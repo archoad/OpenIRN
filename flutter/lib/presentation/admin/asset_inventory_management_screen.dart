@@ -889,7 +889,11 @@ class _InventoryContent extends StatelessWidget {
                           icon: const Icon(Icons.edit_outlined),
                         ),
                         IconButton(
-                          onPressed: working
+                          onPressed:
+                              working ||
+                                  inventory
+                                      .systemsForFunction(function.id)
+                                      .isNotEmpty
                               ? null
                               : () => onDeleteFunction(function),
                           tooltip: context.tr('action.delete'),

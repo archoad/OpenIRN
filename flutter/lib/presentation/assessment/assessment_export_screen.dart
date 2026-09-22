@@ -84,9 +84,9 @@ class _AssessmentExportScreenState extends State<AssessmentExportScreen> {
       future: _exportContextFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            appBar: OpenIrnAppBar(title: 'Export JSON'),
-            body: Center(child: CircularProgressIndicator()),
+          return Scaffold(
+            appBar: OpenIrnAppBar(title: context.tr('export.title')),
+            body: const Center(child: CircularProgressIndicator()),
           );
         }
 
@@ -110,7 +110,7 @@ class _AssessmentExportScreenState extends State<AssessmentExportScreen> {
 
         return Scaffold(
           appBar: OpenIrnAppBar(
-            title: 'Export JSON',
+            title: context.tr('export.title'),
             actions: [
               OpenIrnAppBarAction(
                 id: 'copy',

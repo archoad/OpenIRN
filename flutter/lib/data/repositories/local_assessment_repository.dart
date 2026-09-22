@@ -38,9 +38,25 @@ class LocalAssessmentRepository {
     };
   }
 
-  Future<void> saveCriterionAnswers({
+  /// Saves [answers], the caller's complete in-memory view of the campaign's
+  /// answers, merged onto whatever is freshest on the server rather than
+  /// overwriting it outright.
+  ///
+  /// [baseAnswers] must be the last server snapshot this caller loaded
+  /// *before* making its own local edits. Criteria unchanged between
+  /// [baseAnswers] and [answers] are left untouched in the freshly-read
+  /// server bundle, so a concurrent save by another evaluator (e.g. one
+  /// working on different assigned criteria of the same campaign) is not
+  /// silently discarded. Only criteria that actually differ from
+  /// [baseAnswers] — i.e. this caller's own edits, including clearing an
+  /// answer back to not-answered — are applied.
+  ///
+  /// Returns the cleaned local snapshot that was committed. The caller must
+  /// use it as the base for its next save so later removals remain detectable.
+  Future<Map<String, CriterionAnswer>> saveCriterionAnswers({
     required String referentialId,
     required Map<String, CriterionAnswer> answers,
+    required Map<String, CriterionAnswer> baseAnswers,
     String? campaignId,
   }) async {
     final resolvedCampaignId = campaignId?.trim() ?? '';
@@ -63,29 +79,37 @@ class LocalAssessmentRepository {
     await _store.updateBundle(
       referentialId: referentialId,
       campaignId: resolvedCampaignId,
-      update: (bundle) => bundle.copyWith(
-        criterionAnswers: cleanedAnswers,
-        replaceAssetAnswers: true,
-      ),
-    );
-  }
-
-  Future<void> saveAnswers({
-    required String referentialId,
-    required Map<String, IrnAnswer> answers,
-    String? campaignId,
-  }) async {
-    await saveCriterionAnswers(
-      referentialId: referentialId,
-      campaignId: campaignId,
-      answers: <String, CriterionAnswer>{
-        for (final entry in answers.entries)
-          entry.key: CriterionAnswer(
-            criterionId: entry.key,
-            answer: entry.value,
-          ),
+      update: (bundle) {
+        final merged = Map<String, CriterionAnswer>.of(bundle.criterionAnswers);
+        final editedKeys = <String>{
+          ...baseAnswers.keys,
+          ...cleanedAnswers.keys,
+        };
+        for (final key in editedKeys) {
+          if (_sameAnswer(baseAnswers[key], cleanedAnswers[key])) {
+            continue;
+          }
+          final localValue = cleanedAnswers[key];
+          if (localValue == null) {
+            merged.remove(key);
+          } else {
+            merged[key] = localValue;
+          }
+        }
+        return bundle.copyWith(
+          criterionAnswers: merged,
+          replaceAssetAnswers: true,
+        );
       },
     );
+    return Map<String, CriterionAnswer>.unmodifiable(cleanedAnswers);
+  }
+
+  bool _sameAnswer(CriterionAnswer? a, CriterionAnswer? b) {
+    if (a == null || b == null) {
+      return a == b;
+    }
+    return a.answer == b.answer && a.justification == b.justification;
   }
 
   Future<void> clearAnswers({

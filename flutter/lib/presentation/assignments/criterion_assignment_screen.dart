@@ -54,6 +54,9 @@ class _CriterionAssignmentScreenState extends State<CriterionAssignmentScreen> {
     final evaluators = users
         .where((user) => user.active && user.role == AppUserRole.evaluator)
         .toList(growable: false);
+    final usersById = <String, AppUser>{
+      for (final user in users) user.id: user,
+    };
     final assignments = await _assignmentRepository.loadAssignmentsByCriterion(
       referentialId: widget.referential.id,
       campaignId: widget.campaign.id,
@@ -61,6 +64,7 @@ class _CriterionAssignmentScreenState extends State<CriterionAssignmentScreen> {
     return _AssignmentState(
       activeUser: activeUser,
       users: evaluators,
+      usersById: usersById,
       assignmentsByCriterionId: assignments,
     );
   }
@@ -106,6 +110,9 @@ class _CriterionAssignmentScreenState extends State<CriterionAssignmentScreen> {
           toValue: 'Non affecté',
         ),
       );
+      if (!mounted) {
+        return;
+      }
       _updateAssignmentInCurrentState(
         state: state,
         criterionId: criterion.id,
@@ -140,6 +147,9 @@ class _CriterionAssignmentScreenState extends State<CriterionAssignmentScreen> {
         toValue: selectedUser.displayName,
       ),
     );
+    if (!mounted) {
+      return;
+    }
     _updateAssignmentInCurrentState(
       state: state,
       criterionId: criterion.id,
@@ -171,7 +181,7 @@ class _CriterionAssignmentScreenState extends State<CriterionAssignmentScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const OpenIrnAppBar(title: 'Affectations des critères'),
+      appBar: OpenIrnAppBar(title: context.tr('assignment.title')),
       body: FutureBuilder<_AssignmentState>(
         future: _stateFuture,
         builder: (context, snapshot) {
@@ -199,14 +209,14 @@ class _CriterionAssignmentScreenState extends State<CriterionAssignmentScreen> {
           final activeCriteriaCount = widget.referential.criteria
               .where((criterion) => criterion.active)
               .length;
-          final evaluatorIds = state.users.map((user) => user.id).toSet();
           final canManageAssignments = _accessPolicy.canManageAssignments(
             state.activeUser,
             widget.campaign,
           );
-          final assignedCount = state.assignmentsByCriterionId.values
-              .where((assignment) => evaluatorIds.contains(assignment.userId))
-              .length;
+          // Every stored assignment record represents a criterion that is
+          // assigned to someone, even if that evaluator was since
+          // deactivated or reassigned a different role.
+          final assignedCount = state.assignmentsByCriterionId.length;
 
           return Center(
             child: ConstrainedBox(
@@ -232,6 +242,7 @@ class _CriterionAssignmentScreenState extends State<CriterionAssignmentScreen> {
                         entry.key.id,
                       ),
                       users: state.users,
+                      usersById: state.usersById,
                       assignmentsByCriterionId: state.assignmentsByCriterionId,
                       readOnly: !canManageAssignments,
                       onExpansionChanged: (expanded) {
@@ -265,6 +276,7 @@ class _AssignmentPillarCard extends StatelessWidget {
   final List<IrnCriterion> criteria;
   final bool initiallyExpanded;
   final List<AppUser> users;
+  final Map<String, AppUser> usersById;
   final Map<String, CriterionAssignment> assignmentsByCriterionId;
   final bool readOnly;
   final ValueChanged<bool> onExpansionChanged;
@@ -276,6 +288,7 @@ class _AssignmentPillarCard extends StatelessWidget {
     required this.criteria,
     required this.initiallyExpanded,
     required this.users,
+    required this.usersById,
     required this.assignmentsByCriterionId,
     required this.readOnly,
     required this.onExpansionChanged,
@@ -312,6 +325,7 @@ class _AssignmentPillarCard extends StatelessWidget {
               _CriterionAssignmentTile(
                 criterion: criterion,
                 users: users,
+                usersById: usersById,
                 assignment: assignmentsByCriterionId[criterion.id],
                 readOnly: readOnly,
                 onChanged: (userId) => onAssignmentChanged(criterion, userId),
@@ -326,11 +340,13 @@ class _AssignmentPillarCard extends StatelessWidget {
 class _AssignmentState {
   final AppUser activeUser;
   final List<AppUser> users;
+  final Map<String, AppUser> usersById;
   final Map<String, CriterionAssignment> assignmentsByCriterionId;
 
   const _AssignmentState({
     required this.activeUser,
     required this.users,
+    required this.usersById,
     required this.assignmentsByCriterionId,
   });
 
@@ -341,11 +357,14 @@ class _AssignmentState {
     return _AssignmentState(
       activeUser: activeUser,
       users: users ?? this.users,
+      usersById: usersById,
       assignmentsByCriterionId:
           assignmentsByCriterionId ?? this.assignmentsByCriterionId,
     );
   }
 
+  /// Restricted to currently assignable (active) evaluators — used to
+  /// validate a *new* assignment choice.
   AppUser? userById(String userId) {
     for (final user in users) {
       if (user.id == userId) {
@@ -354,6 +373,11 @@ class _AssignmentState {
     }
     return null;
   }
+
+  /// Looks up any known user regardless of active/role status — used to
+  /// resolve who an *existing* assignment record actually points to, even
+  /// if that person is no longer an assignable evaluator.
+  AppUser? anyUserById(String userId) => usersById[userId];
 }
 
 class _AssignmentHeaderCard extends StatelessWidget {
@@ -451,6 +475,7 @@ class _AssignmentHeaderCard extends StatelessWidget {
 class _CriterionAssignmentTile extends StatelessWidget {
   final IrnCriterion criterion;
   final List<AppUser> users;
+  final Map<String, AppUser> usersById;
   final CriterionAssignment? assignment;
   final bool readOnly;
   final ValueChanged<String?> onChanged;
@@ -458,6 +483,7 @@ class _CriterionAssignmentTile extends StatelessWidget {
   const _CriterionAssignmentTile({
     required this.criterion,
     required this.users,
+    required this.usersById,
     required this.assignment,
     required this.readOnly,
     required this.onChanged,
@@ -503,8 +529,21 @@ class _CriterionAssignmentTile extends StatelessWidget {
   }
 
   Widget _buildAssigneeDropdown(BuildContext context) {
-    final selectedUserId = users.any((user) => user.id == assignment?.userId)
-        ? assignment!.userId
+    final assignedUserId = assignment?.userId;
+    final isAssignableEvaluator =
+        assignedUserId != null &&
+        users.any((user) => user.id == assignedUserId);
+    // The assignment record may point to a user who was since deactivated
+    // or reassigned away from the Évaluateur role. Rather than silently
+    // falling back to "Non affecté" and hiding that a real assignment still
+    // exists, surface that user as a distinct, clearly-labelled entry.
+    final staleAssignedUser = assignedUserId != null && !isAssignableEvaluator
+        ? usersById[assignedUserId]
+        : null;
+    final selectedUserId = assignedUserId == null
+        ? ''
+        : (isAssignableEvaluator || staleAssignedUser != null)
+        ? assignedUserId
         : '';
 
     return DropdownButtonFormField<String>(
@@ -519,6 +558,12 @@ class _CriterionAssignmentTile extends StatelessWidget {
           context.tr('assignment.unassigned'),
           overflow: TextOverflow.ellipsis,
         ),
+        if (staleAssignedUser != null)
+          Text(
+            _staleUserLabel(context, staleAssignedUser),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
+          ),
         for (final user in users)
           Text(
             _shortUserLabel(user),
@@ -534,6 +579,15 @@ class _CriterionAssignmentTile extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
           ),
         ),
+        if (staleAssignedUser != null)
+          DropdownMenuItem<String>(
+            value: staleAssignedUser.id,
+            child: Text(
+              _staleUserLabel(context, staleAssignedUser),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
+          ),
         for (final user in users)
           DropdownMenuItem<String>(
             value: user.id,
@@ -547,6 +601,20 @@ class _CriterionAssignmentTile extends StatelessWidget {
       onChanged: readOnly
           ? null
           : (value) => onChanged(value == null || value.isEmpty ? null : value),
+    );
+  }
+
+  static String _staleUserLabel(BuildContext context, AppUser user) {
+    final identity = user.fullName.trim().isEmpty ? user.email : user.fullName;
+    final isInactive = !user.active;
+    return context.tr(
+      isInactive
+          ? 'assignment.evaluator.inactive'
+          : 'assignment.evaluator.not_evaluator',
+      values: {'name': identity},
+      fallback: isInactive
+          ? '$identity (compte non actif)'
+          : '$identity (n’est plus évaluateur)',
     );
   }
 

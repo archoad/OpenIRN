@@ -1903,7 +1903,10 @@ class _EnrollmentFormResult {
 
 String _formatDateTime(DateTime? value) {
   if (value == null) {
-    return 'date inconnue';
+    return OpenIrnLocalizations.instance.tr(
+      'common.unknown_date',
+      fallback: 'date inconnue',
+    );
   }
   final local = value.toLocal();
   String twoDigits(int number) => number.toString().padLeft(2, '0');

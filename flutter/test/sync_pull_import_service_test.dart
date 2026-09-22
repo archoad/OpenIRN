@@ -85,7 +85,17 @@ void main() {
               <String, dynamic>{'criterionId': 'RES-1.1', 'userId': 'user-1'},
             ],
             'activityLog': <String, dynamic>{
-              'events': <Map<String, dynamic>>[],
+              'events': <Map<String, dynamic>>[
+                <String, dynamic>{
+                  'id': 'activity-remote-clear',
+                  'type': 'activity_log_cleared',
+                  'title': 'activity_log_cleared',
+                  'description': '',
+                  'actorName': 'Alice Martin',
+                  'actorRole': 'evaluator',
+                  'createdAt': '2026-06-24T11:00:00Z',
+                },
+              ],
             },
           },
         ],
@@ -108,6 +118,64 @@ void main() {
     expect(
       result.campaigns.single.activityEvents.first.title,
       'Campagne importée depuis le serveur',
+    );
+    final clearedEvent = result.campaigns.single.activityEvents.singleWhere(
+      (event) => event.id.contains('activity-remote-'),
+    );
+    expect(clearedEvent.actorName, 'Alice Martin');
+    expect(clearedEvent.actorRole, 'evaluator');
+  });
+
+  test('importe les réponses par actif malgré la clé composite', () {
+    final result = const SyncPullImportService().importSnapshotPayload(
+      referential: referential,
+      serverSyncId: 'sync-003',
+      sourceDeviceId: 'device-a',
+      importedAt: DateTime.utc(2026, 6, 24, 12),
+      payload: <String, dynamic>{
+        'schemaVersion': 1,
+        'type': 'openirn.syncPush',
+        'referential': <String, dynamic>{
+          'id': 'adri-irn-v1.1',
+          'checksumSha256': 'abc',
+        },
+        'users': <Map<String, dynamic>>[],
+        'campaigns': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'campaign': <String, dynamic>{
+              'id': 'local-source-campaign',
+              'referentialId': 'adri-irn-v1.1',
+              'name': 'Campagne par actif',
+              'description': '',
+              'status': 'draft',
+              'createdAt': '2026-06-24T10:00:00Z',
+              'updatedAt': '2026-06-24T10:00:00Z',
+              'statusUpdatedAt': '2026-06-24T10:00:00Z',
+            },
+            'answers': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'criterionId': 'asset:asset-1:criterion:RES-1.1',
+                'answer': 'result',
+                'justification': 'Justification actif 1',
+              },
+            ],
+            'assignments': <Map<String, dynamic>>[],
+            'activityLog': <String, dynamic>{
+              'events': <Map<String, dynamic>>[],
+            },
+          },
+        ],
+      },
+    );
+
+    expect(result.campaigns.single.criterionAnswers.length, 1);
+    expect(
+      result
+          .campaigns
+          .single
+          .criterionAnswers['asset:asset-1:criterion:RES-1.1']
+          ?.answer,
+      IrnAnswer.result,
     );
   });
 

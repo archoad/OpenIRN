@@ -48,9 +48,6 @@ class _UserListScreenState extends State<UserListScreen> {
   int _lastAppliedSyncSerial = 0;
   bool _working = false;
 
-  bool get _isSolutionAdministrator =>
-      widget.activeUser.role == AppUserRole.administrator;
-
   @override
   void initState() {
     super.initState();
@@ -82,16 +79,27 @@ class _UserListScreenState extends State<UserListScreen> {
       return const _UserListStateData(
         users: <AppUser>[],
         serverAvailable: false,
+        solutionAdministrator: false,
         sourceLabel: 'users.source.terminal_not_authorized',
         sourceMessage: 'users.source.authorize_terminal_first',
       );
     }
 
+    // The cross-tenant "administrateur solution" mode is a server-tracked
+    // flag distinct from the client-side Administrateur role — it must be
+    // read from the server rather than inferred from `activeUser.role`.
+    final tenantsResult = await _apiClient.loadTenants(
+      baseUrl: configuration.apiBaseUrl,
+      tenantId: configuration.tenantId,
+      apiToken: configuration.apiToken,
+    );
+    final solutionAdministrator = tenantsResult.solutionAdministrator;
+
     final centralUsers = await _apiClient.loadUsers(
       baseUrl: configuration.apiBaseUrl,
       tenantId: configuration.tenantId,
       apiToken: configuration.apiToken,
-      allTenants: _isSolutionAdministrator,
+      allTenants: solutionAdministrator,
     );
 
     if (centralUsers.isAvailable ||
@@ -99,7 +107,8 @@ class _UserListScreenState extends State<UserListScreen> {
       return _UserListStateData(
         users: centralUsers.users,
         serverAvailable: true,
-        sourceLabel: _isSolutionAdministrator
+        solutionAdministrator: solutionAdministrator,
+        sourceLabel: solutionAdministrator
             ? 'users.source.central_all_workspaces'
             : 'users.source.central',
         sourceMessage: centralUsers.message,
@@ -112,6 +121,7 @@ class _UserListScreenState extends State<UserListScreen> {
     return _UserListStateData(
       users: const <AppUser>[],
       serverAvailable: false,
+      solutionAdministrator: solutionAdministrator,
       sourceLabel: 'users.source.server_unavailable',
       sourceMessage: 'users.source.server_unavailable_no_cache',
       apiBaseUrl: configuration.apiBaseUrl,
@@ -121,6 +131,9 @@ class _UserListScreenState extends State<UserListScreen> {
   }
 
   Future<void> _refresh() async {
+    if (!mounted) {
+      return;
+    }
     setState(() {
       _usersFuture = _loadUsers();
     });
@@ -159,6 +172,7 @@ class _UserListScreenState extends State<UserListScreen> {
     return _UserListStateData(
       users: centralUsers.users,
       serverAvailable: true,
+      solutionAdministrator: false,
       sourceLabel: 'Base centrale serveur',
       sourceMessage: centralUsers.message,
       apiBaseUrl: configuration.apiBaseUrl,
@@ -172,6 +186,9 @@ class _UserListScreenState extends State<UserListScreen> {
     required String tenantId,
     required String successMessage,
   }) async {
+    if (!mounted) {
+      return;
+    }
     setState(() {
       _working = true;
     });
@@ -224,10 +241,14 @@ class _UserListScreenState extends State<UserListScreen> {
   }
 
   Future<void> _createUser() async {
+    final solutionAdministrator = (await _usersFuture).solutionAdministrator;
+    if (!mounted) {
+      return;
+    }
     final result = await showDialog<_UserFormResult>(
       context: context,
       builder: (_) =>
-          _UserDialog(allowAdministratorRole: _isSolutionAdministrator),
+          _UserDialog(allowAdministratorRole: solutionAdministrator),
     );
     if (result == null) {
       return;
@@ -274,11 +295,15 @@ class _UserListScreenState extends State<UserListScreen> {
   }
 
   Future<void> _editUser(AppUser user) async {
+    final solutionAdministrator = (await _usersFuture).solutionAdministrator;
+    if (!mounted) {
+      return;
+    }
     final result = await showDialog<_UserFormResult>(
       context: context,
       builder: (_) => _UserDialog(
         user: user,
-        allowAdministratorRole: _isSolutionAdministrator,
+        allowAdministratorRole: solutionAdministrator,
       ),
     );
     if (result == null) {
@@ -460,9 +485,7 @@ class _UserListScreenState extends State<UserListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: OpenIrnAppBar(
-        title: _isSolutionAdministrator
-            ? context.tr('users.title_all_workspaces')
-            : context.tr('users.title'),
+        title: context.tr('users.title'),
         actions: [
           OpenIrnAppBarAction(
             id: 'refresh_users',
@@ -511,18 +534,20 @@ class _UserListScreenState extends State<UserListScreen> {
                   }
                   final user = users[index - 1];
                   final serverAvailable = state?.serverAvailable ?? false;
+                  final solutionAdministrator =
+                      state?.solutionAdministrator ?? false;
                   return _UserCard(
                     user: user,
                     centralPinsAvailable:
-                        serverAvailable && _isSolutionAdministrator,
-                    showTenant: _isSolutionAdministrator,
+                        serverAvailable && solutionAdministrator,
+                    showTenant: solutionAdministrator,
                     onEdit: serverAvailable && !_working
                         ? () => _editUser(user)
                         : null,
                     onChangePin:
                         state == null ||
                             !serverAvailable ||
-                            !_isSolutionAdministrator ||
+                            !solutionAdministrator ||
                             _working
                         ? null
                         : () => _changeUserPin(user, state),
@@ -543,6 +568,7 @@ class _UserListScreenState extends State<UserListScreen> {
 class _UserListStateData {
   final List<AppUser> users;
   final bool serverAvailable;
+  final bool solutionAdministrator;
   final String sourceLabel;
   final String sourceMessage;
   final String apiBaseUrl;
@@ -552,6 +578,7 @@ class _UserListStateData {
   const _UserListStateData({
     required this.users,
     required this.serverAvailable,
+    required this.solutionAdministrator,
     required this.sourceLabel,
     required this.sourceMessage,
     this.apiBaseUrl = '',

@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../data/repositories/local_activity_repository.dart';
 import '../../l10n/openirn_localizations.dart';
+import '../../domain/models/app_user.dart';
 import '../../domain/models/irn_referential.dart';
 import '../../domain/models/local_activity_event.dart';
+import '../../domain/services/access_policy_service.dart';
 import '../common/openirn_app_bar.dart';
 import '../common/responsive_dialog.dart';
 import '../../domain/models/local_campaign.dart';
@@ -11,10 +13,12 @@ import '../../domain/models/local_campaign.dart';
 class ActivityLogScreen extends StatefulWidget {
   final IrnReferential referential;
   final LocalCampaign campaign;
+  final AppUser activeUser;
 
   const ActivityLogScreen({
     required this.referential,
     required this.campaign,
+    required this.activeUser,
     super.key,
   });
 
@@ -24,6 +28,7 @@ class ActivityLogScreen extends StatefulWidget {
 
 class _ActivityLogScreenState extends State<ActivityLogScreen> {
   final _repository = const LocalActivityRepository();
+  final _accessPolicy = const AccessPolicyService();
   late Future<List<LocalActivityEvent>> _eventsFuture;
 
   @override
@@ -47,6 +52,19 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
   }
 
   Future<void> _clearJournal() async {
+    if (!_accessPolicy.canClearCampaignActivityLog(widget.activeUser)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.tr(
+              'activity.clear_forbidden',
+              fallback: 'Votre profil ne permet pas d’effacer ce journal.',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -90,9 +108,23 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
       return;
     }
 
-    await _repository.clearEvents(
+    final clearedAt = DateTime.now();
+    await _repository.saveEvents(
       referentialId: widget.referential.id,
       campaignId: widget.campaign.id,
+      events: [
+        LocalActivityEvent.create(
+          referentialId: widget.referential.id,
+          campaignId: widget.campaign.id,
+          type: LocalActivityType.activityLogCleared,
+          title: LocalActivityType.activityLogCleared.jsonValue,
+          actorName: widget.activeUser.fullName.trim().isEmpty
+              ? widget.activeUser.email
+              : widget.activeUser.fullName,
+          actorRole: widget.activeUser.role.jsonValue,
+          now: clearedAt,
+        ),
+      ],
     );
     if (!mounted) {
       return;
@@ -111,7 +143,10 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: OpenIrnAppBar(
-        title: 'Journal d’activité',
+        title: context.tr(
+          'screen.activity.title',
+          fallback: 'Journal d’activité',
+        ),
         actions: [
           OpenIrnAppBarAction(
             id: 'refresh',
@@ -119,17 +154,19 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
             icon: Icons.refresh,
             onSelected: _refresh,
           ),
-          const OpenIrnAppBarAction.divider(),
-          OpenIrnAppBarAction(
-            id: 'clear',
-            label: context.tr(
-              'activity.action.clear_log',
-              fallback: 'Effacer le journal',
+          if (_accessPolicy.canClearCampaignActivityLog(widget.activeUser)) ...[
+            const OpenIrnAppBarAction.divider(),
+            OpenIrnAppBarAction(
+              id: 'clear',
+              label: context.tr(
+                'activity.action.clear_log',
+                fallback: 'Effacer le journal',
+              ),
+              icon: Icons.delete_outline,
+              destructive: true,
+              onSelected: _clearJournal,
             ),
-            icon: Icons.delete_outline,
-            destructive: true,
-            onSelected: _clearJournal,
-          ),
+          ],
         ],
       ),
       body: FutureBuilder<List<LocalActivityEvent>>(
@@ -239,6 +276,8 @@ class _ActivityEventCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final title = _localizedTitle(context);
+    final description = _localizedDescription(context);
 
     return Card(
       child: Padding(
@@ -257,13 +296,13 @@ class _ActivityEventCard extends StatelessWidget {
                     runSpacing: 8,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      Text(event.title, style: theme.textTheme.titleMedium),
+                      Text(title, style: theme.textTheme.titleMedium),
                       Chip(label: Text(context.trText(event.type.label))),
                     ],
                   ),
-                  if (event.description.isNotEmpty) ...[
+                  if (description.isNotEmpty) ...[
                     const SizedBox(height: 4),
-                    Text(event.description),
+                    Text(description),
                   ],
                   const SizedBox(height: 8),
                   Wrap(
@@ -290,6 +329,35 @@ class _ActivityEventCard extends StatelessWidget {
     );
   }
 
+  String _localizedTitle(BuildContext context) {
+    if (event.type != LocalActivityType.activityLogCleared) {
+      return event.title;
+    }
+    return context.tr(
+      'activity.event.log_cleared.title',
+      fallback: 'Journal d’activité effacé',
+    );
+  }
+
+  String _localizedDescription(BuildContext context) {
+    if (event.type != LocalActivityType.activityLogCleared) {
+      return event.description;
+    }
+    final actorName = event.actorName?.trim() ?? '';
+    final actorRole = event.actorRole?.trim() ?? '';
+    if (actorName.isEmpty || actorRole.isEmpty) {
+      return event.description;
+    }
+    return context.tr(
+      'activity.event.log_cleared.description',
+      fallback: 'Effacé par {name} ({role}).',
+      values: {
+        'name': actorName,
+        'role': context.tr('role.$actorRole', fallback: actorRole),
+      },
+    );
+  }
+
   IconData _iconForType(LocalActivityType type) {
     switch (type) {
       case LocalActivityType.campaignCreated:
@@ -308,6 +376,8 @@ class _ActivityEventCard extends StatelessWidget {
         return Icons.notes_outlined;
       case LocalActivityType.answersReset:
         return Icons.restart_alt_outlined;
+      case LocalActivityType.activityLogCleared:
+        return Icons.delete_sweep_outlined;
     }
   }
 

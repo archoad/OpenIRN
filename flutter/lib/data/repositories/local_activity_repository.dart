@@ -59,16 +59,4 @@ class LocalActivityRepository {
       ),
     );
   }
-
-  Future<void> clearEvents({
-    required String referentialId,
-    required String campaignId,
-  }) async {
-    await _store.updateBundle(
-      referentialId: referentialId,
-      campaignId: campaignId,
-      update: (bundle) =>
-          bundle.copyWith(activityEvents: const <LocalActivityEvent>[]),
-    );
-  }
 }

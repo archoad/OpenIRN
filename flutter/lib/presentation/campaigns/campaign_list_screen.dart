@@ -87,11 +87,7 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
       final summary =
           maturitySummary?.aggregateSummary ??
           _computeCampaignSummary(campaign, criterionAnswers);
-      final qualityReport = _qualityService.buildReport(
-        referential: widget.referential,
-        criterionAnswers: criterionAnswers,
-        campaign: campaign,
-      );
+      final qualityReport = _buildQualityReport(campaign, criterionAnswers);
       enriched.add(
         _CampaignWithSummary(
           campaign: campaign,
@@ -167,6 +163,92 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
       resultCriteria: result,
       notAnsweredCriteria: notAnswered,
       scorePointsTotal: scorePointsTotal,
+    );
+  }
+
+  /// Builds the quality report for [campaign], aggregating across every
+  /// scoped asset when [campaign] is asset-scoped. `AssessmentQualityService`
+  /// expects a flat `criterionId -> answer` map, but asset-scoped campaigns
+  /// store answers under composite `asset:<assetId>:criterion:<criterionId>`
+  /// keys — so each asset's slice must be flattened and reported on
+  /// separately, then merged, or every answer would be reported as missing.
+  AssessmentQualityReport _buildQualityReport(
+    LocalCampaign campaign,
+    Map<String, CriterionAnswer> criterionAnswers,
+  ) {
+    if (!campaign.information.isAssetScoped) {
+      return _qualityService.buildReport(
+        referential: widget.referential,
+        criterionAnswers: criterionAnswers,
+        campaign: campaign,
+      );
+    }
+
+    final assets = campaign.information.assets;
+    if (assets.isEmpty) {
+      return _qualityService.buildReport(
+        referential: widget.referential,
+        criterionAnswers: const <String, CriterionAnswer>{},
+        campaign: campaign,
+      );
+    }
+
+    final perAssetReports = [
+      for (final asset in assets)
+        _qualityService.buildReport(
+          referential: widget.referential,
+          criterionAnswers: _flattenAssetAnswers(asset.id, criterionAnswers),
+          campaign: campaign,
+        ),
+    ];
+    return _mergeQualityReports(perAssetReports);
+  }
+
+  Map<String, CriterionAnswer> _flattenAssetAnswers(
+    String assetId,
+    Map<String, CriterionAnswer> criterionAnswers,
+  ) {
+    final prefix = 'asset:$assetId:criterion:';
+    final flattened = <String, CriterionAnswer>{};
+    for (final entry in criterionAnswers.entries) {
+      if (!entry.key.startsWith(prefix)) {
+        continue;
+      }
+      final criterionId = entry.key.substring(prefix.length);
+      if (criterionId.isEmpty) {
+        continue;
+      }
+      flattened[criterionId] = CriterionAnswer(
+        criterionId: criterionId,
+        answer: entry.value.answer,
+        justification: entry.value.justification,
+      );
+    }
+    return flattened;
+  }
+
+  AssessmentQualityReport _mergeQualityReports(
+    List<AssessmentQualityReport> reports,
+  ) {
+    var totalCriteria = 0;
+    var answeredCriteria = 0;
+    var justifiedCriteria = 0;
+    final missingAnswers = <IrnCriterion>[];
+    final missingJustifications = <AssessmentQualityIssue>[];
+    for (final report in reports) {
+      totalCriteria += report.totalCriteria;
+      answeredCriteria += report.answeredCriteria;
+      justifiedCriteria += report.justifiedCriteria;
+      missingAnswers.addAll(report.missingAnswers);
+      missingJustifications.addAll(report.missingJustifications);
+    }
+    return AssessmentQualityReport(
+      totalCriteria: totalCriteria,
+      answeredCriteria: answeredCriteria,
+      justifiedCriteria: justifiedCriteria,
+      missingAnswers: List.unmodifiable(missingAnswers),
+      missingJustifications: List.unmodifiable(missingJustifications),
+      missingCampaignInformation: reports.first.missingCampaignInformation,
     );
   }
 

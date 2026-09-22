@@ -257,7 +257,8 @@ class SyncPullImportService {
         warnings.add('Une réponse distante sans criterionId a été ignorée.');
         continue;
       }
-      if (!activeCriterionIds.contains(criterionId)) {
+      final referencedCriterionId = _referencedCriterionId(criterionId);
+      if (!activeCriterionIds.contains(referencedCriterionId)) {
         warnings.add(
           'La réponse distante pour $criterionId a été ignorée car le critère n’existe pas dans le référentiel actif.',
         );
@@ -282,6 +283,24 @@ class SyncPullImportService {
       );
     }
     return answers;
+  }
+
+  /// For asset-scoped campaigns, answers are keyed as
+  /// `asset:<assetId>:criterion:<criterionId>` rather than by plain criterion
+  /// id (see `ServerCampaignStore._answerToJson`). Extracts the underlying
+  /// criterion id so it can be checked against [activeCriterionIds], instead
+  /// of always failing that check and silently dropping every asset-scoped
+  /// answer.
+  String _referencedCriterionId(String criterionId) {
+    const marker = ':criterion:';
+    if (!criterionId.startsWith('asset:')) {
+      return criterionId;
+    }
+    final index = criterionId.indexOf(marker);
+    if (index == -1) {
+      return criterionId;
+    }
+    return criterionId.substring(index + marker.length);
   }
 
   List<CriterionAssignment> _parseAssignments({
@@ -403,6 +422,8 @@ class SyncPullImportService {
           criterionId: sourceEvent.criterionId,
           fromValue: sourceEvent.fromValue,
           toValue: sourceEvent.toValue,
+          actorName: sourceEvent.actorName,
+          actorRole: sourceEvent.actorRole,
           createdAt: createdAt,
         ),
       );

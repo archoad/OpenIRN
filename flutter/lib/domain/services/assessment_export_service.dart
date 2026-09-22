@@ -252,6 +252,8 @@ class AssessmentExportService {
       if (event.criterionId != null) 'criterionId': event.criterionId,
       if (event.fromValue != null) 'fromValue': event.fromValue,
       if (event.toValue != null) 'toValue': event.toValue,
+      if (event.actorName != null) 'actorName': event.actorName,
+      if (event.actorRole != null) 'actorRole': event.actorRole,
       'createdAt': event.createdAt.toUtc().toIso8601String(),
     };
   }

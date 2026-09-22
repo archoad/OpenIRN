@@ -28,6 +28,7 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
   final _configurationRepository = const LocalSyncConfigurationRepository();
   final _apiClient = const OpenIrnApiClient();
   late Future<_TenantManagementStateData> _future;
+  bool _working = false;
 
   @override
   void initState() {
@@ -69,6 +70,9 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
   }
 
   Future<void> _createTenant(_TenantManagementStateData state) async {
+    if (_working) {
+      return;
+    }
     final form = await showDialog<_TenantCreateFormResult>(
       context: context,
       barrierDismissible: false,
@@ -78,28 +82,39 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
       return;
     }
 
-    final result = await _apiClient.createTenant(
-      baseUrl: state.configuration.apiBaseUrl,
-      requesterTenantId: state.configuration.tenantId,
-      displayName: form.displayName,
-      description: form.description,
-      pilotFirstName: form.pilotFirstName,
-      pilotLastName: form.pilotLastName,
-      pilotEmail: form.pilotEmail,
-      pilotPin: form.pilotPin,
-      apiToken: state.configuration.apiToken,
-    );
+    setState(() {
+      _working = true;
+    });
+    try {
+      final result = await _apiClient.createTenant(
+        baseUrl: state.configuration.apiBaseUrl,
+        requesterTenantId: state.configuration.tenantId,
+        displayName: form.displayName,
+        description: form.description,
+        pilotFirstName: form.pilotFirstName,
+        pilotLastName: form.pilotLastName,
+        pilotEmail: form.pilotEmail,
+        pilotPin: form.pilotPin,
+        apiToken: state.configuration.apiToken,
+      );
 
-    if (!mounted) {
-      return;
-    }
+      if (!mounted) {
+        return;
+      }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${result.title} — ${result.message}')),
-    );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${result.title} — ${result.message}')),
+      );
 
-    if (result.isAvailable) {
-      _reload();
+      if (result.isAvailable) {
+        _reload();
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _working = false;
+        });
+      }
     }
   }
 
@@ -107,6 +122,9 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
     _TenantManagementStateData state,
     TenantInfo tenant,
   ) async {
+    if (_working) {
+      return;
+    }
     final form = await showDialog<_TenantRenameFormResult>(
       context: context,
       barrierDismissible: false,
@@ -116,27 +134,41 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
       return;
     }
 
-    final result = await _apiClient.updateTenant(
-      baseUrl: state.configuration.apiBaseUrl,
-      tenantId: tenant.id,
-      displayName: form.displayName,
-      apiToken: state.configuration.apiToken,
-    );
+    setState(() {
+      _working = true;
+    });
+    try {
+      final result = await _apiClient.updateTenant(
+        baseUrl: state.configuration.apiBaseUrl,
+        tenantId: tenant.id,
+        displayName: form.displayName,
+        apiToken: state.configuration.apiToken,
+      );
 
-    if (!mounted) {
-      return;
-    }
+      if (!mounted) {
+        return;
+      }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${result.title} — ${result.message}')),
-    );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${result.title} — ${result.message}')),
+      );
 
-    if (result.isAvailable) {
-      _reload();
+      if (result.isAvailable) {
+        _reload();
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _working = false;
+        });
+      }
     }
   }
 
   Future<void> _deleteTenant(_TenantManagementStateData state) async {
+    if (_working) {
+      return;
+    }
     final deletableTenants = state.tenants
         .where((tenant) => !tenant.permanent && !tenant.isDefault)
         .toList(growable: false);
@@ -165,44 +197,55 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
       return;
     }
 
-    final result = await _apiClient.deleteTenant(
-      baseUrl: state.configuration.apiBaseUrl,
-      tenantId: selectedTenant.id,
-      apiToken: state.configuration.apiToken,
-    );
+    setState(() {
+      _working = true;
+    });
+    try {
+      final result = await _apiClient.deleteTenant(
+        baseUrl: state.configuration.apiBaseUrl,
+        tenantId: selectedTenant.id,
+        apiToken: state.configuration.apiToken,
+      );
 
-    if (!mounted) {
-      return;
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${result.title} — ${result.message}')),
-    );
-
-    if (result.isAvailable) {
-      if (selectedTenant.id == state.configuration.tenantId) {
-        TenantInfo? fallbackTenant;
-        for (final tenant in result.tenants) {
-          if (tenant.permanent) {
-            fallbackTenant = tenant;
-            break;
-          }
-        }
-        if (fallbackTenant != null) {
-          await _configurationRepository
-              .saveTenantSelectionForSolutionAdministration(
-                state.configuration.copyWith(
-                  tenantId: fallbackTenant.id,
-                  tenantDisplayName: fallbackTenant.label,
-                  enabled: true,
-                ),
-              );
-          if (!mounted) {
-            return;
-          }
-        }
+      if (!mounted) {
+        return;
       }
-      _reload();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${result.title} — ${result.message}')),
+      );
+
+      if (result.isAvailable) {
+        if (selectedTenant.id == state.configuration.tenantId) {
+          TenantInfo? fallbackTenant;
+          for (final tenant in result.tenants) {
+            if (tenant.permanent) {
+              fallbackTenant = tenant;
+              break;
+            }
+          }
+          if (fallbackTenant != null) {
+            await _configurationRepository
+                .saveTenantSelectionForSolutionAdministration(
+                  state.configuration.copyWith(
+                    tenantId: fallbackTenant.id,
+                    tenantDisplayName: fallbackTenant.label,
+                    enabled: true,
+                  ),
+                );
+            if (!mounted) {
+              return;
+            }
+          }
+        }
+        _reload();
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _working = false;
+        });
+      }
     }
   }
 
@@ -210,6 +253,9 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
     TenantInfo tenant, {
     required bool solutionAdministrator,
   }) async {
+    if (_working) {
+      return;
+    }
     final sessionReason = context.tr(
       'tenant.switch.session_reason',
       values: {'tenant': tenant.label},
@@ -222,37 +268,48 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
       'tenant.switch.selected',
       values: {'tenant': tenant.label},
     );
-    final configuration = await _configurationRepository.loadConfiguration();
-    if (solutionAdministrator) {
-      await _configurationRepository
-          .saveTenantSelectionForSolutionAdministration(
-            configuration.copyWith(
-              tenantId: tenant.id,
-              tenantDisplayName: tenant.label,
-              enabled: true,
-            ),
-          );
-    } else {
-      await _configurationRepository.saveConfiguration(
-        configuration.copyWith(
-          tenantId: tenant.id,
-          tenantDisplayName: tenant.label,
-          apiToken: '',
+    setState(() {
+      _working = true;
+    });
+    try {
+      final configuration = await _configurationRepository.loadConfiguration();
+      if (solutionAdministrator) {
+        await _configurationRepository
+            .saveTenantSelectionForSolutionAdministration(
+              configuration.copyWith(
+                tenantId: tenant.id,
+                tenantDisplayName: tenant.label,
+                enabled: true,
+              ),
+            );
+      } else {
+        await _configurationRepository.saveConfiguration(
+          configuration.copyWith(
+            tenantId: tenant.id,
+            tenantDisplayName: tenant.label,
+            apiToken: '',
+          ),
+        );
+        AppSessionManager.instance.clearSession(reason: sessionReason);
+      }
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            solutionAdministrator ? administeredMessage : selectedMessage,
+          ),
         ),
       );
-      AppSessionManager.instance.clearSession(reason: sessionReason);
+      _reload();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _working = false;
+        });
+      }
     }
-    if (!mounted) {
-      return;
-    }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          solutionAdministrator ? administeredMessage : selectedMessage,
-        ),
-      ),
-    );
-    _reload();
   }
 
   @override
@@ -278,6 +335,7 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
                 children: [
                   _TenantIntroCard(
                     state: state,
+                    working: _working,
                     onCreateTenant: () => _createTenant(state),
                     onDeleteTenant: () => _deleteTenant(state),
                   ),
@@ -287,8 +345,11 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
                       tenant: tenant,
                       isCurrent: tenant.id == state.configuration.tenantId,
                       solutionAdministrator: state.solutionAdministrator,
-                      onRename: () => _renameTenant(state, tenant),
-                      onSwitch: tenant.id == state.configuration.tenantId
+                      onRename: _working
+                          ? null
+                          : () => _renameTenant(state, tenant),
+                      onSwitch:
+                          _working || tenant.id == state.configuration.tenantId
                           ? null
                           : () => _switchTenant(
                               tenant,
@@ -326,11 +387,13 @@ class _TenantManagementStateData {
 
 class _TenantIntroCard extends StatelessWidget {
   final _TenantManagementStateData state;
+  final bool working;
   final VoidCallback onCreateTenant;
   final VoidCallback onDeleteTenant;
 
   const _TenantIntroCard({
     required this.state,
+    required this.working,
     required this.onCreateTenant,
     required this.onDeleteTenant,
   });
@@ -340,6 +403,7 @@ class _TenantIntroCard extends StatelessWidget {
     final theme = Theme.of(context);
     final isNarrow = MediaQuery.sizeOf(context).width < 680;
     final canDeleteTenant =
+        !working &&
         state.solutionAdministrator &&
         state.tenants.any((tenant) => !tenant.permanent && !tenant.isDefault);
     final deleteButton = FilledButton.icon(
@@ -358,7 +422,7 @@ class _TenantIntroCard extends StatelessWidget {
       label: Text(context.tr('tenant.action.delete_workspace')),
     );
     final createButton = FilledButton.icon(
-      onPressed: onCreateTenant,
+      onPressed: working ? null : onCreateTenant,
       icon: const Icon(Icons.add_business_outlined),
       label: Text(context.tr('tenant.action.create_workspace')),
     );
@@ -452,7 +516,7 @@ class _TenantCard extends StatelessWidget {
   final TenantInfo tenant;
   final bool isCurrent;
   final bool solutionAdministrator;
-  final VoidCallback onRename;
+  final VoidCallback? onRename;
   final VoidCallback? onSwitch;
 
   const _TenantCard({
@@ -907,6 +971,20 @@ class _TenantCreateDialogState extends State<_TenantCreateDialog> {
                     labelText: context.tr('tenant.field.display_name'),
                     prefixIcon: const Icon(Icons.business_outlined),
                   ),
+                  validator: (value) {
+                    final raw = value?.trim() ?? '';
+                    if (raw.isEmpty) {
+                      return context.tr(
+                        'tenant.validation.display_name_required',
+                      );
+                    }
+                    if (raw.length > 160) {
+                      return context.tr(
+                        'tenant.validation.display_name_too_long',
+                      );
+                    }
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 12),
                 TextFormField(

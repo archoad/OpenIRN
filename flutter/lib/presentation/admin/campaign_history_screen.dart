@@ -75,6 +75,9 @@ class _CampaignHistoryScreenState extends State<CampaignHistoryScreen> {
     try {
       final configuration = await _configurationRepository.loadConfiguration();
       if (!configuration.isConfigured) {
+        if (!mounted) {
+          return;
+        }
         setState(() {
           _configuration = configuration;
           _isLoading = false;

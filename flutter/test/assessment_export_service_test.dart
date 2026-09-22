@@ -104,6 +104,8 @@ void main() {
             criterionId: 'RES-1.1',
             fromValue: 'NC',
             toValue: 'R',
+            actorName: 'Alice Martin',
+            actorRole: 'evaluator',
             createdAt: DateTime.utc(2026, 6, 22, 10),
           ),
         ],
@@ -146,6 +148,11 @@ void main() {
       expect(events, hasLength(1));
       expect((events.first as Map<String, dynamic>)['type'], 'answer_changed');
       expect((events.first as Map<String, dynamic>)['criterionId'], 'RES-1.1');
+      expect(
+        (events.first as Map<String, dynamic>)['actorName'],
+        'Alice Martin',
+      );
+      expect((events.first as Map<String, dynamic>)['actorRole'], 'evaluator');
 
       final answers = payload['answers'] as List<dynamic>;
       expect(answers, hasLength(2));

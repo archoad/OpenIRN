@@ -18,6 +18,7 @@ enum OpenIrnPermission {
   manageAssignments,
   exportCampaignJson,
   viewCampaignActivityLog,
+  clearCampaignActivityLog,
   resetCampaignAnswers,
   openAdministration,
   manageUsers,
@@ -52,6 +53,7 @@ class AccessPolicyService {
       OpenIrnPermission.manageAssignments,
       OpenIrnPermission.exportCampaignJson,
       OpenIrnPermission.viewCampaignActivityLog,
+      OpenIrnPermission.clearCampaignActivityLog,
       OpenIrnPermission.resetCampaignAnswers,
       OpenIrnPermission.openAdministration,
       OpenIrnPermission.manageUsers,
@@ -79,6 +81,7 @@ class AccessPolicyService {
       OpenIrnPermission.manageAssignments,
       OpenIrnPermission.exportCampaignJson,
       OpenIrnPermission.viewCampaignActivityLog,
+      OpenIrnPermission.clearCampaignActivityLog,
       OpenIrnPermission.resetCampaignAnswers,
       OpenIrnPermission.openAdministration,
       OpenIrnPermission.manageTenantUsers,
@@ -200,6 +203,10 @@ class AccessPolicyService {
 
   bool canViewCampaignActivityLog(AppUser user) {
     return can(user, OpenIrnPermission.viewCampaignActivityLog);
+  }
+
+  bool canClearCampaignActivityLog(AppUser user) {
+    return can(user, OpenIrnPermission.clearCampaignActivityLog);
   }
 
   bool canResetCampaignAnswers(AppUser user, LocalCampaign campaign) {

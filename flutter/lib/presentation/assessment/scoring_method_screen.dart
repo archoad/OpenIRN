@@ -10,7 +10,12 @@ class ScoringMethodScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: const OpenIrnAppBar(title: 'Mode de calcul de la note IRN'),
+      appBar: OpenIrnAppBar(
+        title: context.tr(
+          'assessment.scoring_method.title',
+          fallback: 'Mode de calcul de la note IRN',
+        ),
+      ),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 980),

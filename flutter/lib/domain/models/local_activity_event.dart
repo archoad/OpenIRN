@@ -6,7 +6,8 @@ enum LocalActivityType {
   assignmentChanged,
   answerChanged,
   justificationChanged,
-  answersReset;
+  answersReset,
+  activityLogCleared;
 
   String get jsonValue {
     switch (this) {
@@ -26,6 +27,8 @@ enum LocalActivityType {
         return 'justification_changed';
       case LocalActivityType.answersReset:
         return 'answers_reset';
+      case LocalActivityType.activityLogCleared:
+        return 'activity_log_cleared';
     }
   }
 
@@ -47,6 +50,8 @@ enum LocalActivityType {
         return 'Justification';
       case LocalActivityType.answersReset:
         return 'Réinitialisation';
+      case LocalActivityType.activityLogCleared:
+        return 'Journal effacé';
     }
   }
 
@@ -69,6 +74,8 @@ enum LocalActivityType {
         return LocalActivityType.justificationChanged;
       case 'answers_reset':
         return LocalActivityType.answersReset;
+      case 'activity_log_cleared':
+        return LocalActivityType.activityLogCleared;
       default:
         return LocalActivityType.answerChanged;
     }
@@ -85,6 +92,8 @@ class LocalActivityEvent {
   final String? criterionId;
   final String? fromValue;
   final String? toValue;
+  final String? actorName;
+  final String? actorRole;
   final DateTime createdAt;
 
   const LocalActivityEvent({
@@ -98,6 +107,8 @@ class LocalActivityEvent {
     this.criterionId,
     this.fromValue,
     this.toValue,
+    this.actorName,
+    this.actorRole,
   });
 
   factory LocalActivityEvent.create({
@@ -109,6 +120,8 @@ class LocalActivityEvent {
     String? criterionId,
     String? fromValue,
     String? toValue,
+    String? actorName,
+    String? actorRole,
     DateTime? now,
   }) {
     final timestamp = (now ?? DateTime.now()).toUtc();
@@ -128,6 +141,8 @@ class LocalActivityEvent {
       criterionId: _blankToNull(criterionId),
       fromValue: _blankToNull(fromValue),
       toValue: _blankToNull(toValue),
+      actorName: _blankToNull(actorName),
+      actorRole: _blankToNull(actorRole),
       createdAt: timestamp,
     );
   }
@@ -147,6 +162,8 @@ class LocalActivityEvent {
       criterionId: _blankToNull(json['criterionId']?.toString()),
       fromValue: _blankToNull(json['fromValue']?.toString()),
       toValue: _blankToNull(json['toValue']?.toString()),
+      actorName: _blankToNull(json['actorName']?.toString()),
+      actorRole: _blankToNull(json['actorRole']?.toString()),
       createdAt: createdAt,
     );
   }
@@ -162,6 +179,8 @@ class LocalActivityEvent {
       if (criterionId != null) 'criterionId': criterionId,
       if (fromValue != null) 'fromValue': fromValue,
       if (toValue != null) 'toValue': toValue,
+      if (actorName != null) 'actorName': actorName,
+      if (actorRole != null) 'actorRole': actorRole,
       'createdAt': createdAt.toUtc().toIso8601String(),
     };
   }

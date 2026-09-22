@@ -1089,7 +1089,7 @@ String _formatBytes(int bytes) {
 
 String _formatDate(DateTime? value) {
   if (value == null) {
-    return 'Non disponible';
+    return OpenIrnLocalizations.instance.text('Non disponible');
   }
   final local = value.toLocal();
   return '${local.day.toString().padLeft(2, '0')}/'
