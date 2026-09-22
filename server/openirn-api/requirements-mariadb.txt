@@ -12,7 +12,7 @@ idna==3.18
 openpyxl==3.1.5
 pydantic==2.13.4
 pydantic-core==2.46.4
-pymysql==1.2.0
+pymysql==1.2.3
 python-dotenv==1.2.2
 pyyaml==6.0.3
 starlette==1.3.1
