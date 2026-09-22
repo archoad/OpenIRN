@@ -1,5 +1,19 @@
+import '../../domain/models/criterion_assignment.dart';
+import '../../domain/models/irn_assessment.dart';
 import '../../domain/models/local_campaign.dart';
 import 'server_campaign_store.dart';
+
+class LocalCampaignData {
+  final LocalCampaign campaign;
+  final Map<String, CriterionAnswer> criterionAnswers;
+  final List<CriterionAssignment> assignments;
+
+  const LocalCampaignData({
+    required this.campaign,
+    required this.criterionAnswers,
+    required this.assignments,
+  });
+}
 
 class LocalCampaignRepository {
   final ServerCampaignStore _store;
@@ -10,8 +24,27 @@ class LocalCampaignRepository {
   Future<List<LocalCampaign>> loadCampaigns({
     required String referentialId,
   }) async {
+    final campaignData = await loadCampaignData(referentialId: referentialId);
+    return campaignData.map((data) => data.campaign).toList(growable: false);
+  }
+
+  Future<List<LocalCampaignData>> loadCampaignData({
+    required String referentialId,
+  }) async {
     final bundles = await _store.loadBundles(referentialId: referentialId);
-    return bundles.map((bundle) => bundle.campaign).toList(growable: false);
+    return bundles
+        .map(
+          (bundle) => LocalCampaignData(
+            campaign: bundle.campaign,
+            criterionAnswers: Map<String, CriterionAnswer>.unmodifiable(
+              bundle.criterionAnswers,
+            ),
+            assignments: List<CriterionAssignment>.unmodifiable(
+              bundle.assignments,
+            ),
+          ),
+        )
+        .toList(growable: false);
   }
 
   Future<List<LocalCampaign>> ensureDefaultCampaign({

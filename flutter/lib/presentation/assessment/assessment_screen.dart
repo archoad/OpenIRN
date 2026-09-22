@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import '../../data/api/openirn_api_client.dart';
 import '../../data/repositories/local_activity_repository.dart';
 import '../../data/repositories/local_assessment_repository.dart';
-import '../../data/repositories/local_criterion_assignment_repository.dart';
 import '../../data/repositories/local_user_repository.dart';
 import '../../data/repositories/local_campaign_repository.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
@@ -24,6 +23,7 @@ import '../../domain/services/sync_automation_service.dart';
 import '../../l10n/openirn_localizations.dart';
 import '../activity/activity_log_screen.dart';
 import '../assignments/criterion_assignment_screen.dart';
+import '../common/irn_pillar_palette.dart';
 import '../common/openirn_app_bar.dart';
 import '../common/responsive_autofocus.dart';
 import '../common/responsive_dialog.dart';
@@ -127,6 +127,23 @@ String _answerHelp(BuildContext context, IrnAnswer answer) {
   }
 }
 
+enum AssessmentLayoutMode { compact, medium, wide }
+
+abstract final class AssessmentLayoutBreakpoints {
+  static const double medium = 700;
+  static const double wide = 1100;
+}
+
+AssessmentLayoutMode assessmentLayoutModeForWidth(double width) {
+  if (width < AssessmentLayoutBreakpoints.medium) {
+    return AssessmentLayoutMode.compact;
+  }
+  if (width < AssessmentLayoutBreakpoints.wide) {
+    return AssessmentLayoutMode.medium;
+  }
+  return AssessmentLayoutMode.wide;
+}
+
 class AssessmentScreen extends StatefulWidget {
   final IrnReferential referential;
   final LocalCampaign campaign;
@@ -153,7 +170,6 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   final _apiClient = const OpenIrnApiClient();
   final _activityRepository = const LocalActivityRepository();
   final _userRepository = const LocalUserRepository();
-  final _assignmentRepository = const LocalCriterionAssignmentRepository();
   final _syncAutomationService = const SyncAutomationService();
   final _appSyncCoordinator = AppSyncCoordinator.instance;
   final Map<String, CriterionAnswer> _criterionAnswers =
@@ -282,8 +298,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     _selectedAssetId = _campaign.information.assets.isEmpty
         ? null
         : _campaign.information.assets.first.id;
-    _loadLocalAnswers();
-    _loadAssignments();
+    _loadAssessmentData();
     _lastAppliedSyncSerial = _appSyncCoordinator.changeSerial;
     _appSyncCoordinator.addListener(_handleBackgroundSyncUpdate);
     _startAutomaticSynchronization();
@@ -389,64 +404,96 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     _reloadCurrentCampaignAfterBackgroundImport();
   }
 
-  Future<void> _loadLocalAnswers() async {
-    try {
-      final criterionAnswers = await _assessmentRepository.loadCriterionAnswers(
-        referentialId: widget.referential.id,
-        campaignId: _campaign.id,
-      );
-      if (!mounted) {
-        return;
-      }
+  Future<void> _loadAssessmentData({
+    bool keepContentVisible = false,
+    bool replaceAnswers = true,
+    bool fallbackToFirstCampaign = false,
+    String? successMessage,
+  }) async {
+    if (!keepContentVisible && mounted) {
       setState(() {
-        _criterionAnswers
-          ..clear()
-          ..addAll(criterionAnswers);
-        _isLoadingAnswers = false;
-        _localStatusMessage = criterionAnswers.isEmpty
-            ? 'Aucune évaluation enregistrée.'
-            : 'Évaluation restaurée (${criterionAnswers.length} critère(s), $_justificationCount justification(s)).';
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _isLoadingAnswers = false;
-        _localStatusMessage = 'Impossible de restaurer l’évaluation : $error';
+        if (replaceAnswers) {
+          _isLoadingAnswers = true;
+        }
+        _isLoadingAssignments = true;
       });
     }
-  }
 
-  Future<void> _loadAssignments() async {
+    final campaignDataFuture = _campaignRepository.loadCampaignData(
+      referentialId: widget.referential.id,
+    );
+    final usersFuture = _userRepository.ensureDefaultUsers();
+
+    List<LocalCampaignData>? campaignData;
+    List<AppUser>? users;
+    Object? campaignError;
+    Object? usersError;
     try {
-      final users = await _userRepository.ensureDefaultUsers();
-      final assignments = await _assignmentRepository
-          .loadAssignmentsByCriterion(
-            referentialId: widget.referential.id,
-            campaignId: _campaign.id,
-          );
-      if (!mounted) {
-        return;
+      campaignData = await campaignDataFuture;
+    } catch (error) {
+      campaignError = error;
+    }
+    try {
+      users = await usersFuture;
+    } catch (error) {
+      usersError = error;
+    }
+    if (!mounted) {
+      return;
+    }
+
+    LocalCampaignData? currentData;
+    if (campaignData != null) {
+      for (final data in campaignData) {
+        if (data.campaign.id == _campaign.id) {
+          currentData = data;
+          break;
+        }
       }
-      setState(() {
+      if (currentData == null &&
+          fallbackToFirstCampaign &&
+          campaignData.isNotEmpty) {
+        currentData = campaignData.first;
+      }
+    }
+
+    setState(() {
+      if (currentData != null) {
+        _campaign = currentData.campaign;
+        if (replaceAnswers) {
+          _criterionAnswers
+            ..clear()
+            ..addAll(currentData.criterionAnswers);
+        }
+        _assignmentsByCriterionId
+          ..clear()
+          ..addEntries(
+            currentData.assignments.map(
+              (assignment) => MapEntry(assignment.criterionId, assignment),
+            ),
+          );
+      }
+      if (users != null) {
         _usersById
           ..clear()
           ..addEntries(users.map((user) => MapEntry(user.id, user)));
-        _assignmentsByCriterionId
-          ..clear()
-          ..addAll(assignments);
-        _isLoadingAssignments = false;
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
       }
-      setState(() {
-        _isLoadingAssignments = false;
-        _localStatusMessage = 'Impossible de charger les affectations : $error';
-      });
-    }
+      _isLoadingAnswers = false;
+      _isLoadingAssignments = false;
+      if (campaignError != null) {
+        _localStatusMessage =
+            'Impossible de restaurer l’évaluation : $campaignError';
+      } else if (usersError != null) {
+        _localStatusMessage =
+            'Impossible de charger les affectations : $usersError';
+      } else if (successMessage != null) {
+        _localStatusMessage = successMessage;
+      } else if (replaceAnswers) {
+        _localStatusMessage = _criterionAnswers.isEmpty
+            ? 'Aucune évaluation enregistrée.'
+            : 'Évaluation restaurée (${_criterionAnswers.length} critère(s), $_justificationCount justification(s)).';
+      }
+    });
   }
 
   void _startAutomaticSynchronization() {
@@ -524,57 +571,19 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   Future<void> _reloadCurrentCampaignAfterAutomaticImport(
     SyncAutomationResult result,
   ) async {
-    final campaigns = await _campaignRepository.loadCampaigns(
-      referentialId: widget.referential.id,
+    await _loadAssessmentData(
+      keepContentVisible: true,
+      fallbackToFirstCampaign: true,
+      successMessage: result.message,
     );
-    LocalCampaign? currentCampaign;
-    for (final campaign in campaigns) {
-      if (campaign.id == _campaign.id) {
-        currentCampaign = campaign;
-        break;
-      }
-    }
-    currentCampaign ??= campaigns.isEmpty ? null : campaigns.first;
-
-    if (!mounted || currentCampaign == null) {
-      return;
-    }
-
-    setState(() {
-      _campaign = currentCampaign!;
-      _isLoadingAnswers = true;
-      _isLoadingAssignments = true;
-      _localStatusMessage = result.message;
-    });
-    await _loadLocalAnswers();
-    await _loadAssignments();
   }
 
   Future<void> _reloadCurrentCampaignAfterBackgroundImport() async {
-    final campaigns = await _campaignRepository.loadCampaigns(
-      referentialId: widget.referential.id,
+    await _loadAssessmentData(
+      keepContentVisible: true,
+      fallbackToFirstCampaign: true,
+      successMessage: _appSyncCoordinator.message,
     );
-    LocalCampaign? currentCampaign;
-    for (final campaign in campaigns) {
-      if (campaign.id == _campaign.id) {
-        currentCampaign = campaign;
-        break;
-      }
-    }
-    currentCampaign ??= campaigns.isEmpty ? null : campaigns.first;
-
-    if (!mounted || currentCampaign == null) {
-      return;
-    }
-
-    setState(() {
-      _campaign = currentCampaign!;
-      _isLoadingAnswers = true;
-      _isLoadingAssignments = true;
-      _localStatusMessage = _appSyncCoordinator.message;
-    });
-    await _loadLocalAnswers();
-    await _loadAssignments();
   }
 
   Future<void> _openAssignments() async {
@@ -591,7 +600,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
         ),
       ),
     );
-    await _loadAssignments();
+    await _loadAssessmentData(keepContentVisible: true, replaceAnswers: false);
   }
 
   Future<void> _setAnswer(IrnCriterion criterion, IrnAnswer answer) async {
@@ -1045,6 +1054,95 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       (total, criteria) => total + criteria.length,
     );
 
+    final sections = _AssessmentSections(
+      campaignContext: canEditCampaign
+          ? _CampaignContextCard(
+              key: const ValueKey<String>('assessment-campaign-context-card'),
+              referential: widget.referential,
+              campaign: _campaign,
+              activeUser: widget.activeUser,
+              onEditInformation: _editCampaignInformation,
+            )
+          : null,
+      assignmentStatus: canManageAssignments
+          ? _AssignmentStatusCard(
+              key: const ValueKey<String>('assessment-assignment-status-card'),
+              isLoading: _isLoadingAssignments,
+              assignmentCount: _assignmentsByCriterionId.length,
+              totalCriteria:
+                  _accessPolicy.shouldLimitToAssignedCriteria(widget.activeUser)
+                  ? visibleCriteriaCount
+                  : widget.referential.criteria
+                        .where((criterion) => criterion.active)
+                        .length,
+              onOpenAssignments: _openAssignments,
+            )
+          : null,
+      score: _ScoreCard(
+        summary: summary,
+        maturitySummary: maturitySummary,
+        justificationCount: _isAssetScopedCampaign
+            ? _globalJustificationCount
+            : _justificationCount,
+      ),
+      assetScope: _isAssetScopedCampaign
+          ? _AssetScopeCard(
+              assets: _scopedAssets,
+              selectedAssetId: _activeAssetId,
+              answeredCountForAsset: _answeredCountForAsset,
+              totalCriteria: widget.referential.criteria
+                  .where((criterion) => criterion.active)
+                  .length,
+              onSelected: (assetId) {
+                setState(() {
+                  _selectedAssetId = assetId;
+                });
+              },
+            )
+          : null,
+      persistence: _shouldShowPersistenceCard
+          ? _LocalPersistenceCard(
+              isLoading: _isLoadingAnswers,
+              isSaving: _isSavingAnswers,
+              message: _localStatusMessage,
+            )
+          : null,
+      assessmentContent: <Widget>[
+        if (_isLoadingAnswers || _isLoadingAssignments)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: CircularProgressIndicator(),
+            ),
+          )
+        else if (visibleCriteriaByPillar.isEmpty)
+          const _NoAssignedCriteriaCard()
+        else
+          for (final entry in visibleCriteriaByPillar.entries)
+            _PillarAssessmentCard(
+              key: PageStorageKey<String>('assessment-pillar-${entry.key.id}'),
+              pillar: entry.key,
+              criteria: entry.value,
+              initiallyExpanded: _expandedPillarIds.contains(entry.key.id),
+              onExpansionChanged: (isExpanded) =>
+                  _setPillarExpanded(entry.key.id, isExpanded),
+              criterionAnswers: activeCriterionAnswers,
+              assignmentsByCriterionId: _assignmentsByCriterionId,
+              usersById: _usersById,
+              answers: answers,
+              summary: _scoringService.computeSummaryForPillar(
+                widget.referential,
+                entry.key.id,
+                answers,
+              ),
+              canEditCriterion: _canEvaluateCriterion,
+              disabledReasonForCriterion: _disabledReasonForCriterion,
+              onAnswerChanged: _setAnswer,
+              onJustificationChanged: _setJustification,
+            ),
+      ],
+    );
+
     return Scaffold(
       appBar: OpenIrnAppBar(
         title: _campaign.name,
@@ -1119,108 +1217,163 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
             ),
         ],
       ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1100),
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              _CampaignContextCard(
-                referential: widget.referential,
-                campaign: _campaign,
-                activeUser: widget.activeUser,
-                canEdit: canEditCampaign,
-                onEditInformation: _editCampaignInformation,
-              ),
-              const SizedBox(height: 12),
-              _AssignmentStatusCard(
-                isLoading: _isLoadingAssignments,
-                assignmentCount: _assignmentsByCriterionId.length,
-                totalCriteria:
-                    _accessPolicy.shouldLimitToAssignedCriteria(
-                      widget.activeUser,
-                    )
-                    ? visibleCriteriaCount
-                    : widget.referential.criteria
-                          .where((criterion) => criterion.active)
-                          .length,
-                onOpenAssignments: canManageAssignments
-                    ? _openAssignments
-                    : null,
-              ),
-              const SizedBox(height: 12),
-              _ScoreCard(
-                summary: summary,
-                maturitySummary: maturitySummary,
-                justificationCount: _isAssetScopedCampaign
-                    ? _globalJustificationCount
-                    : _justificationCount,
-              ),
-              const SizedBox(height: 12),
-              if (_isAssetScopedCampaign) ...[
-                _AssetScopeCard(
-                  assets: _scopedAssets,
-                  selectedAssetId: _activeAssetId,
-                  answeredCountForAsset: _answeredCountForAsset,
-                  totalCriteria: widget.referential.criteria
-                      .where((criterion) => criterion.active)
-                      .length,
-                  onSelected: (assetId) {
-                    setState(() {
-                      _selectedAssetId = assetId;
-                    });
-                  },
-                ),
-                const SizedBox(height: 12),
-              ],
-              if (_shouldShowPersistenceCard) ...[
-                _LocalPersistenceCard(
-                  isLoading: _isLoadingAnswers,
-                  isSaving: _isSavingAnswers,
-                  message: _localStatusMessage,
-                ),
-                const SizedBox(height: 12),
-              ],
-              if (_isLoadingAnswers || _isLoadingAssignments)
-                const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: CircularProgressIndicator(),
-                  ),
-                )
-              else if (visibleCriteriaByPillar.isEmpty)
-                const _NoAssignedCriteriaCard()
-              else
-                for (final entry in visibleCriteriaByPillar.entries)
-                  _PillarAssessmentCard(
-                    key: PageStorageKey<String>(
-                      'assessment-pillar-${entry.key.id}',
-                    ),
-                    pillar: entry.key,
-                    criteria: entry.value,
-                    initiallyExpanded: _expandedPillarIds.contains(
-                      entry.key.id,
-                    ),
-                    onExpansionChanged: (isExpanded) =>
-                        _setPillarExpanded(entry.key.id, isExpanded),
-                    criterionAnswers: activeCriterionAnswers,
-                    assignmentsByCriterionId: _assignmentsByCriterionId,
-                    usersById: _usersById,
-                    answers: answers,
-                    summary: _scoringService.computeSummaryForPillar(
-                      widget.referential,
-                      entry.key.id,
-                      answers,
-                    ),
-                    canEditCriterion: _canEvaluateCriterion,
-                    disabledReasonForCriterion: _disabledReasonForCriterion,
-                    onAnswerChanged: _setAnswer,
-                    onJustificationChanged: _setJustification,
-                  ),
-            ],
-          ),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          return switch (assessmentLayoutModeForWidth(constraints.maxWidth)) {
+            AssessmentLayoutMode.compact => _CompactAssessmentLayout(
+              sections: sections,
+            ),
+            AssessmentLayoutMode.medium => _MediumAssessmentLayout(
+              sections: sections,
+            ),
+            AssessmentLayoutMode.wide => _WideAssessmentLayout(
+              sections: sections,
+            ),
+          };
+        },
+      ),
+    );
+  }
+}
+
+class _AssessmentSections {
+  final Widget? campaignContext;
+  final Widget? assignmentStatus;
+  final Widget score;
+  final Widget? assetScope;
+  final Widget? persistence;
+  final List<Widget> assessmentContent;
+
+  const _AssessmentSections({
+    required this.campaignContext,
+    required this.assignmentStatus,
+    required this.score,
+    required this.assetScope,
+    required this.persistence,
+    required this.assessmentContent,
+  });
+
+  List<Widget> compactSections() => <Widget>[
+    ?campaignContext,
+    ?assetScope,
+    score,
+    ?assignmentStatus,
+    ?persistence,
+    ...assessmentContent,
+  ];
+
+  List<Widget> mediumSections() => <Widget>[
+    ?campaignContext,
+    ?assignmentStatus,
+    ?assetScope,
+    score,
+    ?persistence,
+    ...assessmentContent,
+  ];
+
+  List<Widget> wideNavigationSections() => <Widget>[
+    ?campaignContext,
+    ?assignmentStatus,
+    ?assetScope,
+  ];
+
+  List<Widget> wideAssessmentSections() => <Widget>[
+    score,
+    ?persistence,
+    ...assessmentContent,
+  ];
+}
+
+List<Widget> _withVerticalSpacing(
+  Iterable<Widget> children, {
+  double spacing = 12,
+}) {
+  final result = <Widget>[];
+  for (final child in children) {
+    if (result.isNotEmpty) {
+      result.add(SizedBox(height: spacing));
+    }
+    result.add(child);
+  }
+  return result;
+}
+
+class _CompactAssessmentLayout extends StatelessWidget {
+  final _AssessmentSections sections;
+
+  const _CompactAssessmentLayout({required this.sections});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      key: const ValueKey<String>('assessment-layout-compact'),
+      padding: const EdgeInsets.all(12),
+      children: _withVerticalSpacing(sections.compactSections()),
+    );
+  }
+}
+
+class _MediumAssessmentLayout extends StatelessWidget {
+  final _AssessmentSections sections;
+
+  const _MediumAssessmentLayout({required this.sections});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      key: const ValueKey<String>('assessment-layout-medium'),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 920),
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: _withVerticalSpacing(sections.mediumSections()),
         ),
       ),
+    );
+  }
+}
+
+class _WideAssessmentLayout extends StatelessWidget {
+  final _AssessmentSections sections;
+
+  const _WideAssessmentLayout({required this.sections});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Row(
+      key: const ValueKey<String>('assessment-layout-wide'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          width: 340,
+          child: ColoredBox(
+            key: const ValueKey<String>('assessment-wide-sidebar'),
+            color: colorScheme.surfaceContainerHigh,
+            child: ListView(
+              primary: false,
+              padding: const EdgeInsets.all(16),
+              children: _withVerticalSpacing(sections.wideNavigationSections()),
+            ),
+          ),
+        ),
+        const VerticalDivider(width: 1),
+        Expanded(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1100),
+              child: ListView(
+                key: const ValueKey<String>('assessment-wide-content-scroll'),
+                primary: false,
+                padding: const EdgeInsets.all(20),
+                children: _withVerticalSpacing(
+                  sections.wideAssessmentSections(),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1263,14 +1416,13 @@ class _CampaignContextCard extends StatelessWidget {
   final IrnReferential referential;
   final LocalCampaign campaign;
   final AppUser activeUser;
-  final bool canEdit;
   final VoidCallback onEditInformation;
 
   const _CampaignContextCard({
+    super.key,
     required this.referential,
     required this.campaign,
     required this.activeUser,
-    required this.canEdit,
     required this.onEditInformation,
   });
 
@@ -1345,7 +1497,7 @@ class _CampaignContextCard extends StatelessWidget {
                   Align(
                     alignment: Alignment.centerLeft,
                     child: FilledButton.tonalIcon(
-                      onPressed: canEdit ? onEditInformation : null,
+                      onPressed: onEditInformation,
                       icon: const Icon(Icons.edit_note_outlined),
                       label: Text(
                         context.tr('assessment.context.edit_information'),
@@ -1714,9 +1866,10 @@ class _AssignmentStatusCard extends StatelessWidget {
   final bool isLoading;
   final int assignmentCount;
   final int totalCriteria;
-  final VoidCallback? onOpenAssignments;
+  final VoidCallback onOpenAssignments;
 
   const _AssignmentStatusCard({
+    super.key,
     required this.isLoading,
     required this.assignmentCount,
     required this.totalCriteria,
@@ -1734,17 +1887,38 @@ class _AssignmentStatusCard extends StatelessWidget {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(14),
-        child: Row(
-          children: [
-            const Icon(Icons.assignment_ind_outlined),
-            const SizedBox(width: 10),
-            Expanded(child: Text(label)),
-            TextButton.icon(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final status = Row(
+              children: [
+                const Icon(Icons.assignment_ind_outlined),
+                const SizedBox(width: 10),
+                Expanded(child: Text(label)),
+              ],
+            );
+            final action = TextButton.icon(
               onPressed: isLoading ? null : onOpenAssignments,
               icon: const Icon(Icons.edit_outlined),
               label: Text(context.tr('assessment.assignments.manage')),
-            ),
-          ],
+            );
+            if (constraints.maxWidth < 520) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  status,
+                  const SizedBox(height: 8),
+                  Align(alignment: Alignment.centerLeft, child: action),
+                ],
+              );
+            }
+            return Row(
+              children: [
+                Expanded(child: status),
+                const SizedBox(width: 12),
+                action,
+              ],
+            );
+          },
         ),
       ),
     );
@@ -2210,6 +2384,7 @@ class _PillarAssessmentCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final pillarStyle = IrnPillarPalette.forPillar(pillar);
     final justificationCount = criteria
         .where(
           (criterion) =>
@@ -2219,42 +2394,72 @@ class _PillarAssessmentCard extends StatelessWidget {
         .length;
 
     return Card(
-      child: ExpansionTile(
-        initiallyExpanded: initiallyExpanded,
-        maintainState: true,
-        onExpansionChanged: onExpansionChanged,
-        title: Text('${pillar.code} — ${pillar.label}'),
-        subtitle: Text(
-          context.tr(
-            'assessment.pillar.subtitle',
-            values: {
-              'answered': summary.answeredCriteria,
-              'total': summary.totalCriteria,
-              'justifications': justificationCount,
-              'score': summary.formattedOpenIrnRnrScore,
-            },
-          ),
+      color: pillarStyle.backgroundColor,
+      shape: pillarStyle.cardShape(),
+      child: Theme(
+        data: Theme.of(context).copyWith(
+          dividerColor: pillarStyle.borderColor.withValues(alpha: 0.35),
         ),
-        children: [
-          for (final criterion in criteria)
-            SizedBox(
-              width: double.infinity,
-              child: _CriterionAnswerTile(
-                criterion: criterion,
-                answer: answers[criterion.id] ?? IrnAnswer.notAnswered,
-                justification:
-                    criterionAnswers[criterion.id]?.justification ?? '',
-                assignment: assignmentsByCriterionId[criterion.id],
-                assignedUser:
-                    usersById[assignmentsByCriterionId[criterion.id]?.userId],
-                canEdit: canEditCriterion(criterion),
-                disabledReason: disabledReasonForCriterion(criterion),
-                onAnswerChanged: (answer) => onAnswerChanged(criterion, answer),
-                onJustificationChanged: (justification) =>
-                    onJustificationChanged(criterion, justification),
-              ),
+        child: ExpansionTile(
+          initiallyExpanded: initiallyExpanded,
+          maintainState: true,
+          onExpansionChanged: onExpansionChanged,
+          textColor: pillarStyle.foregroundColor,
+          collapsedTextColor: pillarStyle.foregroundColor,
+          iconColor: pillarStyle.borderColor,
+          collapsedIconColor: pillarStyle.borderColor,
+          title: Text('${pillar.code} — ${pillar.label}'),
+          subtitle: Text(
+            context.tr(
+              'assessment.pillar.subtitle',
+              values: {
+                'answered': summary.answeredCriteria,
+                'total': summary.totalCriteria,
+                'justifications': justificationCount,
+                'score': summary.formattedOpenIrnRnrScore,
+              },
             ),
-        ],
+          ),
+          children: [
+            LayoutBuilder(
+              builder: (context, constraints) {
+                const spacing = 12.0;
+                final useTwoColumns = constraints.maxWidth >= 960;
+                final tileWidth = useTwoColumns
+                    ? (constraints.maxWidth - spacing) / 2
+                    : constraints.maxWidth;
+                return Wrap(
+                  spacing: spacing,
+                  runSpacing: spacing,
+                  children: [
+                    for (final criterion in criteria)
+                      SizedBox(
+                        width: tileWidth,
+                        child: _CriterionAnswerTile(
+                          criterion: criterion,
+                          answer:
+                              answers[criterion.id] ?? IrnAnswer.notAnswered,
+                          justification:
+                              criterionAnswers[criterion.id]?.justification ??
+                              '',
+                          assignment: assignmentsByCriterionId[criterion.id],
+                          assignedUser:
+                              usersById[assignmentsByCriterionId[criterion.id]
+                                  ?.userId],
+                          canEdit: canEditCriterion(criterion),
+                          disabledReason: disabledReasonForCriterion(criterion),
+                          onAnswerChanged: (answer) =>
+                              onAnswerChanged(criterion, answer),
+                          onJustificationChanged: (justification) =>
+                              onJustificationChanged(criterion, justification),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+          ],
+        ),
       ),
     );
   }

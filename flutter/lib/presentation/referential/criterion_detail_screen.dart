@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../domain/models/irn_referential.dart';
 import '../../l10n/openirn_localizations.dart';
+import '../common/irn_pillar_palette.dart';
 import '../common/openirn_app_bar.dart';
 
 class CriterionDetailScreen extends StatelessWidget {
@@ -16,6 +17,7 @@ class CriterionDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final pillarStyle = IrnPillarPalette.forPillar(pillar);
     return Scaffold(
       appBar: OpenIrnAppBar(title: criterion.code),
       body: Center(
@@ -25,6 +27,8 @@ class CriterionDetailScreen extends StatelessWidget {
             padding: const EdgeInsets.all(16),
             children: [
               Card(
+                color: pillarStyle.backgroundColor,
+                shape: pillarStyle.cardShape(),
                 child: Padding(
                   padding: const EdgeInsets.all(18),
                   child: Column(
@@ -39,7 +43,16 @@ class CriterionDetailScreen extends StatelessWidget {
                         spacing: 8,
                         runSpacing: 8,
                         children: [
-                          Chip(label: Text(pillar.label)),
+                          Chip(
+                            label: Text(
+                              pillar.label,
+                              style: TextStyle(
+                                color: pillarStyle.foregroundColor,
+                              ),
+                            ),
+                            backgroundColor: pillarStyle.backgroundColor,
+                            side: BorderSide(color: pillarStyle.borderColor),
+                          ),
                           Chip(
                             label: Text(
                               context.tr(

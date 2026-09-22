@@ -12,6 +12,7 @@ import '../../domain/models/local_campaign.dart';
 import '../../domain/services/access_policy_service.dart';
 import '../../domain/services/referential_catalog_service.dart';
 import '../../l10n/openirn_localizations.dart';
+import '../common/irn_pillar_palette.dart';
 import '../common/openirn_app_bar.dart';
 
 class CriterionAssignmentScreen extends StatefulWidget {
@@ -224,52 +225,99 @@ class _CriterionAssignmentScreenState extends State<CriterionAssignmentScreen> {
                   ),
                   const SizedBox(height: 12),
                   for (final entry in criteriaByPillar.entries)
-                    Card(
-                      child: ExpansionTile(
-                        key: PageStorageKey<String>(
-                          'assignment-pillar-${entry.key.id}',
-                        ),
-                        initiallyExpanded: _expandedPillarIds.contains(
-                          entry.key.id,
-                        ),
-                        onExpansionChanged: (expanded) {
-                          setState(() {
-                            if (expanded) {
-                              _expandedPillarIds.add(entry.key.id);
-                            } else {
-                              _expandedPillarIds.remove(entry.key.id);
-                            }
-                          });
-                        },
-                        title: Text('${entry.key.code} — ${entry.key.label}'),
-                        subtitle: Text(
-                          context.tr(
-                            'assignment.count.criteria',
-                            values: {'count': entry.value.length},
-                          ),
-                        ),
-                        children: [
-                          for (final criterion in entry.value)
-                            _CriterionAssignmentTile(
-                              criterion: criterion,
-                              users: state.users,
-                              assignment:
-                                  state.assignmentsByCriterionId[criterion.id],
-                              readOnly: !canManageAssignments,
-                              onChanged: (userId) => _assignCriterion(
-                                criterion: criterion,
-                                userId: userId,
-                                state: state,
-                              ),
-                            ),
-                        ],
+                    _AssignmentPillarCard(
+                      pillar: entry.key,
+                      criteria: entry.value,
+                      initiallyExpanded: _expandedPillarIds.contains(
+                        entry.key.id,
                       ),
+                      users: state.users,
+                      assignmentsByCriterionId: state.assignmentsByCriterionId,
+                      readOnly: !canManageAssignments,
+                      onExpansionChanged: (expanded) {
+                        setState(() {
+                          if (expanded) {
+                            _expandedPillarIds.add(entry.key.id);
+                          } else {
+                            _expandedPillarIds.remove(entry.key.id);
+                          }
+                        });
+                      },
+                      onAssignmentChanged: (criterion, userId) =>
+                          _assignCriterion(
+                            criterion: criterion,
+                            userId: userId,
+                            state: state,
+                          ),
                     ),
                 ],
               ),
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _AssignmentPillarCard extends StatelessWidget {
+  final IrnPillar pillar;
+  final List<IrnCriterion> criteria;
+  final bool initiallyExpanded;
+  final List<AppUser> users;
+  final Map<String, CriterionAssignment> assignmentsByCriterionId;
+  final bool readOnly;
+  final ValueChanged<bool> onExpansionChanged;
+  final void Function(IrnCriterion criterion, String? userId)
+  onAssignmentChanged;
+
+  const _AssignmentPillarCard({
+    required this.pillar,
+    required this.criteria,
+    required this.initiallyExpanded,
+    required this.users,
+    required this.assignmentsByCriterionId,
+    required this.readOnly,
+    required this.onExpansionChanged,
+    required this.onAssignmentChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final pillarStyle = IrnPillarPalette.forPillar(pillar);
+    return Card(
+      color: pillarStyle.backgroundColor,
+      shape: pillarStyle.cardShape(),
+      child: Theme(
+        data: Theme.of(context).copyWith(
+          dividerColor: pillarStyle.borderColor.withValues(alpha: 0.35),
+        ),
+        child: ExpansionTile(
+          key: PageStorageKey<String>('assignment-pillar-${pillar.id}'),
+          initiallyExpanded: initiallyExpanded,
+          onExpansionChanged: onExpansionChanged,
+          textColor: pillarStyle.foregroundColor,
+          collapsedTextColor: pillarStyle.foregroundColor,
+          iconColor: pillarStyle.borderColor,
+          collapsedIconColor: pillarStyle.borderColor,
+          title: Text('${pillar.code} — ${pillar.label}'),
+          subtitle: Text(
+            context.tr(
+              'assignment.count.criteria',
+              values: {'count': criteria.length},
+            ),
+          ),
+          children: [
+            for (final criterion in criteria)
+              _CriterionAssignmentTile(
+                criterion: criterion,
+                users: users,
+                assignment: assignmentsByCriterionId[criterion.id],
+                readOnly: readOnly,
+                onChanged: (userId) => onAssignmentChanged(criterion, userId),
+              ),
+          ],
+        ),
       ),
     );
   }

@@ -18,6 +18,7 @@ import '../about/about_screen.dart';
 import '../admin/administration_screen.dart';
 import '../campaigns/campaign_list_screen.dart';
 import '../common/change_access_code_card.dart';
+import '../common/irn_pillar_palette.dart';
 import '../common/openirn_app_bar.dart';
 import '../common/responsive_autofocus.dart';
 import '../common/responsive_dialog.dart';
@@ -2360,60 +2361,74 @@ class _PillarExpansionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final pillarStyle = IrnPillarPalette.forPillar(pillar);
     return Card(
-      child: ExpansionTile(
-        initiallyExpanded: initiallyExpanded && criteria.isNotEmpty,
-        title: Text('${pillar.code} — ${pillar.label}'),
-        subtitle: Text(
-          context.tr(
-            criteria.length > 1
-                ? 'referential_catalog.pillar.criteria_plural'
-                : 'referential_catalog.pillar.criteria_singular',
-            fallback: criteria.length > 1
-                ? '{count} critères'
-                : '{count} critère',
-            values: {'count': criteria.length},
-          ),
+      color: pillarStyle.backgroundColor,
+      shape: pillarStyle.cardShape(),
+      child: Theme(
+        data: Theme.of(context).copyWith(
+          dividerColor: pillarStyle.borderColor.withValues(alpha: 0.35),
         ),
-        children: [
-          if (criteria.isEmpty)
-            ListTile(
-              leading: const Icon(Icons.info_outline),
-              title: Text(
-                context.tr(
-                  'referential_catalog.pillar.no_match',
-                  fallback:
-                      'Aucun critère ne correspond à la recherche dans ce pilier.',
-                ),
-              ),
+        child: ExpansionTile(
+          initiallyExpanded: initiallyExpanded && criteria.isNotEmpty,
+          textColor: pillarStyle.foregroundColor,
+          collapsedTextColor: pillarStyle.foregroundColor,
+          iconColor: pillarStyle.borderColor,
+          collapsedIconColor: pillarStyle.borderColor,
+          title: Text('${pillar.code} — ${pillar.label}'),
+          subtitle: Text(
+            context.tr(
+              criteria.length > 1
+                  ? 'referential_catalog.pillar.criteria_plural'
+                  : 'referential_catalog.pillar.criteria_singular',
+              fallback: criteria.length > 1
+                  ? '{count} critères'
+                  : '{count} critère',
+              values: {'count': criteria.length},
             ),
-          for (final criterion in criteria)
-            ListTile(
-              leading: CircleAvatar(
-                child: Text(criterion.code.split('.').last),
-              ),
-              title: Text('${criterion.code} — ${criterion.label}'),
-              subtitle: Text(
-                context.tr(
-                  'referential_catalog.criterion.subtitle',
-                  fallback: 'Portée : {scope} · Réponse : {answerMode}',
-                  values: {
-                    'scope': context.trText(criterion.scope.label),
-                    'answerMode': criterion.answerMode,
-                  },
-                ),
-              ),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => CriterionDetailScreen(
-                    pillar: pillar,
-                    criterion: criterion,
+          ),
+          children: [
+            if (criteria.isEmpty)
+              ListTile(
+                leading: const Icon(Icons.info_outline),
+                title: Text(
+                  context.tr(
+                    'referential_catalog.pillar.no_match',
+                    fallback:
+                        'Aucun critère ne correspond à la recherche dans ce pilier.',
                   ),
                 ),
               ),
-            ),
-        ],
+            for (final criterion in criteria)
+              ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: Colors.white.withValues(alpha: 0.72),
+                  foregroundColor: pillarStyle.foregroundColor,
+                  child: Text(criterion.code.split('.').last),
+                ),
+                title: Text('${criterion.code} — ${criterion.label}'),
+                subtitle: Text(
+                  context.tr(
+                    'referential_catalog.criterion.subtitle',
+                    fallback: 'Portée : {scope} · Réponse : {answerMode}',
+                    values: {
+                      'scope': context.trText(criterion.scope.label),
+                      'answerMode': criterion.answerMode,
+                    },
+                  ),
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => CriterionDetailScreen(
+                      pillar: pillar,
+                      criterion: criterion,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

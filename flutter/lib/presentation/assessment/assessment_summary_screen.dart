@@ -12,8 +12,9 @@ import '../../domain/models/local_campaign.dart';
 import '../../domain/services/assessment_pdf_export_service.dart';
 import '../../domain/services/official_rnr_scoring_service.dart';
 import '../../l10n/openirn_localizations.dart';
-import 'widgets/pillar_radar_chart.dart';
+import '../common/irn_pillar_palette.dart';
 import '../common/openirn_app_bar.dart';
+import 'widgets/pillar_radar_chart.dart';
 
 class AssessmentSummaryScreen extends StatefulWidget {
   final IrnReferential referential;
@@ -930,6 +931,7 @@ class _PillarIndicatorGrid extends StatelessWidget {
               badge: entry.key.code,
               compactTitle: true,
               icon: _pillarIcon(entry.key),
+              pillarStyle: IrnPillarPalette.forPillar(entry.key),
               subtitle: context.tr(
                 'screen.summary.pillar_indicator',
                 values: {
@@ -953,6 +955,7 @@ class _IndicatorTile extends StatelessWidget {
   final String subtitle;
   final bool compactTitle;
   final IconData icon;
+  final IrnPillarVisualStyle? pillarStyle;
 
   const _IndicatorTile({
     required this.title,
@@ -961,12 +964,16 @@ class _IndicatorTile extends StatelessWidget {
     required this.compactTitle,
     required this.icon,
     this.badge,
+    this.pillarStyle,
   });
 
   @override
   Widget build(BuildContext context) {
-    final backgroundColor = _scoreTileColor(score);
-    final foregroundColor = _scoreTileForegroundColor(backgroundColor);
+    final backgroundColor =
+        pillarStyle?.backgroundColor ?? _scoreTileColor(score);
+    final foregroundColor =
+        pillarStyle?.foregroundColor ??
+        _scoreTileForegroundColor(backgroundColor);
     final theme = Theme.of(context);
     final tilePadding = compactTitle ? 12.0 : 14.0;
     final iconSize = compactTitle ? 19.0 : 32.0;
@@ -975,7 +982,12 @@ class _IndicatorTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: backgroundColor,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: foregroundColor.withValues(alpha: 0.12)),
+        border: Border.all(
+          color:
+              pillarStyle?.borderColor ??
+              foregroundColor.withValues(alpha: 0.12),
+          width: pillarStyle == null ? 1 : 1.5,
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.05),
@@ -1070,7 +1082,9 @@ class _IndicatorTile extends StatelessWidget {
               maxLines: compactTitle ? 1 : 2,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodySmall?.copyWith(
-                color: foregroundColor.withValues(alpha: 0.78),
+                color: pillarStyle == null
+                    ? foregroundColor.withValues(alpha: 0.78)
+                    : foregroundColor,
               ),
             ),
           ],
@@ -1412,35 +1426,64 @@ class _PillarRadarLegend extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         for (final datum in data)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 64,
-                  child: Text(datum.code, style: theme.textTheme.labelLarge),
+          Builder(
+            builder: (context) {
+              final pillarStyle = IrnPillarPalette.forCode(datum.code);
+              return Container(
+                margin: const EdgeInsets.symmetric(vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
                 ),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(datum.label),
-                      const SizedBox(height: 3),
-                      LinearProgressIndicator(value: datum.normalizedScore),
-                    ],
-                  ),
+                decoration: pillarStyle.boxDecoration(borderRadius: 10),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 64,
+                      child: Text(
+                        datum.code,
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: pillarStyle.foregroundColor,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            datum.label,
+                            style: TextStyle(
+                              color: pillarStyle.foregroundColor,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          LinearProgressIndicator(
+                            value: datum.normalizedScore,
+                            color: pillarStyle.borderColor,
+                            backgroundColor: Colors.white.withValues(
+                              alpha: 0.65,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 56,
+                      child: Text(
+                        datum.formattedScore,
+                        textAlign: TextAlign.right,
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: pillarStyle.foregroundColor,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 12),
-                SizedBox(
-                  width: 56,
-                  child: Text(
-                    datum.formattedScore,
-                    textAlign: TextAlign.right,
-                    style: theme.textTheme.labelLarge,
-                  ),
-                ),
-              ],
-            ),
+              );
+            },
           ),
       ],
     );
@@ -1489,6 +1532,7 @@ class _PillarScoreCard extends StatelessWidget {
         },
       ),
       summary: summary,
+      pillarStyle: IrnPillarPalette.forPillar(pillar),
     );
   }
 }
@@ -1520,18 +1564,24 @@ class _ScoreLineCard extends StatelessWidget {
   final String title;
   final String subtitle;
   final IrnScoreSummary summary;
+  final IrnPillarVisualStyle? pillarStyle;
 
   const _ScoreLineCard({
     required this.title,
     required this.subtitle,
     required this.summary,
+    this.pillarStyle,
   });
 
   @override
   Widget build(BuildContext context) {
     final score = summary.openIrnRnrScore;
+    final theme = Theme.of(context);
+    final foregroundColor = pillarStyle?.foregroundColor;
 
     return Card(
+      color: pillarStyle?.backgroundColor,
+      shape: pillarStyle?.cardShape(),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
@@ -1545,21 +1595,32 @@ class _ScoreLineCard extends StatelessWidget {
                     children: [
                       Text(
                         title,
-                        style: Theme.of(context).textTheme.titleMedium,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: foregroundColor,
+                        ),
                       ),
                       const SizedBox(height: 2),
-                      Text(subtitle),
+                      Text(subtitle, style: TextStyle(color: foregroundColor)),
                     ],
                   ),
                 ),
                 Text(
                   summary.formattedOpenIrnRnrScore,
-                  style: Theme.of(context).textTheme.titleMedium,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: foregroundColor,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: 10),
-            LinearProgressIndicator(value: score == null ? 0 : score / 100),
+            LinearProgressIndicator(
+              value: score == null ? 0 : score / 100,
+              color: pillarStyle?.borderColor,
+              backgroundColor: pillarStyle == null
+                  ? null
+                  : Colors.white.withValues(alpha: 0.65),
+            ),
           ],
         ),
       ),
@@ -1605,10 +1666,27 @@ class _RankedPillarsCard extends StatelessWidget {
               Text(emptyMessage)
             else
               for (final entry in entries)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text('${entry.key.code} — ${entry.key.label}'),
-                  trailing: Text(entry.value.formattedOpenIrnRnrScore),
+                Builder(
+                  builder: (context) {
+                    final pillarStyle = IrnPillarPalette.forPillar(entry.key);
+                    return Container(
+                      margin: const EdgeInsets.only(top: 8),
+                      decoration: pillarStyle.boxDecoration(borderRadius: 10),
+                      child: ListTile(
+                        title: Text(
+                          '${entry.key.code} — ${entry.key.label}',
+                          style: TextStyle(color: pillarStyle.foregroundColor),
+                        ),
+                        trailing: Text(
+                          entry.value.formattedOpenIrnRnrScore,
+                          style: TextStyle(
+                            color: pillarStyle.foregroundColor,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
                 ),
           ],
         ),

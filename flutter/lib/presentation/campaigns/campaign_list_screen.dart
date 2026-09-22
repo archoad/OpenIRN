@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../data/repositories/local_assessment_repository.dart';
 import '../../data/repositories/local_campaign_repository.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/irn_assessment.dart';
@@ -30,21 +29,24 @@ class CampaignListScreen extends StatefulWidget {
 
 class _CampaignListScreenState extends State<CampaignListScreen> {
   final _campaignRepository = const LocalCampaignRepository();
-  final _assessmentRepository = const LocalAssessmentRepository();
   final _scoringService = const OfficialRnrScoringService();
   final _qualityService = const AssessmentQualityService();
   final _appSyncCoordinator = AppSyncCoordinator.instance;
   final _accessPolicy = const AccessPolicyService();
 
-  late Future<_CampaignListState> _campaignsFuture;
+  _CampaignListState? _campaignState;
+  Object? _loadError;
+  bool _isInitialLoading = true;
+  bool _isRefreshing = false;
+  Future<void>? _refreshInFlight;
   int _lastAppliedSyncSerial = 0;
 
   @override
   void initState() {
     super.initState();
-    _campaignsFuture = _loadCampaigns();
     _lastAppliedSyncSerial = _appSyncCoordinator.changeSerial;
     _appSyncCoordinator.addListener(_handleBackgroundSyncUpdate);
+    _refresh();
   }
 
   @override
@@ -63,16 +65,14 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
   }
 
   Future<_CampaignListState> _loadCampaigns() async {
-    final campaigns = await _campaignRepository.loadCampaigns(
+    final campaignData = await _campaignRepository.loadCampaignData(
       referentialId: widget.referential.id,
     );
 
     final enriched = <_CampaignWithSummary>[];
-    for (final campaign in campaigns) {
-      final criterionAnswers = await _assessmentRepository.loadCriterionAnswers(
-        referentialId: widget.referential.id,
-        campaignId: campaign.id,
-      );
+    for (final data in campaignData) {
+      final campaign = data.campaign;
+      final criterionAnswers = data.criterionAnswers;
       final answers = <String, IrnAnswer>{
         for (final entry in criterionAnswers.entries)
           entry.key: entry.value.answer,
@@ -170,13 +170,55 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
     );
   }
 
-  Future<void> _refresh() async {
-    if (!mounted) return;
+  Future<void> _refresh() {
+    final inFlight = _refreshInFlight;
+    if (inFlight != null) {
+      return inFlight;
+    }
 
-    setState(() {
-      _campaignsFuture = _loadCampaigns();
+    late final Future<void> refresh;
+    refresh = _performRefresh().whenComplete(() {
+      if (identical(_refreshInFlight, refresh)) {
+        _refreshInFlight = null;
+      }
     });
-    await _campaignsFuture;
+    _refreshInFlight = refresh;
+    return refresh;
+  }
+
+  Future<void> _performRefresh() async {
+    if (!mounted) {
+      return;
+    }
+
+    final hasVisibleData = _campaignState != null;
+    setState(() {
+      _loadError = null;
+      _isInitialLoading = !hasVisibleData;
+      _isRefreshing = hasVisibleData;
+    });
+
+    try {
+      final state = await _loadCampaigns();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _campaignState = state;
+        _loadError = null;
+        _isInitialLoading = false;
+        _isRefreshing = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _loadError = error;
+        _isInitialLoading = false;
+        _isRefreshing = false;
+      });
+    }
   }
 
   void _showForbidden(String message) {
@@ -215,40 +257,61 @@ class _CampaignListScreenState extends State<CampaignListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: const OpenIrnAppBar(title: 'Campagnes'),
-      body: FutureBuilder<_CampaignListState>(
-        future: _campaignsFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return _ErrorState(
-              error: snapshot.error.toString(),
-              onRetry: _refresh,
-            );
+      body: Builder(
+        builder: (context) {
+          final state = _campaignState;
+          if (state == null) {
+            if (_isInitialLoading) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            return _ErrorState(error: _loadError.toString(), onRetry: _refresh);
           }
 
-          final state = snapshot.data;
-          final campaigns = state?.campaigns ?? <_CampaignWithSummary>[];
-          return Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1100),
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  _HeaderCard(referential: widget.referential),
-                  const SizedBox(height: 12),
-                  if (campaigns.isEmpty)
-                    const _NoCampaignState()
-                  else
-                    for (final campaign in campaigns)
-                      _CampaignCard(
-                        entry: campaign,
-                        onOpen: () => _openCampaign(campaign.campaign),
+          return Column(
+            children: [
+              if (_isRefreshing) const LinearProgressIndicator(),
+              if (_loadError != null)
+                MaterialBanner(
+                  content: Text(
+                    context.tr(
+                      'screen.campaign.list.error.load',
+                      fallback: 'Impossible de charger les campagnes : {error}',
+                      values: {'error': _loadError.toString()},
+                    ),
+                  ),
+                  actions: [
+                    TextButton.icon(
+                      onPressed: _refresh,
+                      icon: const Icon(Icons.refresh),
+                      label: Text(
+                        context.tr('action.retry', fallback: 'Réessayer'),
                       ),
-                ],
+                    ),
+                  ],
+                ),
+              Expanded(
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1100),
+                    child: ListView(
+                      padding: const EdgeInsets.all(16),
+                      children: [
+                        _HeaderCard(referential: widget.referential),
+                        const SizedBox(height: 12),
+                        if (state.campaigns.isEmpty)
+                          const _NoCampaignState()
+                        else
+                          for (final campaign in state.campaigns)
+                            _CampaignCard(
+                              entry: campaign,
+                              onOpen: () => _openCampaign(campaign.campaign),
+                            ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
-            ),
+            ],
           );
         },
       ),
