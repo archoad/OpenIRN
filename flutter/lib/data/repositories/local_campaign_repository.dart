@@ -47,13 +47,6 @@ class LocalCampaignRepository {
         .toList(growable: false);
   }
 
-  Future<List<LocalCampaign>> ensureDefaultCampaign({
-    required String referentialId,
-    required String referentialVersion,
-  }) {
-    return loadCampaigns(referentialId: referentialId);
-  }
-
   Future<LocalCampaign> createCampaign({
     required String referentialId,
     required String name,
@@ -110,70 +103,5 @@ class LocalCampaignRepository {
       },
     );
     return updatedCampaign;
-  }
-
-  Future<LocalCampaign?> updateCampaignStatus({
-    required String referentialId,
-    required String campaignId,
-    required LocalCampaignStatus status,
-  }) async {
-    LocalCampaign? updatedCampaign;
-    await _store.updateBundle(
-      referentialId: referentialId,
-      campaignId: campaignId,
-      update: (bundle) {
-        final now = DateTime.now().toUtc();
-        updatedCampaign = bundle.campaign.copyWith(
-          status: status,
-          updatedAt: now,
-          statusUpdatedAt: now,
-        );
-        return bundle.copyWith(campaign: updatedCampaign);
-      },
-    );
-    return updatedCampaign;
-  }
-
-  Future<void> touchCampaign({
-    required String referentialId,
-    required String campaignId,
-  }) async {
-    await _store.updateBundle(
-      referentialId: referentialId,
-      campaignId: campaignId,
-      update: (bundle) => bundle.copyWith(
-        campaign: bundle.campaign.copyWith(updatedAt: DateTime.now().toUtc()),
-      ),
-    );
-  }
-
-  Future<void> saveCampaigns({
-    required String referentialId,
-    required List<LocalCampaign> campaigns,
-  }) async {
-    final existingBundles = await _store.loadBundles(
-      referentialId: referentialId,
-    );
-    final bundlesByCampaignId = <String, ServerCampaignBundle>{
-      for (final bundle in existingBundles) bundle.campaign.id: bundle,
-    };
-
-    final nextBundles = <ServerCampaignBundle>[];
-    for (final campaign in campaigns) {
-      if (campaign.referentialId != referentialId) {
-        continue;
-      }
-      final existing = bundlesByCampaignId[campaign.id];
-      nextBundles.add(
-        existing == null
-            ? ServerCampaignBundle(campaign: campaign)
-            : existing.copyWith(campaign: campaign),
-      );
-    }
-
-    await _store.saveBundles(
-      referentialId: referentialId,
-      bundles: nextBundles,
-    );
   }
 }

@@ -121,16 +121,8 @@ class AccessPolicyService {
     return _permissionsByRole[user.role]?.contains(permission) ?? false;
   }
 
-  bool hasAny(AppUser? user, Iterable<OpenIrnPermission> permissions) {
-    return permissions.any((permission) => can(user, permission));
-  }
-
   bool canOpenAdministration(AppUser user) {
     return can(user, OpenIrnPermission.openAdministration);
-  }
-
-  bool canManageUsers(AppUser user) {
-    return can(user, OpenIrnPermission.manageUsers);
   }
 
   bool canManageTenantUsers(AppUser user) {
@@ -140,10 +132,6 @@ class AccessPolicyService {
 
   bool canManageTenants(AppUser user) {
     return can(user, OpenIrnPermission.manageTenants);
-  }
-
-  bool canManageAuthorizedDevices(AppUser user) {
-    return can(user, OpenIrnPermission.manageAuthorizedDevices);
   }
 
   bool canManageTenantAuthorizedDevices(AppUser user) {
@@ -177,10 +165,6 @@ class AccessPolicyService {
 
   bool canManageServerMaintenance(AppUser user) {
     return can(user, OpenIrnPermission.manageServerMaintenance);
-  }
-
-  bool canManageSyncConfiguration(AppUser user) {
-    return can(user, OpenIrnPermission.manageSyncConfiguration);
   }
 
   bool canManageCampaigns(AppUser user) {
@@ -232,16 +216,16 @@ class AccessPolicyService {
     return assignment != null && assignment.userId == user.id;
   }
 
-  bool canReviewCampaign(AppUser user, LocalCampaign campaign) {
-    return !campaign.isReadOnly && can(user, OpenIrnPermission.reviewCampaign);
-  }
-
   bool canReadCampaign(AppUser user) {
     return can(user, OpenIrnPermission.viewCampaign);
   }
 
   bool shouldLimitToAssignedCriteria(AppUser user) {
     return can(user, OpenIrnPermission.viewAssignedCriteriaOnly);
+  }
+
+  bool shouldOpenEvaluatorAssessmentWorkspace(AppUser user) {
+    return user.active && user.role == AppUserRole.evaluator;
   }
 
   String administrationForbiddenMessage(AppUser user) {

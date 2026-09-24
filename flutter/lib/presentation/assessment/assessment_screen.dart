@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../../data/api/openirn_api_client.dart';
 import '../../data/repositories/local_activity_repository.dart';
@@ -44,10 +45,6 @@ String _campaignStatusHelper(BuildContext context, LocalCampaignStatus status) {
     'campaign.status.${status.jsonValue}.helper',
     fallback: status.helperText,
   );
-}
-
-String _roleLabel(BuildContext context, AppUserRole role) {
-  return context.tr('role.${role.jsonValue}', fallback: role.label);
 }
 
 String _criterionScopeLabel(BuildContext context, CriterionScope scope) {
@@ -148,11 +145,17 @@ class AssessmentScreen extends StatefulWidget {
   final IrnReferential referential;
   final LocalCampaign campaign;
   final AppUser activeUser;
+  final String? initialAssetId;
+  final bool showAssetScope;
+  final Widget? navigationPanel;
 
   const AssessmentScreen({
     required this.referential,
     required this.campaign,
     required this.activeUser,
+    this.initialAssetId,
+    this.showAssetScope = true,
+    this.navigationPanel,
     super.key,
   });
 
@@ -309,9 +312,15 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   void initState() {
     super.initState();
     _campaign = widget.campaign;
-    _selectedAssetId = _campaign.information.assets.isEmpty
-        ? null
-        : _campaign.information.assets.first.id;
+    final requestedAssetId = widget.initialAssetId?.trim() ?? '';
+    _selectedAssetId =
+        _campaign.information.assets.any(
+          (asset) => asset.id == requestedAssetId,
+        )
+        ? requestedAssetId
+        : (_campaign.information.assets.isEmpty
+              ? null
+              : _campaign.information.assets.first.id);
     _loadAssessmentData();
     _lastAppliedSyncSerial = _appSyncCoordinator.changeSerial;
     _appSyncCoordinator.addListener(_handleBackgroundSyncUpdate);
@@ -320,13 +329,27 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   }
 
   void _setPillarExpanded(String pillarId, bool isExpanded) {
-    setState(() {
-      if (isExpanded) {
-        _expandedPillarIds.add(pillarId);
-      } else {
-        _expandedPillarIds.remove(pillarId);
+    void applyExpansionState() {
+      if (!mounted || _expandedPillarIds.contains(pillarId) == isExpanded) {
+        return;
       }
-    });
+      setState(() {
+        if (isExpanded) {
+          _expandedPillarIds.add(pillarId);
+        } else {
+          _expandedPillarIds.remove(pillarId);
+        }
+      });
+    }
+
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      SchedulerBinding.instance.addPostFrameCallback(
+        (_) => applyExpansionState(),
+      );
+      return;
+    }
+    applyExpansionState();
   }
 
   Future<void> _refreshAssetScopeFromInventory() async {
@@ -1009,31 +1032,31 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  Future<void> _editCampaignInformation() async {
+  Future<void> _openCampaignInformation() async {
+    final canEdit = _accessPolicy.canEditCampaignInformation(
+      widget.activeUser,
+      _campaign,
+    );
+
+    final result = await showDialog<_CampaignInformationFormResult>(
+      context: context,
+      builder: (_) =>
+          _CampaignInformationDialog(campaign: _campaign, canEdit: canEdit),
+    );
+    if (result == null || !mounted) {
+      return;
+    }
     if (!_accessPolicy.canEditCampaignInformation(
       widget.activeUser,
       _campaign,
     )) {
       _showForbidden(
-        _campaign.isReadOnly
-            ? context.tr(
-                'assessment.disabled.read_only_campaign',
-                fallback: 'La campagne est en lecture seule.',
-              )
-            : context.tr(
-                'assessment.forbidden.edit_campaign_information',
-                fallback:
-                    'Seuls les administrateurs et pilotes IRN peuvent modifier les informations de campagne.',
-              ),
+        context.tr(
+          'assessment.forbidden.edit_campaign_information',
+          fallback:
+              'Seuls les administrateurs et pilotes IRN peuvent modifier les informations de campagne.',
+        ),
       );
-      return;
-    }
-
-    final result = await showDialog<_CampaignInformationFormResult>(
-      context: context,
-      builder: (_) => _CampaignInformationDialog(campaign: _campaign),
-    );
-    if (result == null || !mounted) {
       return;
     }
 
@@ -1189,13 +1212,10 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     );
 
     final sections = _AssessmentSections(
-      campaignContext: canEditCampaign
+      campaignContext: widget.navigationPanel == null
           ? _CampaignContextCard(
               key: const ValueKey<String>('assessment-campaign-context-card'),
-              referential: widget.referential,
               campaign: _campaign,
-              activeUser: widget.activeUser,
-              onEditInformation: _editCampaignInformation,
             )
           : null,
       assignmentStatus: canManageAssignments
@@ -1219,7 +1239,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
             ? _globalJustificationCount
             : _justificationCount,
       ),
-      assetScope: _isAssetScopedCampaign
+      assetScope: widget.showAssetScope && _isAssetScopedCampaign
           ? _AssetScopeCard(
               assets: _scopedAssets,
               selectedAssetId: _activeAssetId,
@@ -1277,18 +1297,33 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       ],
     );
 
+    Widget buildAssessmentBody() => LayoutBuilder(
+      builder: (context, constraints) {
+        return switch (assessmentLayoutModeForWidth(constraints.maxWidth)) {
+          AssessmentLayoutMode.compact => _CompactAssessmentLayout(
+            sections: sections,
+          ),
+          AssessmentLayoutMode.medium => _MediumAssessmentLayout(
+            sections: sections,
+          ),
+          AssessmentLayoutMode.wide => _WideAssessmentLayout(
+            sections: sections,
+          ),
+        };
+      },
+    );
+
     return Scaffold(
       appBar: OpenIrnAppBar(
         title: _campaign.name,
         actions: [
-          if (canEditCampaign)
-            OpenIrnAppBarAction(
-              id: 'info',
-              label: context.tr('assessment.action.information'),
-              icon: Icons.edit_note_outlined,
-              enabled: !_isLoadingAnswers,
-              onSelected: _editCampaignInformation,
-            ),
+          OpenIrnAppBarAction(
+            id: 'info',
+            label: context.tr('assessment.action.information'),
+            icon: Icons.info_outline,
+            enabled: !_isLoadingAnswers,
+            onSelected: _openCampaignInformation,
+          ),
           if (canManageAssignments)
             OpenIrnAppBarAction(
               id: 'assign',
@@ -1351,21 +1386,42 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
             ),
         ],
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          return switch (assessmentLayoutModeForWidth(constraints.maxWidth)) {
-            AssessmentLayoutMode.compact => _CompactAssessmentLayout(
-              sections: sections,
+      body: widget.navigationPanel == null
+          ? buildAssessmentBody()
+          : LayoutBuilder(
+              builder: (context, constraints) {
+                if (constraints.maxWidth >= 1000) {
+                  return Row(
+                    children: [
+                      SizedBox(
+                        key: const ValueKey<String>(
+                          'assessment-navigation-panel-left',
+                        ),
+                        width: 340,
+                        child: widget.navigationPanel,
+                      ),
+                      const VerticalDivider(width: 1),
+                      Expanded(
+                        child: _WideAssessmentContent(sections: sections),
+                      ),
+                    ],
+                  );
+                }
+                return Column(
+                  children: [
+                    SizedBox(
+                      key: const ValueKey<String>(
+                        'assessment-navigation-panel-top',
+                      ),
+                      height: constraints.maxHeight.clamp(180, 260),
+                      child: widget.navigationPanel,
+                    ),
+                    const Divider(height: 1),
+                    Expanded(child: buildAssessmentBody()),
+                  ],
+                );
+              },
             ),
-            AssessmentLayoutMode.medium => _MediumAssessmentLayout(
-              sections: sections,
-            ),
-            AssessmentLayoutMode.wide => _WideAssessmentLayout(
-              sections: sections,
-            ),
-          };
-        },
-      ),
     );
   }
 }
@@ -1492,22 +1548,29 @@ class _WideAssessmentLayout extends StatelessWidget {
           ),
         ),
         const VerticalDivider(width: 1),
-        Expanded(
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1100),
-              child: ListView(
-                key: const ValueKey<String>('assessment-wide-content-scroll'),
-                primary: false,
-                padding: const EdgeInsets.all(20),
-                children: _withVerticalSpacing(
-                  sections.wideAssessmentSections(),
-                ),
-              ),
-            ),
-          ),
-        ),
+        Expanded(child: _WideAssessmentContent(sections: sections)),
       ],
+    );
+  }
+}
+
+class _WideAssessmentContent extends StatelessWidget {
+  final _AssessmentSections sections;
+
+  const _WideAssessmentContent({required this.sections});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 1100),
+        child: ListView(
+          key: const ValueKey<String>('assessment-wide-content-scroll'),
+          primary: false,
+          padding: const EdgeInsets.all(20),
+          children: _withVerticalSpacing(sections.wideAssessmentSections()),
+        ),
+      ),
     );
   }
 }
@@ -1547,18 +1610,9 @@ class _NoAssignedCriteriaCard extends StatelessWidget {
 }
 
 class _CampaignContextCard extends StatelessWidget {
-  final IrnReferential referential;
   final LocalCampaign campaign;
-  final AppUser activeUser;
-  final VoidCallback onEditInformation;
 
-  const _CampaignContextCard({
-    super.key,
-    required this.referential,
-    required this.campaign,
-    required this.activeUser,
-    required this.onEditInformation,
-  });
+  const _CampaignContextCard({super.key, required this.campaign});
 
   @override
   Widget build(BuildContext context) {
@@ -1568,159 +1622,21 @@ class _CampaignContextCard extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Icon(Icons.folder_outlined),
+            const Icon(Icons.dns_outlined),
             const SizedBox(width: 12),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(campaign.name, style: theme.textTheme.titleMedium),
-                  const SizedBox(height: 4),
-                  Text(
-                    context.tr(
-                      'assessment.context.referential_version',
-                      values: {'version': referential.version},
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      Chip(
-                        label: Text(
-                          _campaignStatusLabel(context, campaign.status),
-                        ),
-                      ),
-                      Chip(
-                        avatar: const Icon(
-                          Icons.verified_user_outlined,
-                          size: 18,
-                        ),
-                        label: Text(
-                          context.tr(
-                            'assessment.context.session',
-                            values: {'name': activeUser.displayName},
-                          ),
-                        ),
-                      ),
-                      Chip(label: Text(_roleLabel(context, activeUser.role))),
-                      if (campaign.isReadOnly)
-                        Chip(
-                          avatar: const Icon(Icons.lock_outline, size: 18),
-                          label: Text(
-                            context.tr('assessment.context.read_only'),
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _campaignStatusHelper(context, campaign.status),
-                    style: theme.textTheme.bodySmall,
-                  ),
-                  if (campaign.description.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(campaign.description),
-                  ],
-                  const SizedBox(height: 10),
-                  _CampaignInfoRows(campaign: campaign),
-                  const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: FilledButton.tonalIcon(
-                      onPressed: onEditInformation,
-                      icon: const Icon(Icons.edit_note_outlined),
-                      label: Text(
-                        context.tr('assessment.context.edit_information'),
-                      ),
-                    ),
-                  ),
-                ],
+              child: Text(
+                campaign.information.systemName.trim().isEmpty
+                    ? context.tr('assessment.context.system_missing')
+                    : campaign.information.systemName,
+                style: theme.textTheme.titleMedium,
               ),
             ),
           ],
         ),
       ),
     );
-  }
-}
-
-class _CampaignInfoRows extends StatelessWidget {
-  final LocalCampaign campaign;
-
-  const _CampaignInfoRows({required this.campaign});
-
-  @override
-  Widget build(BuildContext context) {
-    final info = campaign.information;
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        Chip(
-          avatar: const Icon(Icons.dns_outlined, size: 18),
-          label: Text(
-            info.systemName.trim().isEmpty
-                ? context.tr('assessment.context.system_missing')
-                : context.tr(
-                    'assessment.context.system',
-                    values: {'name': info.systemName},
-                  ),
-          ),
-        ),
-        if (info.criticalFunctionName.trim().isNotEmpty)
-          Chip(
-            avatar: const Icon(Icons.account_tree_outlined, size: 18),
-            label: Text(
-              context.tr(
-                'assessment.context.critical_function',
-                values: {'name': info.criticalFunctionName},
-              ),
-            ),
-          ),
-        if (info.isAssetScoped)
-          Chip(
-            avatar: const Icon(Icons.inventory_2_outlined, size: 18),
-            label: Text(
-              context.tr(
-                'assessment.context.assets_to_score',
-                values: {'count': info.assets.length},
-              ),
-            ),
-          ),
-        Chip(
-          avatar: const Icon(Icons.person_outline, size: 18),
-          label: Text(_projectDirectorLabel(context, info)),
-        ),
-      ],
-    );
-  }
-
-  String _projectDirectorLabel(BuildContext context, CampaignInformation info) {
-    final name = info.projectDirectorFullName;
-    final email = info.projectDirectorEmail.trim();
-    if (name.isNotEmpty && email.isNotEmpty) {
-      return context.tr(
-        'assessment.context.project_director_name_email',
-        values: {'name': name, 'email': email},
-      );
-    }
-    if (name.isNotEmpty) {
-      return context.tr(
-        'assessment.context.project_director_name',
-        values: {'name': name},
-      );
-    }
-    if (email.isNotEmpty) {
-      return context.tr(
-        'assessment.context.project_director_email',
-        values: {'email': email},
-      );
-    }
-    return context.tr('assessment.context.project_director_missing');
   }
 }
 
@@ -1738,8 +1654,12 @@ class _CampaignInformationFormResult {
 
 class _CampaignInformationDialog extends StatefulWidget {
   final LocalCampaign campaign;
+  final bool canEdit;
 
-  const _CampaignInformationDialog({required this.campaign});
+  const _CampaignInformationDialog({
+    required this.campaign,
+    required this.canEdit,
+  });
 
   @override
   State<_CampaignInformationDialog> createState() =>
@@ -1792,6 +1712,9 @@ class _CampaignInformationDialogState
   }
 
   void _submit() {
+    if (!widget.canEdit) {
+      return;
+    }
     if (_formKey.currentState?.validate() != true) {
       return;
     }
@@ -1833,7 +1756,9 @@ class _CampaignInformationDialogState
                 const SizedBox(height: 10),
                 TextFormField(
                   controller: _nameController,
-                  autofocus: shouldAutofocusTextField(context),
+                  autofocus:
+                      widget.canEdit && shouldAutofocusTextField(context),
+                  readOnly: !widget.canEdit,
                   decoration: InputDecoration(
                     labelText: context.tr(
                       'assessment.information.campaign_name',
@@ -1852,6 +1777,7 @@ class _CampaignInformationDialogState
                 const SizedBox(height: 10),
                 TextFormField(
                   controller: _descriptionController,
+                  readOnly: !widget.canEdit,
                   minLines: 2,
                   maxLines: 4,
                   decoration: InputDecoration(
@@ -1864,6 +1790,28 @@ class _CampaignInformationDialogState
                     border: const OutlineInputBorder(),
                   ),
                 ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    Chip(
+                      label: Text(
+                        _campaignStatusLabel(context, widget.campaign.status),
+                      ),
+                    ),
+                    if (!widget.canEdit)
+                      Chip(
+                        avatar: const Icon(Icons.lock_outline, size: 18),
+                        label: Text(context.tr('assessment.context.read_only')),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _campaignStatusHelper(context, widget.campaign.status),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
                 const SizedBox(height: 18),
                 Text(
                   context.tr(
@@ -1874,6 +1822,7 @@ class _CampaignInformationDialogState
                 const SizedBox(height: 10),
                 TextFormField(
                   controller: _systemNameController,
+                  readOnly: !widget.canEdit,
                   decoration: InputDecoration(
                     labelText: context.tr('assessment.information.system_name'),
                     hintText: context.tr(
@@ -1888,6 +1837,7 @@ class _CampaignInformationDialogState
                 const SizedBox(height: 10),
                 TextFormField(
                   controller: _systemDescriptionController,
+                  readOnly: !widget.canEdit,
                   minLines: 3,
                   maxLines: 6,
                   decoration: InputDecoration(
@@ -1905,6 +1855,50 @@ class _CampaignInformationDialogState
                         )
                       : null,
                 ),
+                if (widget.campaign.information.criticalFunctionName
+                    .trim()
+                    .isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Chip(
+                    avatar: const Icon(Icons.account_tree_outlined, size: 18),
+                    label: Text(
+                      context.tr(
+                        'assessment.context.critical_function',
+                        values: {
+                          'name':
+                              widget.campaign.information.criticalFunctionName,
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+                if (widget.campaign.information.assets.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    context.tr(
+                      'assessment.context.assets_to_score',
+                      values: {
+                        'count': widget.campaign.information.assets.length,
+                      },
+                    ),
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final asset in widget.campaign.information.assets)
+                        Chip(
+                          avatar: const Icon(
+                            Icons.inventory_2_outlined,
+                            size: 18,
+                          ),
+                          label: Text(asset.displayLabel),
+                        ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 18),
                 Text(
                   context.tr('assessment.information.section.project_director'),
@@ -1916,6 +1910,7 @@ class _CampaignInformationDialogState
                     Expanded(
                       child: TextFormField(
                         controller: _projectDirectorFirstNameController,
+                        readOnly: !widget.canEdit,
                         decoration: InputDecoration(
                           labelText: context.tr(
                             'assessment.information.first_name',
@@ -1934,6 +1929,7 @@ class _CampaignInformationDialogState
                     Expanded(
                       child: TextFormField(
                         controller: _projectDirectorLastNameController,
+                        readOnly: !widget.canEdit,
                         decoration: InputDecoration(
                           labelText: context.tr(
                             'assessment.information.last_name',
@@ -1953,6 +1949,7 @@ class _CampaignInformationDialogState
                 const SizedBox(height: 10),
                 TextFormField(
                   controller: _projectDirectorEmailController,
+                  readOnly: !widget.canEdit,
                   keyboardType: safeKeyboardType(
                     context,
                     TextInputType.emailAddress,
@@ -1985,12 +1982,17 @@ class _CampaignInformationDialogState
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: Text(context.tr('common.action.cancel')),
+          child: Text(
+            context.tr(
+              widget.canEdit ? 'common.action.cancel' : 'common.close',
+            ),
+          ),
         ),
-        FilledButton(
-          onPressed: _submit,
-          child: Text(context.tr('common.action.save')),
-        ),
+        if (widget.canEdit)
+          FilledButton(
+            onPressed: _submit,
+            child: Text(context.tr('common.action.save')),
+          ),
       ],
     );
   }

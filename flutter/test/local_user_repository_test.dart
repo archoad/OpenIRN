@@ -12,22 +12,18 @@ void main() {
       FlutterSecureStorage.setMockInitialValues(<String, String>{});
     });
 
-    test('does not create a local default administrator anymore', () async {
-      const repository = LocalUserRepository();
+    test(
+      'purges legacy users without creating a local administrator',
+      () async {
+        const repository = LocalUserRepository();
+        final preferences = await SharedPreferences.getInstance();
+        await preferences.setString('openirn.localUsers', '{"users":[]}');
 
-      final users = await repository.ensureDefaultUsers();
+        final users = await repository.ensureDefaultUsers();
 
-      expect(users, isEmpty);
-    });
-
-    test('purges legacy local user cache instead of saving it', () async {
-      const repository = LocalUserRepository();
-      final preferences = await SharedPreferences.getInstance();
-      await preferences.setString('openirn.localUsers', '{"users":[]}');
-
-      await repository.saveUsers(const []);
-
-      expect(preferences.containsKey('openirn.localUsers'), isFalse);
-    });
+        expect(users, isEmpty);
+        expect(preferences.containsKey('openirn.localUsers'), isFalse);
+      },
+    );
   });
 }

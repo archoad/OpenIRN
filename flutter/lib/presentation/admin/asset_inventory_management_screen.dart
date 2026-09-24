@@ -239,6 +239,9 @@ class _AssetInventoryManagementScreenState
         name: system.name,
         description: system.description,
         owner: system.owner,
+        ownerFirstName: system.ownerFirstName,
+        ownerLastName: system.ownerLastName,
+        ownerEmail: system.ownerEmail,
       );
       if (!currentResult.isAvailable) {
         return currentResult;
@@ -299,7 +302,9 @@ class _AssetInventoryManagementScreenState
         functionIds: const <String>[],
         name: form.name,
         description: form.description,
-        owner: form.owner,
+        ownerFirstName: form.ownerFirstName,
+        ownerLastName: form.ownerLastName,
+        ownerEmail: form.ownerEmail,
       ),
     );
   }
@@ -340,7 +345,9 @@ class _AssetInventoryManagementScreenState
       functionIds: system.functionIds,
       name: form.name,
       description: form.description,
-      owner: form.owner,
+      ownerFirstName: form.ownerFirstName,
+      ownerLastName: form.ownerLastName,
+      ownerEmail: form.ownerEmail,
     );
     if (!updateResult.isAvailable) {
       return updateResult;
@@ -802,10 +809,10 @@ class _InventoryContent extends StatelessWidget {
                     title: Text(system.name),
                     subtitle: Text(
                       [
-                        if (system.owner.isNotEmpty)
+                        if (system.ownerDisplayLabel.isNotEmpty)
                           context.tr(
                             'inventory.system.owner',
-                            values: {'owner': system.owner},
+                            values: {'owner': system.ownerDisplayLabel},
                           ),
                         context.tr(
                           'inventory.count.linked_functions',
@@ -1135,12 +1142,12 @@ class _FunctionDialogState extends State<_FunctionDialog> {
                           controlAffinity: ListTileControlAffinity.leading,
                           value: _selectedSystemIds.contains(system.id),
                           title: Text(system.name),
-                          subtitle: system.owner.isEmpty
+                          subtitle: system.ownerDisplayLabel.isEmpty
                               ? null
                               : Text(
                                   context.tr(
                                     'inventory.system.owner',
-                                    values: {'owner': system.owner},
+                                    values: {'owner': system.ownerDisplayLabel},
                                   ),
                                 ),
                           onChanged: (selected) {
@@ -1191,13 +1198,17 @@ class _SystemFormResult {
   final List<String> assetIds;
   final String name;
   final String description;
-  final String owner;
+  final String ownerFirstName;
+  final String ownerLastName;
+  final String ownerEmail;
 
   const _SystemFormResult({
     required this.assetIds,
     required this.name,
     required this.description,
-    required this.owner,
+    required this.ownerFirstName,
+    required this.ownerLastName,
+    required this.ownerEmail,
   });
 }
 
@@ -1220,7 +1231,9 @@ class _SystemDialogState extends State<_SystemDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
   late final TextEditingController _descriptionController;
-  late final TextEditingController _ownerController;
+  late final TextEditingController _ownerFirstNameController;
+  late final TextEditingController _ownerLastNameController;
+  late final TextEditingController _ownerEmailController;
   late Set<String> _selectedAssetIds;
 
   @override
@@ -1231,14 +1244,24 @@ class _SystemDialogState extends State<_SystemDialog> {
     _descriptionController = TextEditingController(
       text: widget.system?.description ?? '',
     );
-    _ownerController = TextEditingController(text: widget.system?.owner ?? '');
+    _ownerFirstNameController = TextEditingController(
+      text: widget.system?.ownerFirstName ?? '',
+    );
+    _ownerLastNameController = TextEditingController(
+      text: widget.system?.ownerLastName ?? '',
+    );
+    _ownerEmailController = TextEditingController(
+      text: widget.system?.ownerEmail ?? '',
+    );
   }
 
   @override
   void dispose() {
     _nameController.dispose();
     _descriptionController.dispose();
-    _ownerController.dispose();
+    _ownerFirstNameController.dispose();
+    _ownerLastNameController.dispose();
+    _ownerEmailController.dispose();
     super.dispose();
   }
 
@@ -1251,7 +1274,9 @@ class _SystemDialogState extends State<_SystemDialog> {
         assetIds: _selectedAssetIds.toList(growable: false),
         name: _nameController.text.trim(),
         description: _descriptionController.text.trim(),
-        owner: _ownerController.text.trim(),
+        ownerFirstName: _ownerFirstNameController.text.trim(),
+        ownerLastName: _ownerLastNameController.text.trim(),
+        ownerEmail: _ownerEmailController.text.trim().toLowerCase(),
       ),
     );
   }
@@ -1259,6 +1284,32 @@ class _SystemDialogState extends State<_SystemDialog> {
   @override
   Widget build(BuildContext context) {
     final editing = widget.system != null;
+    final compact = isResponsiveDialogCompact(context, maxWidth: 680);
+
+    Widget buildOwnerFirstNameField() => TextFormField(
+      controller: _ownerFirstNameController,
+      decoration: InputDecoration(
+        labelText: context.tr('assessment.information.first_name'),
+        prefixIcon: const Icon(Icons.person_outline),
+        border: const OutlineInputBorder(),
+      ),
+      validator: (value) => value == null || value.trim().isEmpty
+          ? context.tr('assessment.validation.first_name_required')
+          : null,
+    );
+
+    Widget buildOwnerLastNameField() => TextFormField(
+      controller: _ownerLastNameController,
+      decoration: InputDecoration(
+        labelText: context.tr('assessment.information.last_name'),
+        prefixIcon: const Icon(Icons.person_outline),
+        border: const OutlineInputBorder(),
+      ),
+      validator: (value) => value == null || value.trim().isEmpty
+          ? context.tr('assessment.validation.last_name_required')
+          : null,
+    );
+
     return AlertDialog(
       insetPadding: responsiveDialogInsetPadding(context),
       title: Text(
@@ -1285,12 +1336,52 @@ class _SystemDialogState extends State<_SystemDialog> {
                     : null,
               ),
               const SizedBox(height: 12),
-              TextFormField(
-                controller: _ownerController,
-                decoration: InputDecoration(
-                  labelText: context.tr('inventory.field.system_owner'),
-                  prefixIcon: const Icon(Icons.person_outline),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  context.tr('inventory.field.system_owner'),
+                  style: Theme.of(context).textTheme.titleMedium,
                 ),
+              ),
+              const SizedBox(height: 8),
+              if (compact) ...[
+                buildOwnerFirstNameField(),
+                const SizedBox(height: 12),
+                buildOwnerLastNameField(),
+              ] else
+                Row(
+                  children: [
+                    Expanded(child: buildOwnerFirstNameField()),
+                    const SizedBox(width: 12),
+                    Expanded(child: buildOwnerLastNameField()),
+                  ],
+                ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _ownerEmailController,
+                keyboardType: safeKeyboardType(
+                  context,
+                  TextInputType.emailAddress,
+                ),
+                autocorrect: false,
+                enableSuggestions: false,
+                smartDashesType: SmartDashesType.disabled,
+                smartQuotesType: SmartQuotesType.disabled,
+                decoration: InputDecoration(
+                  labelText: context.tr('assessment.information.email'),
+                  prefixIcon: const Icon(Icons.alternate_email),
+                  border: const OutlineInputBorder(),
+                ),
+                validator: (value) {
+                  final email = value?.trim() ?? '';
+                  if (email.isEmpty) {
+                    return context.tr('assessment.validation.email_required');
+                  }
+                  if (!email.contains('@') || !email.contains('.')) {
+                    return context.tr('assessment.validation.email_invalid');
+                  }
+                  return null;
+                },
               ),
               const SizedBox(height: 12),
               TextFormField(

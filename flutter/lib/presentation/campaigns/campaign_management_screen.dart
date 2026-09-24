@@ -16,6 +16,35 @@ import '../common/openirn_app_bar.dart';
 import '../common/responsive_autofocus.dart';
 import '../common/responsive_dialog.dart';
 
+CampaignInformation campaignInformationFromInventorySystem({
+  required InformationSystemInfo system,
+  required List<CriticalFunctionInfo> functions,
+  required List<InformationAssetInfo> assets,
+}) {
+  return CampaignInformation(
+    systemName: system.name,
+    systemDescription: system.description,
+    projectDirectorFirstName: system.ownerFirstName,
+    projectDirectorLastName: system.ownerLastName,
+    projectDirectorEmail: system.ownerEmail,
+    criticalFunctionId: functions.isEmpty ? '' : functions.first.id,
+    criticalFunctionIds: functions.map((item) => item.id).toList(),
+    criticalFunctionName: functions.map((item) => item.name).join(', '),
+    informationSystemId: system.id,
+    assets: assets
+        .map(
+          (asset) => CampaignInformationAsset(
+            id: asset.id,
+            name: asset.name,
+            assetType: asset.assetType,
+            criticality: asset.criticality,
+            description: asset.description,
+          ),
+        )
+        .toList(growable: false),
+  );
+}
+
 class CampaignManagementScreen extends StatefulWidget {
   final IrnReferential referential;
   final AppUser activeUser;
@@ -558,25 +587,10 @@ class _CreateCampaignDialogState extends State<_CreateCampaignDialog> {
     if (system != null) {
       final functions = _functionsForSystem(system);
       final assets = _assetsForSystem(system);
-      information = CampaignInformation(
-        systemName: system.name,
-        systemDescription: system.description,
-        projectDirectorLastName: system.owner,
-        criticalFunctionId: functions.isEmpty ? '' : functions.first.id,
-        criticalFunctionIds: functions.map((item) => item.id).toList(),
-        criticalFunctionName: functions.map((item) => item.name).join(', '),
-        informationSystemId: system.id,
-        assets: assets
-            .map(
-              (asset) => CampaignInformationAsset(
-                id: asset.id,
-                name: asset.name,
-                assetType: asset.assetType,
-                criticality: asset.criticality,
-                description: asset.description,
-              ),
-            )
-            .toList(growable: false),
+      information = campaignInformationFromInventorySystem(
+        system: system,
+        functions: functions,
+        assets: assets,
       );
     }
 
@@ -819,12 +833,12 @@ class _SelectedSystemPreview extends StatelessWidget {
                 values: {'system': system.name},
               ),
             ),
-            if (system.owner.trim().isNotEmpty)
+            if (system.ownerDisplayLabel.isNotEmpty)
               Text(
                 context.tr(
                   'screen.campaign.manage.scope.owner',
                   fallback: 'Porteur SI : {owner}',
-                  values: {'owner': system.owner},
+                  values: {'owner': system.ownerDisplayLabel},
                 ),
               ),
             Text(

@@ -98,24 +98,4 @@ class LocalCriterionAssignmentRepository {
       ),
     );
   }
-
-  Future<void> saveAssignments({
-    required String referentialId,
-    required String campaignId,
-    required List<CriterionAssignment> assignments,
-  }) async {
-    await _store.updateBundle(
-      referentialId: referentialId,
-      campaignId: campaignId,
-      update: (bundle) => bundle.copyWith(
-        assignments: assignments
-            .where(
-              (assignment) =>
-                  assignment.referentialId == referentialId &&
-                  assignment.campaignId == campaignId,
-            )
-            .toList(growable: false),
-      ),
-    );
-  }
 }

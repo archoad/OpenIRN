@@ -38,6 +38,9 @@ class InformationSystemInfo {
   final String name;
   final String description;
   final String owner;
+  final String ownerFirstName;
+  final String ownerLastName;
+  final String ownerEmail;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -48,20 +51,49 @@ class InformationSystemInfo {
     required this.name,
     required this.description,
     required this.owner,
+    this.ownerFirstName = '',
+    this.ownerLastName = '',
+    this.ownerEmail = '',
     this.createdAt,
     this.updatedAt,
   });
 
   String get functionId => functionIds.isEmpty ? '' : functionIds.first;
 
+  String get ownerFullName {
+    final structuredName = <String>[
+      ownerFirstName.trim(),
+      ownerLastName.trim(),
+    ].where((part) => part.isNotEmpty).join(' ');
+    return structuredName.isEmpty ? owner.trim() : structuredName;
+  }
+
+  String get ownerDisplayLabel {
+    final name = ownerFullName;
+    final email = ownerEmail.trim();
+    if (name.isNotEmpty && email.isNotEmpty) {
+      return '$name <$email>';
+    }
+    return name.isNotEmpty ? name : email;
+  }
+
   factory InformationSystemInfo.fromJson(Map<String, dynamic> json) {
+    final legacyOwner = json['owner']?.toString().trim() ?? '';
+    final ownerFirstName = json['ownerFirstName']?.toString().trim() ?? '';
+    var ownerLastName = json['ownerLastName']?.toString().trim() ?? '';
+    if (ownerFirstName.isEmpty && ownerLastName.isEmpty) {
+      ownerLastName = legacyOwner;
+    }
     return InformationSystemInfo(
       id: json['systemId']?.toString() ?? json['id']?.toString() ?? '',
       tenantId: json['tenantId']?.toString() ?? '',
       functionIds: _relationIds(json['functionIds'], json['functionId']),
       name: json['name']?.toString().trim() ?? '',
       description: json['description']?.toString().trim() ?? '',
-      owner: json['owner']?.toString().trim() ?? '',
+      owner: legacyOwner,
+      ownerFirstName: ownerFirstName,
+      ownerLastName: ownerLastName,
+      ownerEmail: json['ownerEmail']?.toString().trim().toLowerCase() ?? '',
       createdAt: DateTime.tryParse(
         json['createdAt']?.toString() ?? '',
       )?.toUtc(),

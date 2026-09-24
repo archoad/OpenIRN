@@ -16,6 +16,7 @@ import '../../domain/services/access_policy_service.dart';
 import '../../domain/services/referential_catalog_service.dart';
 import '../about/about_screen.dart';
 import '../admin/administration_screen.dart';
+import '../assessment/evaluator_assessment_workspace_screen.dart';
 import '../campaigns/campaign_list_screen.dart';
 import '../common/change_access_code_card.dart';
 import '../common/irn_pillar_palette.dart';
@@ -582,10 +583,16 @@ class _HomeContentState extends State<_HomeContent> {
 
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => CampaignListScreen(
-          referential: widget.referential,
-          activeUser: activeUser,
-        ),
+        builder: (_) =>
+            _accessPolicy.shouldOpenEvaluatorAssessmentWorkspace(activeUser)
+            ? EvaluatorAssessmentWorkspaceScreen(
+                referential: widget.referential,
+                activeUser: activeUser,
+              )
+            : CampaignListScreen(
+                referential: widget.referential,
+                activeUser: activeUser,
+              ),
       ),
     );
   }

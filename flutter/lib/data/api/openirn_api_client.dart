@@ -2932,7 +2932,14 @@ class OpenIrnApiClient {
     required String name,
     String description = '',
     String owner = '',
+    String ownerFirstName = '',
+    String ownerLastName = '',
+    String ownerEmail = '',
   }) {
+    final ownerName = <String>[
+      ownerFirstName.trim(),
+      ownerLastName.trim(),
+    ].where((part) => part.isNotEmpty).join(' ');
     return _postInventory(
       baseUrl: baseUrl,
       tenantId: tenantId,
@@ -2942,7 +2949,10 @@ class OpenIrnApiClient {
         'functionIds': functionIds,
         'name': name.trim(),
         'description': description.trim(),
-        'owner': owner.trim(),
+        'owner': ownerName.isEmpty ? owner.trim() : ownerName,
+        'ownerFirstName': ownerFirstName.trim(),
+        'ownerLastName': ownerLastName.trim(),
+        'ownerEmail': ownerEmail.trim().toLowerCase(),
       },
       successTitle: 'Système d’information créé',
     );
@@ -2957,7 +2967,14 @@ class OpenIrnApiClient {
     required String name,
     String description = '',
     String owner = '',
+    String ownerFirstName = '',
+    String ownerLastName = '',
+    String ownerEmail = '',
   }) {
+    final ownerName = <String>[
+      ownerFirstName.trim(),
+      ownerLastName.trim(),
+    ].where((part) => part.isNotEmpty).join(' ');
     return _patchInventory(
       baseUrl: baseUrl,
       tenantId: tenantId,
@@ -2967,7 +2984,10 @@ class OpenIrnApiClient {
         'functionIds': functionIds,
         'name': name.trim(),
         'description': description.trim(),
-        'owner': owner.trim(),
+        'owner': ownerName.isEmpty ? owner.trim() : ownerName,
+        'ownerFirstName': ownerFirstName.trim(),
+        'ownerLastName': ownerLastName.trim(),
+        'ownerEmail': ownerEmail.trim().toLowerCase(),
       },
       successTitle: 'Système d’information mis à jour',
     );

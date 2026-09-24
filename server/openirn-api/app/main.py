@@ -179,10 +179,6 @@ def _db_backend() -> str:
     return "mariadb"
 
 
-def _using_mariadb() -> bool:
-    return True
-
-
 def _load_pymysql() -> Any:
     try:
         import pymysql  # type: ignore
@@ -1520,39 +1516,6 @@ def _expire_stale_enrollment_requests(con: Any, tenant_id: str) -> int:
     return int(result.rowcount or 0)
 
 
-def _require_active_device(
-    request: Request,
-    tenant_id: str,
-    payload: dict[str, Any] | None = None,
-) -> str:
-    device_id = _request_device_id(request, payload)
-    if not device_id:
-        raise HTTPException(status_code=401, detail="Missing OpenIRN device id")
-    now = _utc_now().isoformat()
-    with _db() as con:
-        row = con.execute(
-            """
-            SELECT 1
-            FROM authorized_devices
-            WHERE tenant_id = ? AND device_id = ?
-              AND status = 'active' AND revoked_at IS NULL
-            """,
-            (tenant_id, device_id),
-        ).fetchone()
-        if row is None:
-            raise HTTPException(status_code=403, detail="Terminal non autorisé ou révoqué")
-        con.execute(
-            """
-            UPDATE authorized_devices
-            SET last_seen_at = ?
-            WHERE tenant_id = ? AND device_id = ?
-            """,
-            (now, tenant_id, device_id),
-        )
-        con.commit()
-    return device_id
-
-
 def _create_api_session(
     con: Any,
     tenant_id: str,
@@ -1630,6 +1593,7 @@ def _apply_schema(migration_mysql_url: str) -> None:
         _migrate_reusable_enrollment_codes_schema(con)
         _migrate_enrollment_request_email_schema(con)
         _migrate_shared_assets_schema(con)
+        _migrate_information_system_owner_schema(con)
         _ensure_tenant(con, DEFAULT_TENANT_ID)
         _backfill_default_tenant_display_name(con)
         _sync_solution_administrators_to_all_tenants(con)
@@ -1984,6 +1948,34 @@ def _migrate_shared_assets_schema(con: Any) -> None:
             replace_existing=True,
         )
     _record_migration(con, 173, "shared_assets_and_canonical_assessments")
+
+
+def _migrate_information_system_owner_schema(con: Any) -> None:
+    """Store the information-system owner as a structured identity."""
+    if not _table_exists(con, "information_systems"):
+        _record_migration(con, 174, "information_system_owner_identity")
+        return
+
+    columns = _table_columns(con, "information_systems")
+    additions = {
+        "owner_first_name": "VARCHAR(255) NOT NULL DEFAULT '' AFTER owner",
+        "owner_last_name": "VARCHAR(255) NOT NULL DEFAULT '' AFTER owner_first_name",
+        "owner_email": "VARCHAR(254) NOT NULL DEFAULT '' AFTER owner_last_name",
+    }
+    for column_name, definition in additions.items():
+        if column_name not in columns:
+            con.execute(
+                f"ALTER TABLE information_systems ADD COLUMN {column_name} {definition}"
+            )
+
+    con.execute(
+        """
+        UPDATE information_systems
+        SET owner_last_name = owner
+        WHERE owner_first_name = '' AND owner_last_name = '' AND owner <> ''
+        """
+    )
+    _record_migration(con, 174, "information_system_owner_identity")
 
 
 def _alias_target(con: Any, entity_type: str, old_id: str, scope_id: str = "") -> str:
@@ -2585,21 +2577,6 @@ def _public_tenant_discovery_payload(item: dict[str, Any]) -> dict[str, Any]:
         "permanent": bool(item.get("permanent")),
         "isDefault": bool(item.get("isDefault")),
     }
-
-
-def _safe_tenant_id_for_creation(value: Any) -> str:
-    tenant_id = _safe_segment(value, "").strip("._-")
-    if not tenant_id:
-        raise HTTPException(status_code=400, detail="Missing tenantId")
-    if tenant_id != str(value or "").strip():
-        raise HTTPException(
-            status_code=400,
-            detail="tenantId can only contain letters, digits, underscore, dot and dash",
-        )
-    if len(tenant_id) > 80:
-        raise HTTPException(status_code=400, detail="tenantId is too long")
-    return tenant_id
-
 
 
 def _copy_user_to_tenant(
@@ -5821,25 +5798,6 @@ def _backup_path_from_name(backup_name: str) -> Path:
     return backup_path
 
 
-def _verify_backup_file(backup_path: Path) -> dict[str, Any]:
-    digest = _file_sha256(backup_path)
-    sha_path = backup_path.with_suffix(backup_path.suffix + ".sha256")
-    if sha_path.exists():
-        expected_parts = sha_path.read_text(encoding="utf-8").split()
-        expected = expected_parts[0].strip() if expected_parts else ""
-        if expected and not hmac.compare_digest(digest, expected):
-            raise HTTPException(status_code=500, detail="Backup SHA-256 checksum mismatch")
-
-    meta_path = backup_path.with_suffix(backup_path.suffix + ".json")
-    metadata = _parse_json(meta_path.read_text(encoding="utf-8") if meta_path.exists() else None, {})
-    if not isinstance(metadata, dict):
-        metadata = {}
-    signature_status = _backup_signature_status(metadata) if metadata else "unsigned"
-    if signature_status == "invalid":
-        raise HTTPException(status_code=500, detail="Backup manifest HMAC signature mismatch")
-    return {"sha256": digest, "integrityCheck": "logical_dump", "signatureStatus": signature_status}
-
-
 def _delete_database_backup(
     backup_name: str,
     *,
@@ -8162,6 +8120,22 @@ def _inventory_text(value: Any, limit: int = 255) -> str:
     return str(value or "").strip()[: max(1, limit)]
 
 
+def _inventory_owner_fields(payload: dict[str, Any]) -> tuple[str, str, str, str]:
+    legacy_owner = _inventory_text(payload.get("owner"), 255)
+    first_name = _inventory_text(payload.get("ownerFirstName"), 255)
+    last_name = _inventory_text(payload.get("ownerLastName"), 255)
+    email = _inventory_text(payload.get("ownerEmail"), 254).lower()
+    if email and EMAIL_RE.fullmatch(email) is None:
+        raise HTTPException(
+            status_code=400,
+            detail="L’adresse email du porteur du SI est invalide",
+        )
+    if not first_name and not last_name and legacy_owner:
+        last_name = legacy_owner
+    display_name = " ".join(part for part in (first_name, last_name) if part)
+    return display_name or legacy_owner, first_name, last_name, email
+
+
 def _inventory_asset_criticality(value: Any, *, default: str = "") -> str:
     text = str(value or "").strip()
     if not text:
@@ -8206,6 +8180,9 @@ def _inventory_row_public(
             "name": row["name"],
             "description": row["description"],
             "owner": row["owner"],
+            "ownerFirstName": str(_row_value(row, "owner_first_name", "") or ""),
+            "ownerLastName": str(_row_value(row, "owner_last_name", "") or ""),
+            "ownerEmail": str(_row_value(row, "owner_email", "") or ""),
             "createdAt": row["created_at"],
             "updatedAt": row["updated_at"],
         }
@@ -8236,7 +8213,9 @@ def _inventory_payload(con: Any, tenant_id: str) -> dict[str, Any]:
     ).fetchall()
     system_rows = con.execute(
         """
-        SELECT tenant_id, system_id, name, description, owner, created_at, updated_at
+        SELECT tenant_id, system_id, name, description, owner,
+               owner_first_name, owner_last_name, owner_email,
+               created_at, updated_at
         FROM information_systems
         WHERE tenant_id = ?
         ORDER BY name ASC, created_at ASC
@@ -8383,20 +8362,6 @@ def _load_openpyxl() -> Any:
 def _inventory_excel_safe_name(value: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9_.-]+", "_", value.strip()).strip("_")
     return cleaned[:80] or "inventaire"
-
-
-def _inventory_excel_write_header(sheet: Any, headers: list[str]) -> None:
-    sheet.append(headers)
-
-
-def _inventory_excel_autowidth(sheet: Any) -> None:
-    for column_cells in sheet.columns:
-        max_length = 0
-        column_letter = column_cells[0].column_letter
-        for cell in column_cells:
-            value = "" if cell.value is None else str(cell.value)
-            max_length = max(max_length, min(len(value), 80))
-        sheet.column_dimensions[column_letter].width = max(12, min(max_length + 2, 60))
 
 
 def _inventory_system_export_context(con: Any, tenant_id: str, system_id: str) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
@@ -8920,7 +8885,9 @@ async def information_system_create(request: Request) -> dict[str, Any]:
     function_ids = _inventory_relation_ids(payload, "functionIds", "functionId")
     name = _inventory_text(payload.get("name"), 255)
     description = _inventory_text(payload.get("description"), 4000)
-    owner = _inventory_text(payload.get("owner"), 255)
+    owner, owner_first_name, owner_last_name, owner_email = (
+        _inventory_owner_fields(payload)
+    )
     if not name:
         raise HTTPException(status_code=400, detail="Le nom du système d'information est obligatoire")
     now = _utc_now().isoformat()
@@ -8930,10 +8897,26 @@ async def information_system_create(request: Request) -> dict[str, Any]:
             _ensure_tenant(con, tenant_id)
             con.execute(
                 """
-                INSERT INTO information_systems(tenant_id, system_id, function_id, name, description, owner, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO information_systems(
+                    tenant_id, system_id, function_id, name, description,
+                    owner, owner_first_name, owner_last_name, owner_email,
+                    created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (tenant_id, system_id, function_ids[0] if function_ids else None, name, description, owner, now, now),
+                (
+                    tenant_id,
+                    system_id,
+                    function_ids[0] if function_ids else None,
+                    name,
+                    description,
+                    owner,
+                    owner_first_name,
+                    owner_last_name,
+                    owner_email,
+                    now,
+                    now,
+                ),
             )
             _replace_system_function_links(con, tenant_id, system_id, function_ids, now)
             _record_device_audit(con, tenant_id, "inventory.information_system.created", device_id=str(auth_context.get("deviceId") or ""), payload={"systemId": system_id, "functionIds": function_ids, "name": name, "actorUserId": auth_context.get("userId") or ""})
@@ -8954,20 +8937,68 @@ async def information_system_update(system_id: str, request: Request) -> dict[st
     function_ids = _inventory_relation_ids(payload, "functionIds", "functionId")
     name = _inventory_text(payload.get("name"), 255)
     description = _inventory_text(payload.get("description"), 4000)
-    owner = _inventory_text(payload.get("owner"), 255)
+    structured_owner_supplied = any(
+        key in payload for key in ("ownerFirstName", "ownerLastName", "ownerEmail")
+    )
+    owner, owner_first_name, owner_last_name, owner_email = (
+        _inventory_owner_fields(payload)
+    )
     if not name:
         raise HTTPException(status_code=400, detail="Le nom du système d'information est obligatoire")
     now = _utc_now().isoformat()
     with _db() as con:
         with con:
             _require_information_system(con, tenant_id, system_id)
+            if not structured_owner_supplied:
+                existing_owner = con.execute(
+                    """
+                    SELECT owner, owner_first_name, owner_last_name, owner_email
+                    FROM information_systems
+                    WHERE tenant_id = ? AND system_id = ?
+                    """,
+                    (tenant_id, system_id),
+                ).fetchone()
+                stored_first_name = str(
+                    _row_value(existing_owner, "owner_first_name", "") or ""
+                ).strip()
+                stored_last_name = str(
+                    _row_value(existing_owner, "owner_last_name", "") or ""
+                ).strip()
+                stored_email = str(
+                    _row_value(existing_owner, "owner_email", "") or ""
+                ).strip()
+                if stored_first_name or stored_last_name or stored_email:
+                    owner_first_name = stored_first_name
+                    owner_last_name = stored_last_name
+                    owner_email = stored_email
+                    stored_display_name = " ".join(
+                        part
+                        for part in (owner_first_name, owner_last_name)
+                        if part
+                    )
+                    owner = stored_display_name or str(
+                        _row_value(existing_owner, "owner", owner) or owner
+                    )
             con.execute(
                 """
                 UPDATE information_systems
-                SET function_id = ?, name = ?, description = ?, owner = ?, updated_at = ?
+                SET function_id = ?, name = ?, description = ?, owner = ?,
+                    owner_first_name = ?, owner_last_name = ?, owner_email = ?,
+                    updated_at = ?
                 WHERE tenant_id = ? AND system_id = ?
                 """,
-                (function_ids[0] if function_ids else None, name, description, owner, now, tenant_id, system_id),
+                (
+                    function_ids[0] if function_ids else None,
+                    name,
+                    description,
+                    owner,
+                    owner_first_name,
+                    owner_last_name,
+                    owner_email,
+                    now,
+                    tenant_id,
+                    system_id,
+                ),
             )
             _replace_system_function_links(con, tenant_id, system_id, function_ids, now)
             _record_device_audit(con, tenant_id, "inventory.information_system.updated", device_id=str(auth_context.get("deviceId") or ""), payload={"systemId": system_id, "functionIds": function_ids, "name": name, "actorUserId": auth_context.get("userId") or ""})

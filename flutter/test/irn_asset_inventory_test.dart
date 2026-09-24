@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openirn/domain/models/irn_asset_inventory.dart';
+import 'package:openirn/presentation/campaigns/campaign_management_screen.dart';
 
 void main() {
   test('an asset can belong to several systems and functions', () {
@@ -60,5 +61,53 @@ void main() {
 
     expect(inventory.informationSystems.single.functionIds, ['function-a']);
     expect(inventory.assets.single.systemIds, ['system-a']);
+  });
+
+  test('system owner identity is structured and copied into campaigns', () {
+    final inventory = IrnAssetInventory.fromJson(<String, dynamic>{
+      'informationSystems': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'systemId': 'system-a',
+          'name': 'SI A',
+          'description': 'Description SI',
+          'owner': 'Alice Martin',
+          'ownerFirstName': 'Alice',
+          'ownerLastName': 'Martin',
+          'ownerEmail': 'ALICE.MARTIN@EXAMPLE.TEST',
+        },
+      ],
+    });
+    final system = inventory.informationSystems.single;
+
+    expect(system.ownerFullName, 'Alice Martin');
+    expect(system.ownerEmail, 'alice.martin@example.test');
+    expect(
+      system.ownerDisplayLabel,
+      'Alice Martin <alice.martin@example.test>',
+    );
+
+    final campaignInformation = campaignInformationFromInventorySystem(
+      system: system,
+      functions: const <CriticalFunctionInfo>[],
+      assets: const <InformationAssetInfo>[],
+    );
+    expect(campaignInformation.projectDirectorFirstName, 'Alice');
+    expect(campaignInformation.projectDirectorLastName, 'Martin');
+    expect(
+      campaignInformation.projectDirectorEmail,
+      'alice.martin@example.test',
+    );
+  });
+
+  test('legacy owner remains readable as the last name', () {
+    final system = InformationSystemInfo.fromJson(<String, dynamic>{
+      'systemId': 'system-legacy',
+      'name': 'SI historique',
+      'owner': 'Porteur historique',
+    });
+
+    expect(system.ownerFirstName, isEmpty);
+    expect(system.ownerLastName, 'Porteur historique');
+    expect(system.ownerFullName, 'Porteur historique');
   });
 }

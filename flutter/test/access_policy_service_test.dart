@@ -62,12 +62,36 @@ void main() {
     expect(service.canReadCampaign(inactiveAdmin), isFalse);
   });
 
+  test('only an active evaluator opens the direct assessment workspace', () {
+    expect(
+      service.shouldOpenEvaluatorAssessmentWorkspace(
+        user('evaluator', AppUserRole.evaluator),
+      ),
+      isTrue,
+    );
+    expect(
+      service.shouldOpenEvaluatorAssessmentWorkspace(
+        user('pilot', AppUserRole.campaignManager),
+      ),
+      isFalse,
+    );
+    expect(
+      service.shouldOpenEvaluatorAssessmentWorkspace(
+        user('inactive', AppUserRole.evaluator, active: false),
+      ),
+      isFalse,
+    );
+  });
+
   test('administrator has full administration permissions', () {
     final admin = user('admin', AppUserRole.administrator);
 
     expect(service.canOpenAdministration(admin), isTrue);
-    expect(service.canManageUsers(admin), isTrue);
-    expect(service.canManageAuthorizedDevices(admin), isTrue);
+    expect(service.can(admin, OpenIrnPermission.manageUsers), isTrue);
+    expect(
+      service.can(admin, OpenIrnPermission.manageAuthorizedDevices),
+      isTrue,
+    );
     expect(service.canViewSecurityAudit(admin), isTrue);
     expect(service.canManageServerSessions(admin), isTrue);
     expect(service.canManageOfficialReferential(admin), isTrue);
@@ -86,8 +110,11 @@ void main() {
       expect(service.canManageAssignments(pilot, campaign), isTrue);
       expect(service.canViewCampaignHistory(pilot), isFalse);
       expect(service.canRestoreCampaignRevision(pilot), isFalse);
-      expect(service.canManageUsers(pilot), isFalse);
-      expect(service.canManageAuthorizedDevices(pilot), isFalse);
+      expect(service.can(pilot, OpenIrnPermission.manageUsers), isFalse);
+      expect(
+        service.can(pilot, OpenIrnPermission.manageAuthorizedDevices),
+        isFalse,
+      );
       expect(service.canViewSecurityAudit(pilot), isFalse);
       expect(service.canManageServerSessions(pilot), isFalse);
       expect(service.canManageServerMaintenance(pilot), isFalse);
@@ -171,6 +198,36 @@ void main() {
       expect(
         service.can(activeUser, OpenIrnPermission.viewCampaignQuality),
         isTrue,
+      );
+    }
+  });
+
+  test('only administrators and campaign managers can edit information', () {
+    expect(
+      service.canEditCampaignInformation(
+        user('admin', AppUserRole.administrator),
+        campaign,
+      ),
+      isTrue,
+    );
+    expect(
+      service.canEditCampaignInformation(
+        user('pilot', AppUserRole.campaignManager),
+        campaign,
+      ),
+      isTrue,
+    );
+    for (final role in [
+      AppUserRole.evaluator,
+      AppUserRole.reviewer,
+      AppUserRole.reader,
+    ]) {
+      expect(
+        service.canEditCampaignInformation(
+          user(role.jsonValue, role),
+          campaign,
+        ),
+        isFalse,
       );
     }
   });

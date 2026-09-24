@@ -24,20 +24,6 @@ class LocalAssessmentRepository {
     );
   }
 
-  Future<Map<String, IrnAnswer>> loadAnswers({
-    required String referentialId,
-    String? campaignId,
-  }) async {
-    final criterionAnswers = await loadCriterionAnswers(
-      referentialId: referentialId,
-      campaignId: campaignId,
-    );
-    return <String, IrnAnswer>{
-      for (final entry in criterionAnswers.entries)
-        entry.key: entry.value.answer,
-    };
-  }
-
   /// Saves [answers], the caller's complete in-memory view of the campaign's
   /// answers, merged onto whatever is freshest on the server rather than
   /// overwriting it outright.

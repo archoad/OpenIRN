@@ -80,14 +80,23 @@ void main() {
       const Offset(0, -700),
     );
     await tester.pump();
-    expect(find.textContaining('Actif critique'), findsWidgets);
+    expect(
+      find.byKey(const PageStorageKey<String>('assessment-pillar-pillar-1')),
+      findsOne,
+    );
+    await tester.tap(find.text('RES-1 — Pilier 1'));
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull, reason: 'compact layout overflow');
 
     tester.view.physicalSize = const Size(820, 1180);
     await tester.pump();
     expect(find.byKey(const ValueKey('assessment-layout-medium')), findsOne);
     expect(tester.state(find.byType(AssessmentScreen)), same(initialState));
-    expect(tester.takeException(), isNull, reason: 'medium layout overflow');
+    expect(
+      tester.takeException(),
+      isNull,
+      reason: 'medium layout with an expanded pillar',
+    );
 
     tester.view.physicalSize = const Size(1440, 1000);
     await tester.pump();
@@ -134,9 +143,76 @@ void main() {
     expect(tester.takeException(), isNull, reason: 'wide layout overflow');
   });
 
-  testWidgets('hides management cards from a reader', (tester) async {
+  testWidgets(
+    'shows the simplified system card and read-only information to a reader',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(390, 844);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+      });
+
+      await tester.pumpWidget(
+        OpenIrnLocalizationScope(
+          controller: OpenIrnLocalizations.instance,
+          child: MaterialApp(
+            home: AssessmentScreen(
+              referential: _referential,
+              campaign: _campaign,
+              activeUser: _readerUser,
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+
+      final systemCard = find.byKey(
+        const ValueKey('assessment-campaign-context-card'),
+      );
+      expect(systemCard, findsOne);
+      expect(
+        find.descendant(of: systemCard, matching: find.text('SI de test')),
+        findsOne,
+      );
+      expect(
+        find.descendant(
+          of: systemCard,
+          matching: find.text('Campagne responsive'),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: systemCard, matching: find.text('Actif critique')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('assessment-assignment-status-card')),
+        findsNothing,
+      );
+      expect(find.byKey(const ValueKey('assessment-layout-compact')), findsOne);
+
+      await tester.tap(find.byTooltip('Actions'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Informations'));
+      await tester.pumpAndSettle();
+
+      final fields = tester.widgetList<EditableText>(find.byType(EditableText));
+      expect(fields, hasLength(7));
+      expect(fields.every((field) => field.readOnly), isTrue);
+      expect(find.text('Actif critique'), findsOne);
+      expect(find.text('Enregistrer'), findsNothing);
+      expect(find.text('Fermer'), findsOne);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('keeps campaign information editable for an administrator', (
+    tester,
+  ) async {
     tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(390, 844);
+    tester.view.physicalSize = const Size(820, 1180);
     addTearDown(tester.view.resetDevicePixelRatio);
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(() async {
@@ -150,24 +226,82 @@ void main() {
           home: AssessmentScreen(
             referential: _referential,
             campaign: _campaign,
-            activeUser: _readerUser,
+            activeUser: _activeUser,
           ),
         ),
       ),
     );
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(
-      find.byKey(const ValueKey('assessment-campaign-context-card')),
-      findsNothing,
-    );
-    expect(
-      find.byKey(const ValueKey('assessment-assignment-status-card')),
-      findsNothing,
-    );
-    expect(find.byKey(const ValueKey('assessment-layout-compact')), findsOne);
+    await tester.tap(find.byTooltip('Actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Informations'));
+    await tester.pumpAndSettle();
+
+    final fields = tester.widgetList<EditableText>(find.byType(EditableText));
+    expect(fields, hasLength(7));
+    expect(fields.every((field) => !field.readOnly), isTrue);
+    expect(find.text('Actif critique'), findsOne);
+    expect(find.text('Enregistrer'), findsOne);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'replaces the left sidebar with evaluator navigation on desktop',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1440, 1000);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+      });
+
+      await tester.pumpWidget(
+        OpenIrnLocalizationScope(
+          controller: OpenIrnLocalizations.instance,
+          child: MaterialApp(
+            home: AssessmentScreen(
+              referential: _referential,
+              campaign: _campaign,
+              activeUser: _activeUser,
+              showAssetScope: false,
+              navigationPanel: const SizedBox(
+                key: ValueKey<String>('test-evaluator-navigation'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(
+        find.byKey(const ValueKey('assessment-navigation-panel-left')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('assessment-navigation-panel-top')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('assessment-wide-sidebar')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('assessment-campaign-context-card')),
+        findsNothing,
+      );
+      expect(find.text('Notation par actif'), findsNothing);
+
+      tester.view.physicalSize = const Size(900, 1000);
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('assessment-navigation-panel-top')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
 
 final _timestamp = DateTime.utc(2026, 9, 22, 10);
