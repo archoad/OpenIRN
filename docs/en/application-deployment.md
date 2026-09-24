@@ -203,7 +203,7 @@ The server must already respond:
 curl --fail --silent --show-error https://www.archoad.io/api/health
 ```
 
-For a new instance, create the first solution administrator on the server:
+For a new instance, create the global Administrator on the server:
 
 ```bash
 cd /opt/openirn-api
@@ -212,7 +212,7 @@ cd /opt/openirn-api
 	. /etc/openirn-api.env
 	set +a
 	.venv/bin/python tools/create_superuser.py \
-		--tenant "$OPENIRN_SOLUTION_ADMIN_TENANT_ID" \
+		--tenant "$OPENIRN_ADMINISTRATION_TENANT_ID" \
 		--tenant-name 'OpenIRN Administration' \
 		--first-name 'First name' \
 		--last-name 'Last name' \
@@ -222,7 +222,7 @@ cd /opt/openirn-api
 
 The temporary PIN is entered interactively and must be changed at first login.
 
-Restart the API to reconcile the solution administrator profile with existing workspaces:
+Restart the API to reconcile the global Administrator profile with existing workspaces:
 
 ```bash
 systemctl restart openirn-api
@@ -238,7 +238,7 @@ cd /opt/openirn-api
 	. /etc/openirn-api.env
 	set +a
 	.venv/bin/python tools/create_bootstrap_enrollment.py \
-		--tenant "$OPENIRN_SOLUTION_ADMIN_TENANT_ID" \
+		--tenant "$OPENIRN_ADMINISTRATION_TENANT_ID" \
 		--label 'First OpenIRN device' \
 		--expires 10
 )
@@ -256,7 +256,7 @@ On the newly installed device:
 4. Enter the bootstrap code provided by the server administrator.
 5. Check that the home screen shows the device as authorized.
 6. Select **Unlock OpenIRN**.
-7. Choose the solution administrator account.
+7. Choose the global Administrator account.
 8. Enter the temporary PIN.
 9. When prompted, choose a new, non-trivial PIN.
 

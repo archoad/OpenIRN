@@ -5,7 +5,6 @@ import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/sync_configuration.dart';
 import '../../domain/models/tenant_info.dart';
-import '../../domain/services/app_session_manager.dart';
 import '../../l10n/openirn_localizations.dart';
 import '../common/openirn_app_bar.dart';
 import '../common/responsive_autofocus.dart';
@@ -44,7 +43,6 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
         title: 'tenant.source.terminal_not_authorized',
         message: 'tenant.source.authorize_terminal_first',
         tenants: const <TenantInfo>[],
-        solutionAdministrator: false,
       );
     }
 
@@ -59,7 +57,6 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
       title: result.title,
       message: result.message,
       tenants: result.tenants,
-      solutionAdministrator: result.solutionAdministrator,
     );
   }
 
@@ -225,14 +222,13 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
             }
           }
           if (fallbackTenant != null) {
-            await _configurationRepository
-                .saveTenantSelectionForSolutionAdministration(
-                  state.configuration.copyWith(
-                    tenantId: fallbackTenant.id,
-                    tenantDisplayName: fallbackTenant.label,
-                    enabled: true,
-                  ),
-                );
+            await _configurationRepository.saveTenantSelectionForAdministrator(
+              state.configuration.copyWith(
+                tenantId: fallbackTenant.id,
+                tenantDisplayName: fallbackTenant.label,
+                enabled: true,
+              ),
+            );
             if (!mounted) {
               return;
             }
@@ -249,23 +245,12 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
     }
   }
 
-  Future<void> _switchTenant(
-    TenantInfo tenant, {
-    required bool solutionAdministrator,
-  }) async {
+  Future<void> _switchTenant(TenantInfo tenant) async {
     if (_working) {
       return;
     }
-    final sessionReason = context.tr(
-      'tenant.switch.session_reason',
-      values: {'tenant': tenant.label},
-    );
     final administeredMessage = context.tr(
       'tenant.switch.administered',
-      values: {'tenant': tenant.label},
-    );
-    final selectedMessage = context.tr(
-      'tenant.switch.selected',
       values: {'tenant': tenant.label},
     );
     setState(() {
@@ -273,35 +258,19 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
     });
     try {
       final configuration = await _configurationRepository.loadConfiguration();
-      if (solutionAdministrator) {
-        await _configurationRepository
-            .saveTenantSelectionForSolutionAdministration(
-              configuration.copyWith(
-                tenantId: tenant.id,
-                tenantDisplayName: tenant.label,
-                enabled: true,
-              ),
-            );
-      } else {
-        await _configurationRepository.saveConfiguration(
-          configuration.copyWith(
-            tenantId: tenant.id,
-            tenantDisplayName: tenant.label,
-            apiToken: '',
-          ),
-        );
-        AppSessionManager.instance.clearSession(reason: sessionReason);
-      }
+      await _configurationRepository.saveTenantSelectionForAdministrator(
+        configuration.copyWith(
+          tenantId: tenant.id,
+          tenantDisplayName: tenant.label,
+          enabled: true,
+        ),
+      );
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            solutionAdministrator ? administeredMessage : selectedMessage,
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(administeredMessage)));
       _reload();
     } finally {
       if (mounted) {
@@ -344,18 +313,13 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
                     _TenantCard(
                       tenant: tenant,
                       isCurrent: tenant.id == state.configuration.tenantId,
-                      solutionAdministrator: state.solutionAdministrator,
                       onRename: _working
                           ? null
                           : () => _renameTenant(state, tenant),
                       onSwitch:
                           _working || tenant.id == state.configuration.tenantId
                           ? null
-                          : () => _switchTenant(
-                              tenant,
-                              solutionAdministrator:
-                                  state.solutionAdministrator,
-                            ),
+                          : () => _switchTenant(tenant),
                     ),
                     const SizedBox(height: 12),
                   ],
@@ -374,14 +338,12 @@ class _TenantManagementStateData {
   final String title;
   final String message;
   final List<TenantInfo> tenants;
-  final bool solutionAdministrator;
 
   const _TenantManagementStateData({
     required this.configuration,
     required this.title,
     required this.message,
     required this.tenants,
-    required this.solutionAdministrator,
   });
 }
 
@@ -404,7 +366,6 @@ class _TenantIntroCard extends StatelessWidget {
     final isNarrow = MediaQuery.sizeOf(context).width < 680;
     final canDeleteTenant =
         !working &&
-        state.solutionAdministrator &&
         state.tenants.any((tenant) => !tenant.permanent && !tenant.isDefault);
     final deleteButton = FilledButton.icon(
       onPressed: canDeleteTenant ? onDeleteTenant : null,
@@ -465,8 +426,6 @@ class _TenantIntroCard extends StatelessWidget {
                   Chip(
                     label: Text(context.tr('tenant.chip.default_permanent')),
                   ),
-                  if (state.solutionAdministrator)
-                    Chip(label: Text(context.tr('tenant.chip.solution_admin'))),
                 ],
               ),
             ],
@@ -515,14 +474,12 @@ class _TenantIntroCard extends StatelessWidget {
 class _TenantCard extends StatelessWidget {
   final TenantInfo tenant;
   final bool isCurrent;
-  final bool solutionAdministrator;
   final VoidCallback? onRename;
   final VoidCallback? onSwitch;
 
   const _TenantCard({
     required this.tenant,
     required this.isCurrent,
-    required this.solutionAdministrator,
     required this.onRename,
     required this.onSwitch,
   });
@@ -622,9 +579,7 @@ class _TenantCard extends StatelessWidget {
                         onPressed: onSwitch,
                         icon: const Icon(Icons.login_outlined),
                         label: Text(
-                          solutionAdministrator
-                              ? context.tr('tenant.action.administer_workspace')
-                              : context.tr('tenant.action.use_workspace'),
+                          context.tr('tenant.action.administer_workspace'),
                         ),
                       ),
                     ],
@@ -649,9 +604,7 @@ class _TenantCard extends StatelessWidget {
                         onPressed: onSwitch,
                         icon: const Icon(Icons.login_outlined),
                         label: Text(
-                          solutionAdministrator
-                              ? context.tr('tenant.action.administer_workspace')
-                              : context.tr('tenant.action.use_workspace'),
+                          context.tr('tenant.action.administer_workspace'),
                         ),
                       ),
                     ],

@@ -203,7 +203,7 @@ Le serveur doit déjà répondre :
 curl --fail --silent --show-error https://www.archoad.io/api/health
 ```
 
-Pour une instance neuve, créer le premier administrateur solution sur le serveur :
+Pour une instance neuve, créer l'Administrateur global sur le serveur :
 
 ```bash
 cd /opt/openirn-api
@@ -212,7 +212,7 @@ cd /opt/openirn-api
 	. /etc/openirn-api.env
 	set +a
 	.venv/bin/python tools/create_superuser.py \
-		--tenant "$OPENIRN_SOLUTION_ADMIN_TENANT_ID" \
+		--tenant "$OPENIRN_ADMINISTRATION_TENANT_ID" \
 		--tenant-name 'Administration OpenIRN' \
 		--first-name 'Prénom' \
 		--last-name 'Nom' \
@@ -222,7 +222,7 @@ cd /opt/openirn-api
 
 Le PIN temporaire est saisi interactivement et devra être changé lors de la première connexion.
 
-Recharger l'API pour réconcilier le profil administrateur solution avec les espaces déjà présents :
+Recharger l'API pour réconcilier le profil Administrateur global avec les espaces déjà présents :
 
 ```bash
 systemctl restart openirn-api
@@ -238,7 +238,7 @@ cd /opt/openirn-api
 	. /etc/openirn-api.env
 	set +a
 	.venv/bin/python tools/create_bootstrap_enrollment.py \
-		--tenant "$OPENIRN_SOLUTION_ADMIN_TENANT_ID" \
+		--tenant "$OPENIRN_ADMINISTRATION_TENANT_ID" \
 		--label 'Premier terminal OpenIRN' \
 		--expires 10
 )
@@ -256,7 +256,7 @@ Sur le terminal fraîchement installé :
 4. Saisir le code bootstrap fourni par l'administrateur serveur.
 5. Vérifier que l'accueil indique que le terminal est autorisé.
 6. Sélectionner **Déverrouiller OpenIRN**.
-7. Choisir le compte administrateur solution.
+7. Choisir le compte Administrateur global.
 8. Saisir le PIN temporaire.
 9. Lorsque l'application l'exige, choisir un nouveau code PIN non trivial.
 

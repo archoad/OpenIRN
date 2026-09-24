@@ -28,7 +28,7 @@ Choisir les valeurs suivantes avant de commencer :
 | Nom DNS | `openirn.example.org` | URL publique de l'API |
 | Tag OpenIRN | `vX.Y.Z` | version immuable à déployer |
 | Base MariaDB | `openirn` | données de l'instance |
-| Espace d'administration | `openirn-admin` | espace source de l'administrateur solution |
+| Espace d'administration | `openirn-admin` | espace source de l'Administrateur global |
 | Répertoire des versions | `/opt/openirn-releases` | installations immuables |
 | Lien actif | `/opt/openirn-api` | version exécutée |
 | Données | `/var/lib/openirn-api` | référentiels et sauvegardes |
@@ -252,7 +252,7 @@ OPENIRN_API_OPERATIONS_LOG_MAX_BYTES=10485760
 OPENIRN_API_OPERATIONS_LOG_BACKUP_COUNT=7
 OPENIRN_API_OBSERVABILITY_HASH_SECRET=SECRET_OBSERVABILITE_À_REMPLACER
 OPENIRN_ENROLLMENT_CODE_SECRET=SECRET_ENROLEMENT_À_REMPLACER
-OPENIRN_SOLUTION_ADMIN_TENANT_ID=openirn-admin
+OPENIRN_ADMINISTRATION_TENANT_ID=openirn-admin
 OPENIRN_TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128
 OPENIRN_SESSION_TTL_MINUTES=480
 OPENIRN_SESSION_IDLE_TIMEOUT_MINUTES=30
@@ -306,6 +306,8 @@ Le journal `operations.ndjson` recense les démarrages de l'API ainsi que les sa
 # 8. Appliquer le schéma MariaDB
 
 L'API n'applique pas de DDL au démarrage. Charger temporairement les deux fichiers puis exécuter l'outil dédié :
+
+À partir de la migration 175, tous les anciens profils Administrateur locaux, actifs ou désactivés, ainsi que leurs sessions et leurs identifiants de connexion, sont supprimés. La migration conserve uniquement l'Administrateur global défini dans l'espace `OPENIRN_ADMINISTRATION_TENANT_ID` et ses copies. Elle s'arrête sans suppression si cet Administrateur global actif est absent ou si plusieurs profils globaux sont présents. Effectuer et contrôler une sauvegarde avant de l'appliquer sur une instance existante.
 
 ```bash
 cd /opt/openirn-api
@@ -478,7 +480,7 @@ find /var/lib/openirn-api/backups -maxdepth 1 -type f -printf '%f %s octets\n' |
 
 Une sauvegarde valide comporte le dump, son empreinte SHA-256 et son manifeste signé. Une copie hors de l'hôte reste indispensable.
 
-# 12. Créer le premier administrateur solution
+# 12. Créer l'Administrateur global
 
 Cette étape s'effectue une seule fois, après les migrations. L'outil refuse d'agir si un administrateur actif existe déjà dans l'espace cible.
 
@@ -506,7 +508,7 @@ MYSQL_HISTFILE=/dev/null mariadb openirn -e \
 	"SELECT tenant_id,email,role,active FROM users WHERE role='administrator';"
 ```
 
-Recharger l'API pour réconcilier l'administrateur solution avec les espaces déjà présents :
+Recharger l'API pour réconcilier l'Administrateur global avec les espaces déjà présents :
 
 ```bash
 systemctl restart openirn-api

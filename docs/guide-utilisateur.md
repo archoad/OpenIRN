@@ -48,7 +48,7 @@ L'administrateur peut :
 - consulter les révisions, analyser les conflits et restaurer une révision ;
 - contrôler MariaDB et déclencher une sauvegarde.
 
-Un administrateur actif de l'espace désigné comme espace d'administration solution peut administrer les autres espaces. Cette transversalité ne s'applique ni aux pilotes, ni aux évaluateurs, ni aux validateurs, ni aux lecteurs.
+L'unique profil Administrateur est global et commun à tous les espaces de travail. Cette transversalité ne s'applique ni aux pilotes, ni aux évaluateurs, ni aux validateurs, ni aux lecteurs.
 
 ## Pilote IRN
 
@@ -366,7 +366,7 @@ Lors d'un départ, désactiver le compte et demander à l'administrateur de rév
 Dans **Administration → Terminaux autorisés** :
 
 - les demandes en attente apparaissent avant les terminaux ;
-- un administrateur voit tous les espaces lorsqu'il dispose du rôle solution ;
+- l'Administrateur voit tous les espaces ;
 - un Pilote IRN ne voit que son espace ;
 - l'approbation produit un code temporaire à usage unique ;
 - la révocation supprime l'autorisation de cet espace ;

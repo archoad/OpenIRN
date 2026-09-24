@@ -39,7 +39,7 @@ ORPHAN_CHECKS = {
         SELECT COUNT(*) FROM information_assets child
         LEFT JOIN information_systems parent
           ON parent.tenant_id = child.tenant_id AND parent.system_id = child.system_id
-        WHERE parent.system_id IS NULL
+        WHERE child.system_id IS NOT NULL AND parent.system_id IS NULL
     """,
     "devices_without_tenant": """
         SELECT COUNT(*) FROM authorized_devices child

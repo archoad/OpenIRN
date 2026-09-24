@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -58,7 +59,81 @@ class _PinConnection(_Connection):
         )()
 
 
+class _SessionConnection(_Connection):
+    def __init__(self, *, now: datetime, last_seen_at: datetime):
+        super().__init__()
+        self.now = now
+        self.last_seen_at = last_seen_at
+
+    def execute(self, sql, parameters=None):
+        normalized = " ".join(sql.split())
+        self.statements.append((normalized, tuple(parameters or ())))
+        if normalized.startswith("SELECT s.tenant_id"):
+            row = {
+                "tenant_id": "tenant-a",
+                "session_id": "session-a",
+                "device_id": "device-a",
+                "user_id": "user-a",
+                "expires_at": (self.now + timedelta(hours=1)).isoformat(),
+                "last_seen_at": self.last_seen_at.isoformat(),
+                "revoked_at": None,
+                "user_role": "evaluator",
+                "user_active": 1,
+            }
+        elif normalized.startswith("SELECT COALESCE(NULLIF(t.platform"):
+            row = {"platform": "macos"}
+        else:
+            row = None
+        return type(
+            "Result",
+            (),
+            {
+                "fetchone": lambda self: row,
+                "fetchall": lambda self: [],
+                "rowcount": 0,
+            },
+        )()
+
+
 class DeviceAuthorizationTests(unittest.TestCase):
+    def test_valid_session_survives_a_transient_heartbeat_write_failure(self):
+        now = datetime(2026, 9, 24, 12, tzinfo=timezone.utc)
+        read_connection = _SessionConnection(
+            now=now,
+            last_seen_at=now - timedelta(minutes=2),
+        )
+        with (
+            patch.object(api, "_utc_now", return_value=now),
+            patch.object(
+                api,
+                "_db",
+                side_effect=[
+                    read_connection,
+                    api.DbError("transient heartbeat failure"),
+                ],
+            ),
+        ):
+            context = api._session_auth_context("ost_valid")
+
+        self.assertIsNotNone(context)
+        self.assertEqual(context["sessionId"], "session-a")
+        self.assertEqual(context["tenantId"], "tenant-a")
+
+    def test_recent_session_activity_does_not_write_a_heartbeat(self):
+        now = datetime(2026, 9, 24, 12, tzinfo=timezone.utc)
+        read_connection = _SessionConnection(
+            now=now,
+            last_seen_at=now - timedelta(seconds=10),
+        )
+        with (
+            patch.object(api, "_utc_now", return_value=now),
+            patch.object(api, "_db", return_value=read_connection) as database,
+        ):
+            context = api._session_auth_context("ost_valid")
+
+        self.assertIsNotNone(context)
+        database.assert_called_once_with()
+
     def test_unknown_bearer_is_not_accepted_as_global_token(self):
         request = _Request()
         request.headers["authorization"] = "Bearer obsolete-global-token"
@@ -96,29 +171,37 @@ class DeviceAuthorizationTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status_code, 403)
 
-    def test_only_flagged_solution_administrator_is_global(self):
-        local_administrator = {
+    def test_administrator_role_is_global_without_an_extra_flag(self):
+        administrator = {
             "authMode": "session",
             "tenantId": "tenant-a",
             "userRole": "administrator",
         }
-        solution_administrator = {
-            **local_administrator,
-            "solutionAdministrator": True,
-        }
+        self.assertTrue(api._is_administrator_context(administrator))
 
-        self.assertFalse(api._is_solution_admin_context(local_administrator))
-        self.assertTrue(api._is_solution_admin_context(solution_administrator))
-
-    def test_local_administrator_cannot_cross_tenant_boundary(self):
+    def test_administrator_can_cross_tenant_boundary(self):
         context = {
             "authMode": "session",
             "tenantId": "tenant-a",
             "userRole": "administrator",
         }
         with patch.object(api, "_request_auth_context", return_value=context):
+            authorized = api._require_admin_authorization(_Request(), "tenant-b")
+
+        self.assertEqual(authorized, context)
+
+    def test_pilot_cannot_cross_tenant_boundary(self):
+        context = {
+            "authMode": "session",
+            "tenantId": "tenant-a",
+            "userRole": "campaign_manager",
+        }
+        with (
+            patch.object(api, "_request_auth_context", return_value=context),
+            patch.object(api, "_emit_authorization_denied"),
+        ):
             with self.assertRaises(HTTPException) as raised:
-                api._require_admin_authorization(_Request(), "tenant-b")
+                api._require_campaign_manager_authorization(_Request(), "tenant-b")
 
         self.assertEqual(raised.exception.status_code, 403)
 
@@ -234,7 +317,7 @@ class PinPolicyTests(unittest.TestCase):
         with self.assertRaises(HTTPException):
             api._validate_new_pin("7391", current_pin="7391")
 
-    def test_solution_administrator_pin_is_identical_in_every_tenant(self):
+    def test_global_administrator_pin_is_identical_in_every_tenant(self):
         connection = _PinConnection()
         with patch.object(
             api,
@@ -266,7 +349,7 @@ class PinPolicyTests(unittest.TestCase):
             "active": 1,
             "role": "campaign_manager",
         }
-        with patch.object(api, "_solution_administrator_tenant_ids") as global_scope:
+        with patch.object(api, "_global_administrator_tenant_ids") as global_scope:
             affected = api._user_pin_scope_tenant_ids(
                 connection,
                 "tenant-a",

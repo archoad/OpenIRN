@@ -837,7 +837,7 @@ class _SelectedSystemPreview extends StatelessWidget {
               Text(
                 context.tr(
                   'screen.campaign.manage.scope.owner',
-                  fallback: 'Porteur SI : {owner}',
+                  fallback: 'Directeur du SI : {owner}',
                   values: {'owner': system.ownerDisplayLabel},
                 ),
               ),

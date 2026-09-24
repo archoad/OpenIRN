@@ -99,5 +99,13 @@ class BackupIntegrityTests(unittest.TestCase):
         self.assertEqual(report["signatureStatus"], "valid")
 
 
+class RestoreIntegrityQueryTests(unittest.TestCase):
+    def test_unassigned_shared_assets_are_not_reported_as_orphans(self):
+        query = " ".join(restore.ORPHAN_CHECKS["assets_without_system"].split())
+
+        self.assertIn("child.system_id IS NOT NULL", query)
+        self.assertIn("parent.system_id IS NULL", query)
+
+
 if __name__ == "__main__":
     unittest.main()

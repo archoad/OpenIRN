@@ -41,6 +41,7 @@ REQUIRED_MIGRATIONS = {
     172: "enrollment_request_email",
     173: "shared_assets_and_canonical_assessments",
     174: "information_system_owner_identity",
+    175: "global_administrator_role",
 }
 
 RUNTIME_REQUIRED_PRIVILEGES = frozenset({"SELECT", "INSERT", "UPDATE", "DELETE"})

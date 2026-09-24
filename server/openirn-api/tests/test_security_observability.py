@@ -207,14 +207,14 @@ class CommittedSecurityEventTests(unittest.TestCase):
 
 
 class SecurityAuditCoverageTests(unittest.TestCase):
-    def test_cross_tenant_denial_is_emitted_without_raw_identifiers(self):
+    def test_pilot_cross_tenant_denial_is_emitted_without_raw_identifiers(self):
         request = _Request()
         context = {
             "authMode": "session",
             "tenantId": "tenant-private-a",
             "userId": "user-private-a",
             "deviceId": "device-private-a",
-            "userRole": "administrator",
+            "userRole": "campaign_manager",
         }
         with (
             patch.dict(
@@ -225,7 +225,10 @@ class SecurityAuditCoverageTests(unittest.TestCase):
             patch.object(api, "emit_security_event") as emit,
         ):
             with self.assertRaises(HTTPException):
-                api._require_admin_authorization(request, "tenant-private-b")
+                api._require_campaign_manager_authorization(
+                    request,
+                    "tenant-private-b",
+                )
 
         event = emit.call_args.args[0]
         self.assertEqual(event["event"]["action"], "authorization.denied")

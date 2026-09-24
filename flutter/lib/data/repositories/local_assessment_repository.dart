@@ -1,28 +1,14 @@
 import '../../domain/models/irn_assessment.dart';
+import '../../domain/models/local_activity_event.dart';
 import 'server_campaign_store.dart';
 
 class LocalAssessmentRepository {
+  static const _maxActivityEventsPerCampaign = 300;
+
   final ServerCampaignStore _store;
 
   const LocalAssessmentRepository({ServerCampaignStore? store})
     : _store = store ?? const ServerCampaignStore();
-
-  Future<Map<String, CriterionAnswer>> loadCriterionAnswers({
-    required String referentialId,
-    String? campaignId,
-  }) async {
-    final resolvedCampaignId = campaignId?.trim() ?? '';
-    if (resolvedCampaignId.isEmpty) {
-      return <String, CriterionAnswer>{};
-    }
-    final bundle = await _store.loadBundle(
-      referentialId: referentialId,
-      campaignId: resolvedCampaignId,
-    );
-    return Map<String, CriterionAnswer>.from(
-      bundle?.criterionAnswers ?? const <String, CriterionAnswer>{},
-    );
-  }
 
   /// Saves [answers], the caller's complete in-memory view of the campaign's
   /// answers, merged onto whatever is freshest on the server rather than
@@ -44,6 +30,7 @@ class LocalAssessmentRepository {
     required Map<String, CriterionAnswer> answers,
     required Map<String, CriterionAnswer> baseAnswers,
     String? campaignId,
+    LocalActivityEvent? activityEvent,
   }) async {
     final resolvedCampaignId = campaignId?.trim() ?? '';
     if (resolvedCampaignId.isEmpty) {
@@ -85,6 +72,7 @@ class LocalAssessmentRepository {
         return bundle.copyWith(
           criterionAnswers: merged,
           replaceAssetAnswers: true,
+          activityEvents: _activityEventsWith(bundle, activityEvent),
         );
       },
     );
@@ -101,6 +89,7 @@ class LocalAssessmentRepository {
   Future<void> clearAnswers({
     required String referentialId,
     String? campaignId,
+    LocalActivityEvent? activityEvent,
   }) async {
     final resolvedCampaignId = campaignId?.trim() ?? '';
     if (resolvedCampaignId.isEmpty) {
@@ -112,7 +101,22 @@ class LocalAssessmentRepository {
       update: (bundle) => bundle.copyWith(
         criterionAnswers: const <String, CriterionAnswer>{},
         replaceAssetAnswers: true,
+        activityEvents: _activityEventsWith(bundle, activityEvent),
       ),
     );
+  }
+
+  List<LocalActivityEvent> _activityEventsWith(
+    ServerCampaignBundle bundle,
+    LocalActivityEvent? activityEvent,
+  ) {
+    if (activityEvent == null) {
+      return bundle.activityEvents;
+    }
+    final events = <LocalActivityEvent>[
+      activityEvent,
+      ...bundle.activityEvents.where((event) => event.id != activityEvent.id),
+    ]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return events.take(_maxActivityEventsPerCampaign).toList(growable: false);
   }
 }

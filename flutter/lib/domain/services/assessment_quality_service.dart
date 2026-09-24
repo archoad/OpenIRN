@@ -65,30 +65,15 @@ class AssessmentQualityService {
     final info = campaign.information;
     return <CampaignInformationIssue>[
       if (!info.hasSystemName)
-        const CampaignInformationIssue(
-          field: 'systemName',
-          label: 'Nom du système d’information',
-        ),
+        const CampaignInformationIssue(field: 'systemName'),
       if (!info.hasSystemDescription)
-        const CampaignInformationIssue(
-          field: 'systemDescription',
-          label: 'Description du système d’information',
-        ),
+        const CampaignInformationIssue(field: 'systemDescription'),
       if (!info.hasProjectDirectorFirstName)
-        const CampaignInformationIssue(
-          field: 'projectDirectorFirstName',
-          label: 'Prénom du directeur de projet',
-        ),
+        const CampaignInformationIssue(field: 'projectDirectorFirstName'),
       if (!info.hasProjectDirectorLastName)
-        const CampaignInformationIssue(
-          field: 'projectDirectorLastName',
-          label: 'Nom du directeur de projet',
-        ),
+        const CampaignInformationIssue(field: 'projectDirectorLastName'),
       if (!info.hasProjectDirectorEmail)
-        const CampaignInformationIssue(
-          field: 'projectDirectorEmail',
-          label: 'Email du directeur de projet',
-        ),
+        const CampaignInformationIssue(field: 'projectDirectorEmail'),
     ];
   }
 }
@@ -151,7 +136,6 @@ class AssessmentQualityIssue {
 
 class CampaignInformationIssue {
   final String field;
-  final String label;
 
-  const CampaignInformationIssue({required this.field, required this.label});
+  const CampaignInformationIssue({required this.field});
 }

@@ -550,7 +550,7 @@ class _CampaignCard extends StatelessWidget {
                         Text(
                           context.tr(
                             'screen.campaign.list.card.project_director',
-                            fallback: 'Directeur projet : {director}',
+                            fallback: 'Directeur du SI : {director}',
                             values: {
                               'director': _projectDirectorLabel(
                                 context,

@@ -146,7 +146,7 @@ class LocalSyncConfigurationRepository {
     );
   }
 
-  Future<SyncConfiguration> saveTenantSelectionForSolutionAdministration(
+  Future<SyncConfiguration> saveTenantSelectionForAdministrator(
     SyncConfiguration configuration,
   ) async {
     final preferences = await SharedPreferences.getInstance();

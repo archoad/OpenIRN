@@ -4,6 +4,7 @@ import importlib.util
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 TOOL_PATH = Path(__file__).resolve().parents[1] / "tools" / "create_superuser.py"
@@ -25,6 +26,17 @@ class CreateSuperuserTest(unittest.TestCase):
 
     def test_normalizes_tenant_identifier(self) -> None:
         self.assertEqual(MODULE.normalize_tenant("Administration OpenIRN"), "Administration_OpenIRN")
+
+    def test_uses_the_single_configured_administration_workspace(self) -> None:
+        with patch.dict(
+            MODULE.os.environ,
+            {"OPENIRN_ADMINISTRATION_TENANT_ID": "central administration"},
+            clear=False,
+        ):
+            self.assertEqual(
+                MODULE.configured_administration_tenant(),
+                "central_administration",
+            )
 
     def test_parses_mariadb_url(self) -> None:
         config = MODULE.parse_mysql_url(

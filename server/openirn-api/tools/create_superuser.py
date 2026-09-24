@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create the first OpenIRN solution administrator in MariaDB."""
+"""Create the global OpenIRN administrator in MariaDB."""
 
 from __future__ import annotations
 
@@ -34,6 +34,15 @@ def normalize_tenant(value: str) -> str:
     if not normalized:
         raise ValueError("L’identifiant de l’espace d’administration est vide")
     return normalized
+
+
+def configured_administration_tenant() -> str:
+    return normalize_tenant(
+        os.environ.get(
+            "OPENIRN_ADMINISTRATION_TENANT_ID",
+            os.environ.get("OPENIRN_SOLUTION_ADMIN_TENANT_ID", "archoad"),
+        )
+    )
 
 
 def validate_pin(pin: str) -> str:
@@ -181,12 +190,15 @@ def create_superuser(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Créer le premier administrateur solution OpenIRN.",
+        description="Créer l’Administrateur global OpenIRN.",
     )
     parser.add_argument(
         "--tenant",
-        default=os.environ.get("OPENIRN_SOLUTION_ADMIN_TENANT_ID", "archoad"),
-        help="Identifiant de l’espace d’administration solution.",
+        default=os.environ.get(
+            "OPENIRN_ADMINISTRATION_TENANT_ID",
+            os.environ.get("OPENIRN_SOLUTION_ADMIN_TENANT_ID", "archoad"),
+        ),
+        help="Identifiant de l’espace d’administration OpenIRN.",
     )
     parser.add_argument("--tenant-name", default="Administration OpenIRN")
     parser.add_argument("--email", required=True)
@@ -199,6 +211,12 @@ def main() -> int:
     try:
         config = parse_mysql_url(mysql_url)
         tenant_id = normalize_tenant(args.tenant)
+        expected_tenant_id = configured_administration_tenant()
+        if tenant_id != expected_tenant_id:
+            raise ValueError(
+                "L’Administrateur global doit être créé dans l’espace "
+                f"d’administration configuré: {expected_tenant_id}"
+            )
         email = str(args.email or "").strip().lower()
         if not email or "@" not in email:
             raise ValueError("Une adresse électronique valide est requise")
@@ -241,7 +259,7 @@ def main() -> int:
         if connection is not None:
             connection.close()
 
-    print("Administrateur solution créé.")
+    print("Administrateur global créé.")
     print(f"Espace : {tenant_id}")
     print(f"Compte : {email}")
     print(f"UUID   : {user_id}")

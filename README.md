@@ -178,7 +178,7 @@ La matrice de permissions distingue actuellement :
 - **Validateur** : consultation, synthèse et contrôle qualité ;
 - **Lecteur** : accès en lecture aux campagnes, synthèses et contrôles qualité.
 
-Un administrateur solution peut administrer plusieurs espaces de travail lorsque le serveur est configuré pour ce mode transverse.
+L'unique profil **Administrateur** est global et commun à tous les espaces de travail. Chaque Pilote IRN administre les fonctions propres à son espace.
 
 ### Terminaux et enrôlement
 

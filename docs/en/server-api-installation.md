@@ -28,7 +28,7 @@ Choose the following values before starting:
 | DNS name | `openirn.example.org` | public API URL |
 | OpenIRN tag | `vX.Y.Z` | immutable version to deploy |
 | MariaDB database | `openirn` | instance data |
-| Administration workspace | `openirn-admin` | source workspace for the solution administrator |
+| Administration workspace | `openirn-admin` | source workspace for the global Administrator |
 | Release directory | `/opt/openirn-releases` | immutable installations |
 | Active link | `/opt/openirn-api` | version currently executed |
 | Data directory | `/var/lib/openirn-api` | referentials and backups |
@@ -252,7 +252,7 @@ OPENIRN_API_OPERATIONS_LOG_MAX_BYTES=10485760
 OPENIRN_API_OPERATIONS_LOG_BACKUP_COUNT=7
 OPENIRN_API_OBSERVABILITY_HASH_SECRET=OBSERVABILITY_SECRET_TO_REPLACE
 OPENIRN_ENROLLMENT_CODE_SECRET=ENROLLMENT_SECRET_TO_REPLACE
-OPENIRN_SOLUTION_ADMIN_TENANT_ID=openirn-admin
+OPENIRN_ADMINISTRATION_TENANT_ID=openirn-admin
 OPENIRN_TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128
 OPENIRN_SESSION_TTL_MINUTES=480
 OPENIRN_SESSION_IDLE_TIMEOUT_MINUTES=30
@@ -306,6 +306,8 @@ The `operations.ndjson` log records API starts and successful or failed backups.
 # 8. Apply the MariaDB schema
 
 The API does not apply DDL at startup. Temporarily load both files and run the dedicated tool:
+
+Starting with migration 175, every legacy local Administrator profile, whether active or disabled, is deleted together with its sessions and credentials. The migration retains only the global Administrator defined in the `OPENIRN_ADMINISTRATION_TENANT_ID` workspace and its copies. It stops without deleting anything when that active global Administrator is missing or when several global profiles exist. Create and verify a backup before applying it to an existing instance.
 
 ```bash
 cd /opt/openirn-api
@@ -478,7 +480,7 @@ find /var/lib/openirn-api/backups -maxdepth 1 -type f -printf '%f %s bytes\n' | 
 
 A valid backup includes the dump, its SHA-256 checksum, and its signed manifest. An off-host copy remains essential.
 
-# 12. Create the first solution administrator
+# 12. Create the global Administrator
 
 Perform this step once, after running the migrations. The tool refuses to proceed if an active administrator already exists in the target workspace.
 
@@ -506,7 +508,7 @@ MYSQL_HISTFILE=/dev/null mariadb openirn -e \
 	"SELECT tenant_id,email,role,active FROM users WHERE role='administrator';"
 ```
 
-Restart the API to reconcile the solution administrator with existing workspaces:
+Restart the API to reconcile the global Administrator with existing workspaces:
 
 ```bash
 systemctl restart openirn-api

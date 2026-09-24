@@ -1,9 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:openirn/data/api/openirn_api_client.dart';
+import 'package:openirn/data/repositories/local_activity_repository.dart';
+import 'package:openirn/data/repositories/local_campaign_repository.dart';
+import 'package:openirn/data/repositories/local_sync_configuration_repository.dart';
 import 'package:openirn/domain/models/app_user.dart';
+import 'package:openirn/domain/models/irn_asset_inventory.dart';
 import 'package:openirn/domain/models/irn_referential.dart';
+import 'package:openirn/domain/models/local_activity_event.dart';
 import 'package:openirn/domain/models/local_campaign.dart';
+import 'package:openirn/domain/models/sync_configuration.dart';
 import 'package:openirn/l10n/openirn_localizations.dart';
 import 'package:openirn/presentation/assessment/assessment_screen.dart';
 import 'package:openirn/presentation/common/irn_pillar_palette.dart';
@@ -247,6 +254,88 @@ void main() {
   });
 
   testWidgets(
+    'updates the canonical information system from campaign information',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(820, 1180);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+      });
+
+      final campaignRepository = _FakeCampaignRepository(_campaign);
+      final apiClient = _FakeInventoryApiClient();
+      await tester.pumpWidget(
+        OpenIrnLocalizationScope(
+          controller: OpenIrnLocalizations.instance,
+          child: MaterialApp(
+            home: AssessmentScreen(
+              referential: _referential,
+              campaign: _campaign,
+              activeUser: _activeUser,
+              campaignRepository: campaignRepository,
+              configurationRepository: _FakeConfigurationRepository(),
+              apiClient: apiClient,
+              activityRepository: _FakeActivityRepository(),
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+
+      await tester.tap(find.byTooltip('Actions'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Informations'));
+      await tester.pumpAndSettle();
+
+      final fields = find.byType(TextFormField);
+      expect(fields, findsNWidgets(7));
+      expect(
+        tester.widget<TextFormField>(fields.at(2)).controller!.text,
+        'SI canonique',
+      );
+      expect(
+        tester.widget<TextFormField>(fields.at(4)).controller!.text,
+        'Alice',
+      );
+      expect(
+        tester.widget<TextFormField>(fields.at(5)).controller!.text,
+        'Martin',
+      );
+      expect(
+        tester.widget<TextFormField>(fields.at(6)).controller!.text,
+        'alice.martin@example.test',
+      );
+
+      await tester.enterText(fields.at(2), 'SI renommé');
+      await tester.enterText(fields.at(3), 'Description mise à jour');
+      await tester.enterText(fields.at(4), 'Jeanne');
+      await tester.enterText(fields.at(5), 'Dupont');
+      await tester.enterText(fields.at(6), 'jeanne.dupont@example.test');
+      await tester.tap(find.text('Enregistrer'));
+      await tester.pumpAndSettle();
+
+      expect(apiClient.updatedSystemId, 'system-layout-test');
+      expect(apiClient.updatedFunctionIds, <String>['function-layout-test']);
+      expect(apiClient.updatedName, 'SI renommé');
+      expect(apiClient.updatedDescription, 'Description mise à jour');
+      expect(apiClient.updatedOwnerFirstName, 'Jeanne');
+      expect(apiClient.updatedOwnerLastName, 'Dupont');
+      expect(apiClient.updatedOwnerEmail, 'jeanne.dupont@example.test');
+      expect(
+        campaignRepository.updatedInformation?.projectDirectorFullName,
+        'Jeanne Dupont',
+      );
+      expect(
+        campaignRepository.updatedInformation?.projectDirectorEmail,
+        'jeanne.dupont@example.test',
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'replaces the left sidebar with evaluator navigation on desktop',
     (tester) async {
       tester.view.devicePixelRatio = 1;
@@ -391,3 +480,162 @@ final _readerUser = AppUser(
   createdAt: _timestamp,
   updatedAt: _timestamp,
 );
+
+class _FakeCampaignRepository extends LocalCampaignRepository {
+  LocalCampaign campaign;
+  CampaignInformation? updatedInformation;
+
+  _FakeCampaignRepository(this.campaign);
+
+  @override
+  Future<List<LocalCampaignData>> loadCampaignData({
+    required String referentialId,
+  }) async {
+    return <LocalCampaignData>[
+      LocalCampaignData(
+        campaign: campaign,
+        criterionAnswers: const {},
+        assignments: const [],
+      ),
+    ];
+  }
+
+  @override
+  Future<LocalCampaign?> updateCampaignInformation({
+    required String referentialId,
+    required String campaignId,
+    String? name,
+    String? description,
+    required CampaignInformation information,
+  }) async {
+    updatedInformation = information;
+    campaign = campaign.copyWith(
+      name: name,
+      description: description,
+      information: information,
+      updatedAt: _timestamp.add(const Duration(minutes: 1)),
+    );
+    return campaign;
+  }
+}
+
+class _FakeConfigurationRepository extends LocalSyncConfigurationRepository {
+  @override
+  Future<SyncConfiguration> loadConfiguration() async {
+    return SyncConfiguration(
+      apiBaseUrl: SyncConfiguration.fixedApiBaseUrl,
+      tenantId: 'tenant-layout-test',
+      deviceId: 'device-layout-test',
+      enabled: true,
+      apiToken: 'ost_layout_test',
+      updatedAt: _timestamp,
+    );
+  }
+}
+
+class _FakeActivityRepository extends LocalActivityRepository {
+  @override
+  Future<void> appendEvent(LocalActivityEvent event) async {}
+}
+
+class _FakeInventoryApiClient extends OpenIrnApiClient {
+  String? updatedSystemId;
+  List<String>? updatedFunctionIds;
+  String? updatedName;
+  String? updatedDescription;
+  String? updatedOwnerFirstName;
+  String? updatedOwnerLastName;
+  String? updatedOwnerEmail;
+
+  IrnAssetInventory inventory = IrnAssetInventory(
+    tenantId: 'tenant-layout-test',
+    tenantDisplayName: 'Tenant test',
+    criticalFunctions: const [],
+    informationSystems: const <InformationSystemInfo>[
+      InformationSystemInfo(
+        id: 'system-layout-test',
+        tenantId: 'tenant-layout-test',
+        functionIds: <String>['function-layout-test'],
+        name: 'SI canonique',
+        description: 'Description canonique',
+        owner: 'Alice Martin',
+        ownerFirstName: 'Alice',
+        ownerLastName: 'Martin',
+        ownerEmail: 'alice.martin@example.test',
+      ),
+    ],
+    assets: const <InformationAssetInfo>[
+      InformationAssetInfo(
+        id: 'asset-layout-test',
+        tenantId: 'tenant-layout-test',
+        systemIds: <String>['system-layout-test'],
+        name: 'Actif critique',
+        assetType: 'Application',
+        description: '',
+        criticality: '4',
+      ),
+    ],
+  );
+
+  OpenIrnApiInventoryResult _result() {
+    return OpenIrnApiInventoryResult(
+      status: OpenIrnApiDevicesStatus.available,
+      url: 'https://www.archoad.io/api/inventory',
+      statusCode: 200,
+      title: 'Inventaire',
+      message: 'OK',
+      tenantId: inventory.tenantId,
+      inventory: inventory,
+    );
+  }
+
+  @override
+  Future<OpenIrnApiInventoryResult> loadAssetInventory({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+  }) async => _result();
+
+  @override
+  Future<OpenIrnApiInventoryResult> updateInformationSystem({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    required String systemId,
+    List<String> functionIds = const <String>[],
+    required String name,
+    String description = '',
+    String owner = '',
+    String ownerFirstName = '',
+    String ownerLastName = '',
+    String ownerEmail = '',
+  }) async {
+    updatedSystemId = systemId;
+    updatedFunctionIds = List<String>.from(functionIds);
+    updatedName = name;
+    updatedDescription = description;
+    updatedOwnerFirstName = ownerFirstName;
+    updatedOwnerLastName = ownerLastName;
+    updatedOwnerEmail = ownerEmail;
+    inventory = IrnAssetInventory(
+      tenantId: inventory.tenantId,
+      tenantDisplayName: inventory.tenantDisplayName,
+      criticalFunctions: inventory.criticalFunctions,
+      informationSystems: <InformationSystemInfo>[
+        InformationSystemInfo(
+          id: systemId,
+          tenantId: tenantId,
+          functionIds: functionIds,
+          name: name,
+          description: description,
+          owner: '$ownerFirstName $ownerLastName'.trim(),
+          ownerFirstName: ownerFirstName,
+          ownerLastName: ownerLastName,
+          ownerEmail: ownerEmail,
+        ),
+      ],
+      assets: inventory.assets,
+    );
+    return _result();
+  }
+}

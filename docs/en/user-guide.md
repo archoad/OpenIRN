@@ -48,7 +48,7 @@ An Administrator can:
 - view revisions, analyze conflicts, and restore a revision;
 - check MariaDB and trigger a backup.
 
-An active Administrator in the workspace designated as the solution administration workspace can administer other workspaces. This cross-workspace access does not apply to IRN Managers, Evaluators, Reviewers, or Readers.
+The single Administrator profile is global and shared by all workspaces. This cross-workspace access does not apply to IRN Managers, Evaluators, Reviewers, or Readers.
 
 ## IRN Manager
 
@@ -366,7 +366,7 @@ When a person leaves, disable the account and ask an Administrator to revoke its
 Under **Administration → Authorized devices**:
 
 - pending requests are displayed before devices;
-- an Administrator with the solution role can view all workspaces;
+- the Administrator can view all workspaces;
 - an IRN Manager can view only their workspace;
 - approval produces a temporary, one-time code;
 - revocation removes authorization from that workspace;

@@ -16,6 +16,7 @@ import '../../domain/models/irn_asset_inventory.dart';
 import '../../domain/models/local_activity_event.dart';
 import '../../domain/models/irn_referential.dart';
 import '../../domain/models/local_campaign.dart';
+import '../../domain/models/sync_configuration.dart';
 import '../../domain/services/access_policy_service.dart';
 import '../../domain/services/app_sync_coordinator.dart';
 import '../../domain/services/official_rnr_scoring_service.dart';
@@ -148,6 +149,10 @@ class AssessmentScreen extends StatefulWidget {
   final String? initialAssetId;
   final bool showAssetScope;
   final Widget? navigationPanel;
+  final LocalCampaignRepository campaignRepository;
+  final LocalSyncConfigurationRepository configurationRepository;
+  final OpenIrnApiClient apiClient;
+  final LocalActivityRepository activityRepository;
 
   const AssessmentScreen({
     required this.referential,
@@ -156,6 +161,10 @@ class AssessmentScreen extends StatefulWidget {
     this.initialAssetId,
     this.showAssetScope = true,
     this.navigationPanel,
+    this.campaignRepository = const LocalCampaignRepository(),
+    this.configurationRepository = const LocalSyncConfigurationRepository(),
+    this.apiClient = const OpenIrnApiClient(),
+    this.activityRepository = const LocalActivityRepository(),
     super.key,
   });
 
@@ -168,10 +177,10 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   final _scoringService = const OfficialRnrScoringService();
   final _accessPolicy = const AccessPolicyService();
   final _assessmentRepository = const LocalAssessmentRepository();
-  final _campaignRepository = const LocalCampaignRepository();
-  final _configurationRepository = const LocalSyncConfigurationRepository();
-  final _apiClient = const OpenIrnApiClient();
-  final _activityRepository = const LocalActivityRepository();
+  late final LocalCampaignRepository _campaignRepository;
+  late final LocalSyncConfigurationRepository _configurationRepository;
+  late final OpenIrnApiClient _apiClient;
+  late final LocalActivityRepository _activityRepository;
   final _userRepository = const LocalUserRepository();
   final _syncAutomationService = const SyncAutomationService();
   final _appSyncCoordinator = AppSyncCoordinator.instance;
@@ -311,6 +320,10 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   @override
   void initState() {
     super.initState();
+    _campaignRepository = widget.campaignRepository;
+    _configurationRepository = widget.configurationRepository;
+    _apiClient = widget.apiClient;
+    _activityRepository = widget.activityRepository;
     _campaign = widget.campaign;
     final requestedAssetId = widget.initialAssetId?.trim() ?? '';
     _selectedAssetId =
@@ -325,7 +338,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     _lastAppliedSyncSerial = _appSyncCoordinator.changeSerial;
     _appSyncCoordinator.addListener(_handleBackgroundSyncUpdate);
     _startAutomaticSynchronization();
-    _refreshAssetScopeFromInventory();
+    _refreshInformationSystemFromInventory();
   }
 
   void _setPillarExpanded(String pillarId, bool isExpanded) {
@@ -352,70 +365,98 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     applyExpansionState();
   }
 
-  Future<void> _refreshAssetScopeFromInventory() async {
-    if (!_isAssetScopedCampaign) {
-      return;
+  Future<_CanonicalInformationSystemContext?> _loadCanonicalInformationSystem({
+    String? informationSystemId,
+  }) async {
+    final resolvedSystemId =
+        informationSystemId?.trim() ??
+        _campaign.information.informationSystemId.trim();
+    if (resolvedSystemId.isEmpty) {
+      return null;
     }
-    final systemId = _campaign.information.informationSystemId.trim();
-    if (systemId.isEmpty) {
-      return;
+    final configuration = await _configurationRepository.loadConfiguration();
+    if (!configuration.isConfigured) {
+      return null;
     }
-    try {
-      final configuration = await _configurationRepository.loadConfiguration();
-      if (!configuration.isConfigured) {
-        return;
+    final result = await _apiClient.loadAssetInventory(
+      baseUrl: configuration.apiBaseUrl,
+      tenantId: configuration.tenantId,
+      apiToken: configuration.apiToken,
+    );
+    if (!result.isAvailable) {
+      throw _CanonicalInformationSystemException(result.message);
+    }
+    InformationSystemInfo? system;
+    for (final candidate in result.inventory.informationSystems) {
+      if (candidate.id == resolvedSystemId) {
+        system = candidate;
+        break;
       }
-      final result = await _apiClient.loadAssetInventory(
-        baseUrl: configuration.apiBaseUrl,
-        tenantId: configuration.tenantId,
-        apiToken: configuration.apiToken,
+    }
+    if (system == null) {
+      throw const _CanonicalInformationSystemException(
+        'Le système d’information lié à cette campagne est introuvable.',
       );
-      if (!mounted || !result.isAvailable) {
-        return;
-      }
-      final inventoryAssets = <String, InformationAssetInfo>{
-        for (final asset in result.inventory.assetsForSystem(systemId))
-          asset.id: asset,
-      };
-      if (inventoryAssets.isEmpty) {
-        return;
-      }
+    }
+    return _CanonicalInformationSystemContext(
+      configuration: configuration,
+      inventory: result.inventory,
+      system: system,
+    );
+  }
 
-      var changed = false;
-      final updatedAssets = _campaign.information.assets
-          .map((asset) {
-            final inventoryAsset = inventoryAssets[asset.id];
-            if (inventoryAsset == null) {
-              return asset;
-            }
-            final inventoryCriticality = inventoryAsset.criticality.trim();
-            final merged = CampaignInformationAsset(
-              id: asset.id,
-              name: inventoryAsset.name.trim().isEmpty
-                  ? asset.name
-                  : inventoryAsset.name.trim(),
-              assetType: inventoryAsset.assetType.trim(),
-              criticality: inventoryCriticality.isEmpty
-                  ? asset.criticality
-                  : inventoryCriticality,
-              description: inventoryAsset.description.trim(),
-            );
-            if (merged.name != asset.name ||
-                merged.assetType != asset.assetType ||
-                merged.criticality != asset.criticality ||
-                merged.description != asset.description) {
-              changed = true;
-            }
-            return merged;
-          })
-          .toList(growable: false);
+  CampaignInformation _informationFromCanonicalSystem(
+    CampaignInformation information,
+    _CanonicalInformationSystemContext canonical,
+  ) {
+    final inventoryAssets = <String, InformationAssetInfo>{
+      for (final asset in canonical.inventory.assetsForSystem(
+        canonical.system.id,
+      ))
+        asset.id: asset,
+    };
+    final updatedAssets = information.assets
+        .map((asset) {
+          final inventoryAsset = inventoryAssets[asset.id];
+          if (inventoryAsset == null) {
+            return asset;
+          }
+          final inventoryCriticality = inventoryAsset.criticality.trim();
+          return CampaignInformationAsset(
+            id: asset.id,
+            name: inventoryAsset.name.trim().isEmpty
+                ? asset.name
+                : inventoryAsset.name.trim(),
+            assetType: inventoryAsset.assetType.trim(),
+            criticality: inventoryCriticality.isEmpty
+                ? asset.criticality
+                : inventoryCriticality,
+            description: inventoryAsset.description.trim(),
+          );
+        })
+        .toList(growable: false);
+    return information.copyWith(
+      systemName: canonical.system.name,
+      systemDescription: canonical.system.description,
+      projectDirectorFirstName: canonical.system.ownerFirstName,
+      projectDirectorLastName: canonical.system.ownerLastName,
+      projectDirectorEmail: canonical.system.ownerEmail,
+      assets: updatedAssets,
+    );
+  }
 
-      if (!changed || !mounted) {
+  Future<void> _refreshInformationSystemFromInventory() async {
+    try {
+      final canonical = await _loadCanonicalInformationSystem();
+      if (canonical == null || !mounted) {
         return;
       }
       setState(() {
         _campaign = _campaign.copyWith(
-          information: _campaign.information.copyWith(assets: updatedAssets),
+          information: _informationFromCanonicalSystem(
+            _campaign.information,
+            canonical,
+          ),
         );
       });
     } catch (_) {
@@ -702,19 +743,19 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       );
     });
 
-    final saved = await _saveOrRollback(previousAnswers);
-    if (saved && previousAnswer != answer) {
-      await _recordActivity(
-        type: LocalActivityType.answerChanged,
-        title: 'Réponse modifiée',
-        description: _activeAsset == null
-            ? '${criterion.code} — ${criterion.label}'
-            : '${_activeAsset!.displayLabel} · ${criterion.code} — ${criterion.label}',
-        criterionId: criterion.id,
-        fromValue: previousAnswer.label,
-        toValue: answer.label,
-      );
-    }
+    final activityEvent = previousAnswer == answer
+        ? null
+        : _createActivityEvent(
+            type: LocalActivityType.answerChanged,
+            title: 'Réponse modifiée',
+            description: _activeAsset == null
+                ? '${criterion.code} — ${criterion.label}'
+                : '${_activeAsset!.displayLabel} · ${criterion.code} — ${criterion.label}',
+            criterionId: criterion.id,
+            fromValue: previousAnswer.label,
+            toValue: answer.label,
+          );
+    await _saveOrRollback(previousAnswers, activityEvent: activityEvent);
   }
 
   Future<void> _setJustification(
@@ -744,21 +785,21 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       );
     });
 
-    final saved = await _saveOrRollback(previousAnswers);
-    if (saved && previousJustification != updatedJustification) {
-      await _recordActivity(
-        type: LocalActivityType.justificationChanged,
-        title: updatedJustification.isEmpty
-            ? 'Justification supprimée'
-            : 'Justification modifiée',
-        description: _activeAsset == null
-            ? '${criterion.code} — ${criterion.label}'
-            : '${_activeAsset!.displayLabel} · ${criterion.code} — ${criterion.label}',
-        criterionId: criterion.id,
-        fromValue: previousJustification.isEmpty ? 'vide' : 'renseignée',
-        toValue: updatedJustification.isEmpty ? 'vide' : 'renseignée',
-      );
-    }
+    final activityEvent = previousJustification == updatedJustification
+        ? null
+        : _createActivityEvent(
+            type: LocalActivityType.justificationChanged,
+            title: updatedJustification.isEmpty
+                ? 'Justification supprimée'
+                : 'Justification modifiée',
+            description: _activeAsset == null
+                ? '${criterion.code} — ${criterion.label}'
+                : '${_activeAsset!.displayLabel} · ${criterion.code} — ${criterion.label}',
+            criterionId: criterion.id,
+            fromValue: previousJustification.isEmpty ? 'vide' : 'renseignée',
+            toValue: updatedJustification.isEmpty ? 'vide' : 'renseignée',
+          );
+    await _saveOrRollback(previousAnswers, activityEvent: activityEvent);
   }
 
   void _upsertCriterionAnswer(CriterionAnswer answer) {
@@ -773,14 +814,16 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   }
 
   Future<bool> _saveOrRollback(
-    Map<String, CriterionAnswer> previousAnswers,
-  ) async {
+    Map<String, CriterionAnswer> previousAnswers, {
+    LocalActivityEvent? activityEvent,
+  }) async {
     try {
       final savedAnswers = await _assessmentRepository.saveCriterionAnswers(
         referentialId: widget.referential.id,
         campaignId: _campaign.id,
         answers: _criterionAnswers,
         baseAnswers: _lastSyncedCriterionAnswers,
+        activityEvent: activityEvent,
       );
       if (!mounted) {
         return true;
@@ -883,6 +926,12 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       await _assessmentRepository.clearAnswers(
         referentialId: widget.referential.id,
         campaignId: _campaign.id,
+        activityEvent: _createActivityEvent(
+          type: LocalActivityType.answersReset,
+          title: 'Réponses réinitialisées',
+          description:
+              'Toutes les réponses et justifications locales de la campagne ont été supprimées.',
+        ),
       );
       if (!mounted) {
         return;
@@ -895,12 +944,6 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
           fallback: 'Évaluation locale réinitialisée.',
         );
       });
-      await _recordActivity(
-        type: LocalActivityType.answersReset,
-        title: 'Réponses réinitialisées',
-        description:
-            'Toutes les réponses et justifications locales de la campagne ont été supprimées.',
-      );
     } catch (error) {
       if (!mounted) {
         return;
@@ -929,9 +972,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     String? toValue,
   }) async {
     await _activityRepository.appendEvent(
-      LocalActivityEvent.create(
-        referentialId: widget.referential.id,
-        campaignId: _campaign.id,
+      _createActivityEvent(
         type: type,
         title: title,
         description: description,
@@ -939,6 +980,28 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
         fromValue: fromValue,
         toValue: toValue,
       ),
+    );
+  }
+
+  LocalActivityEvent _createActivityEvent({
+    required LocalActivityType type,
+    required String title,
+    String description = '',
+    String? criterionId,
+    String? fromValue,
+    String? toValue,
+  }) {
+    return LocalActivityEvent.create(
+      referentialId: widget.referential.id,
+      campaignId: _campaign.id,
+      type: type,
+      title: title,
+      description: description,
+      criterionId: criterionId,
+      fromValue: fromValue,
+      toValue: toValue,
+      actorName: widget.activeUser.displayName,
+      actorRole: widget.activeUser.role.label,
     );
   }
 
@@ -1033,15 +1096,25 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   }
 
   Future<void> _openCampaignInformation() async {
+    await _refreshInformationSystemFromInventory();
+    if (!mounted) {
+      return;
+    }
     final canEdit = _accessPolicy.canEditCampaignInformation(
       widget.activeUser,
       _campaign,
     );
+    final displayedCampaign = _campaign;
 
     final result = await showDialog<_CampaignInformationFormResult>(
       context: context,
-      builder: (_) =>
-          _CampaignInformationDialog(campaign: _campaign, canEdit: canEdit),
+      builder: (_) => _CampaignInformationDialog(
+        campaign: displayedCampaign,
+        canEdit: canEdit,
+        canEditInformationSystem:
+            canEdit &&
+            displayedCampaign.information.informationSystemId.trim().isNotEmpty,
+      ),
     );
     if (result == null || !mounted) {
       return;
@@ -1060,12 +1133,127 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       return;
     }
 
+    var information = result.information;
+    final systemId = information.informationSystemId.trim();
+    if (systemId.isNotEmpty) {
+      try {
+        final canonical = await _loadCanonicalInformationSystem(
+          informationSystemId: systemId,
+        );
+        if (canonical == null) {
+          throw const _CanonicalInformationSystemException(
+            'La configuration serveur ne permet pas de mettre à jour le système d’information.',
+          );
+        }
+        final displayedInformation = displayedCampaign.information;
+        final systemInformationChanged =
+            information.systemName != displayedInformation.systemName ||
+            information.systemDescription !=
+                displayedInformation.systemDescription ||
+            information.projectDirectorFirstName !=
+                displayedInformation.projectDirectorFirstName ||
+            information.projectDirectorLastName !=
+                displayedInformation.projectDirectorLastName ||
+            information.projectDirectorEmail !=
+                displayedInformation.projectDirectorEmail;
+        if (!systemInformationChanged) {
+          information = _informationFromCanonicalSystem(information, canonical);
+        } else {
+          final informationToUpdate = information.copyWith(
+            systemName:
+                information.systemName != displayedInformation.systemName
+                ? information.systemName
+                : canonical.system.name,
+            systemDescription:
+                information.systemDescription !=
+                    displayedInformation.systemDescription
+                ? information.systemDescription
+                : canonical.system.description,
+            projectDirectorFirstName:
+                information.projectDirectorFirstName !=
+                    displayedInformation.projectDirectorFirstName
+                ? information.projectDirectorFirstName
+                : canonical.system.ownerFirstName,
+            projectDirectorLastName:
+                information.projectDirectorLastName !=
+                    displayedInformation.projectDirectorLastName
+                ? information.projectDirectorLastName
+                : canonical.system.ownerLastName,
+            projectDirectorEmail:
+                information.projectDirectorEmail !=
+                    displayedInformation.projectDirectorEmail
+                ? information.projectDirectorEmail
+                : canonical.system.ownerEmail,
+          );
+          final updateResult = await _apiClient.updateInformationSystem(
+            baseUrl: canonical.configuration.apiBaseUrl,
+            tenantId: canonical.configuration.tenantId,
+            apiToken: canonical.configuration.apiToken,
+            systemId: canonical.system.id,
+            functionIds: canonical.system.functionIds,
+            name: informationToUpdate.systemName,
+            description: informationToUpdate.systemDescription,
+            ownerFirstName: informationToUpdate.projectDirectorFirstName,
+            ownerLastName: informationToUpdate.projectDirectorLastName,
+            ownerEmail: informationToUpdate.projectDirectorEmail,
+          );
+          if (!updateResult.isAvailable) {
+            throw _CanonicalInformationSystemException(updateResult.message);
+          }
+          InformationSystemInfo? updatedSystem;
+          for (final candidate in updateResult.inventory.informationSystems) {
+            if (candidate.id == canonical.system.id) {
+              updatedSystem = candidate;
+              break;
+            }
+          }
+          final updatedCanonical = _CanonicalInformationSystemContext(
+            configuration: canonical.configuration,
+            inventory: updateResult.inventory,
+            system:
+                updatedSystem ??
+                InformationSystemInfo(
+                  id: canonical.system.id,
+                  tenantId: canonical.system.tenantId,
+                  functionIds: canonical.system.functionIds,
+                  name: informationToUpdate.systemName,
+                  description: informationToUpdate.systemDescription,
+                  owner: [
+                    informationToUpdate.projectDirectorFirstName,
+                    informationToUpdate.projectDirectorLastName,
+                  ].where((part) => part.trim().isNotEmpty).join(' '),
+                  ownerFirstName: informationToUpdate.projectDirectorFirstName,
+                  ownerLastName: informationToUpdate.projectDirectorLastName,
+                  ownerEmail: informationToUpdate.projectDirectorEmail,
+                ),
+          );
+          information = _informationFromCanonicalSystem(
+            informationToUpdate,
+            updatedCanonical,
+          );
+        }
+      } on _CanonicalInformationSystemException catch (error) {
+        if (!mounted) {
+          return;
+        }
+        _showForbidden(
+          context.tr(
+            'assessment.error.information_system_update',
+            fallback:
+                'Impossible de mettre à jour le Directeur du SI : {message}',
+            values: {'message': context.trText(error.message)},
+          ),
+        );
+        return;
+      }
+    }
+
     final updatedCampaign = await _campaignRepository.updateCampaignInformation(
       referentialId: widget.referential.id,
       campaignId: _campaign.id,
       name: result.name,
       description: result.description,
-      information: result.information,
+      information: information,
     );
     if (updatedCampaign == null || !mounted) {
       return;
@@ -1652,13 +1840,33 @@ class _CampaignInformationFormResult {
   });
 }
 
+class _CanonicalInformationSystemContext {
+  final SyncConfiguration configuration;
+  final IrnAssetInventory inventory;
+  final InformationSystemInfo system;
+
+  const _CanonicalInformationSystemContext({
+    required this.configuration,
+    required this.inventory,
+    required this.system,
+  });
+}
+
+class _CanonicalInformationSystemException implements Exception {
+  final String message;
+
+  const _CanonicalInformationSystemException(this.message);
+}
+
 class _CampaignInformationDialog extends StatefulWidget {
   final LocalCampaign campaign;
   final bool canEdit;
+  final bool canEditInformationSystem;
 
   const _CampaignInformationDialog({
     required this.campaign,
     required this.canEdit,
+    required this.canEditInformationSystem,
   });
 
   @override
@@ -1822,7 +2030,7 @@ class _CampaignInformationDialogState
                 const SizedBox(height: 10),
                 TextFormField(
                   controller: _systemNameController,
-                  readOnly: !widget.canEdit,
+                  readOnly: !widget.canEditInformationSystem,
                   decoration: InputDecoration(
                     labelText: context.tr('assessment.information.system_name'),
                     hintText: context.tr(
@@ -1830,14 +2038,18 @@ class _CampaignInformationDialogState
                     ),
                     border: const OutlineInputBorder(),
                   ),
-                  validator: (value) => value == null || value.trim().isEmpty
-                      ? context.tr('assessment.validation.system_name_required')
+                  validator: widget.canEditInformationSystem
+                      ? (value) => value == null || value.trim().isEmpty
+                            ? context.tr(
+                                'assessment.validation.system_name_required',
+                              )
+                            : null
                       : null,
                 ),
                 const SizedBox(height: 10),
                 TextFormField(
                   controller: _systemDescriptionController,
-                  readOnly: !widget.canEdit,
+                  readOnly: !widget.canEditInformationSystem,
                   minLines: 3,
                   maxLines: 6,
                   decoration: InputDecoration(
@@ -1849,10 +2061,12 @@ class _CampaignInformationDialogState
                     ),
                     border: const OutlineInputBorder(),
                   ),
-                  validator: (value) => value == null || value.trim().isEmpty
-                      ? context.tr(
-                          'assessment.validation.system_description_required',
-                        )
+                  validator: widget.canEditInformationSystem
+                      ? (value) => value == null || value.trim().isEmpty
+                            ? context.tr(
+                                'assessment.validation.system_description_required',
+                              )
+                            : null
                       : null,
                 ),
                 if (widget.campaign.information.criticalFunctionName
@@ -1910,18 +2124,19 @@ class _CampaignInformationDialogState
                     Expanded(
                       child: TextFormField(
                         controller: _projectDirectorFirstNameController,
-                        readOnly: !widget.canEdit,
+                        readOnly: !widget.canEditInformationSystem,
                         decoration: InputDecoration(
                           labelText: context.tr(
                             'assessment.information.first_name',
                           ),
                           border: const OutlineInputBorder(),
                         ),
-                        validator: (value) =>
-                            value == null || value.trim().isEmpty
-                            ? context.tr(
-                                'assessment.validation.first_name_required',
-                              )
+                        validator: widget.canEditInformationSystem
+                            ? (value) => value == null || value.trim().isEmpty
+                                  ? context.tr(
+                                      'assessment.validation.first_name_required',
+                                    )
+                                  : null
                             : null,
                       ),
                     ),
@@ -1929,18 +2144,19 @@ class _CampaignInformationDialogState
                     Expanded(
                       child: TextFormField(
                         controller: _projectDirectorLastNameController,
-                        readOnly: !widget.canEdit,
+                        readOnly: !widget.canEditInformationSystem,
                         decoration: InputDecoration(
                           labelText: context.tr(
                             'assessment.information.last_name',
                           ),
                           border: const OutlineInputBorder(),
                         ),
-                        validator: (value) =>
-                            value == null || value.trim().isEmpty
-                            ? context.tr(
-                                'assessment.validation.last_name_required',
-                              )
+                        validator: widget.canEditInformationSystem
+                            ? (value) => value == null || value.trim().isEmpty
+                                  ? context.tr(
+                                      'assessment.validation.last_name_required',
+                                    )
+                                  : null
                             : null,
                       ),
                     ),
@@ -1949,7 +2165,7 @@ class _CampaignInformationDialogState
                 const SizedBox(height: 10),
                 TextFormField(
                   controller: _projectDirectorEmailController,
-                  readOnly: !widget.canEdit,
+                  readOnly: !widget.canEditInformationSystem,
                   keyboardType: safeKeyboardType(
                     context,
                     TextInputType.emailAddress,
@@ -1964,6 +2180,9 @@ class _CampaignInformationDialogState
                     border: const OutlineInputBorder(),
                   ),
                   validator: (value) {
+                    if (!widget.canEditInformationSystem) {
+                      return null;
+                    }
                     final email = value?.trim() ?? '';
                     if (email.isEmpty) {
                       return context.tr('assessment.validation.email_required');

@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:openirn/data/repositories/local_assessment_repository.dart';
 import 'package:openirn/data/repositories/server_campaign_store.dart';
 import 'package:openirn/domain/models/irn_assessment.dart';
+import 'package:openirn/domain/models/local_activity_event.dart';
 import 'package:openirn/domain/models/local_campaign.dart';
 
 void main() {
@@ -87,11 +88,41 @@ void main() {
         IrnAnswer.medium,
       );
     });
+
+    test('persists the answer and its activity event in one update', () async {
+      final store = _InMemoryServerCampaignStore();
+      final repository = LocalAssessmentRepository(store: store);
+      final activityEvent = LocalActivityEvent.create(
+        referentialId: 'referential-1',
+        campaignId: 'campaign-1',
+        type: LocalActivityType.answerChanged,
+        title: 'Réponse modifiée',
+        now: DateTime.utc(2026, 9, 24, 12),
+      );
+
+      await repository.saveCriterionAnswers(
+        referentialId: 'referential-1',
+        campaignId: 'campaign-1',
+        answers: const <String, CriterionAnswer>{
+          'criterion-1': CriterionAnswer(
+            criterionId: 'criterion-1',
+            answer: IrnAnswer.result,
+          ),
+        },
+        baseAnswers: const <String, CriterionAnswer>{},
+        activityEvent: activityEvent,
+      );
+
+      expect(store.updateCount, 1);
+      expect(store.bundle.activityEvents, hasLength(1));
+      expect(store.bundle.activityEvents.single.id, activityEvent.id);
+    });
   });
 }
 
 class _InMemoryServerCampaignStore extends ServerCampaignStore {
   ServerCampaignBundle bundle;
+  int updateCount = 0;
 
   _InMemoryServerCampaignStore({
     Map<String, CriterionAnswer> criterionAnswers =
@@ -116,6 +147,7 @@ class _InMemoryServerCampaignStore extends ServerCampaignStore {
   }) async {
     expect(referentialId, 'referential-1');
     expect(campaignId, 'campaign-1');
+    updateCount += 1;
     bundle = update(bundle);
   }
 }

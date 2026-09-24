@@ -619,7 +619,6 @@ class OpenIrnApiTenantsResult {
   final String message;
   final String tenantId;
   final String defaultTenantId;
-  final bool solutionAdministrator;
   final List<TenantInfo> tenants;
   final Map<String, dynamic>? responseBody;
 
@@ -631,7 +630,6 @@ class OpenIrnApiTenantsResult {
     required this.message,
     required this.tenantId,
     required this.defaultTenantId,
-    this.solutionAdministrator = false,
     required this.tenants,
     this.responseBody,
   });
@@ -785,7 +783,6 @@ class OpenIrnApiClient {
           tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
           defaultTenantId:
               decodedBody?['defaultTenantId']?.toString() ?? 'default',
-          solutionAdministrator: decodedBody?['solutionAdministrator'] == true,
           tenants: tenants,
           responseBody: decodedBody,
         );
@@ -918,7 +915,6 @@ class OpenIrnApiClient {
           tenantId: decodedBody?['tenantId']?.toString() ?? '',
           defaultTenantId:
               decodedBody?['defaultTenantId']?.toString() ?? 'default',
-          solutionAdministrator: decodedBody?['solutionAdministrator'] == true,
           tenants: tenants,
           responseBody: decodedBody,
         );
@@ -1038,7 +1034,6 @@ class OpenIrnApiClient {
           tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
           defaultTenantId:
               decodedBody?['defaultTenantId']?.toString() ?? 'default',
-          solutionAdministrator: decodedBody?['solutionAdministrator'] == true,
           tenants: tenants,
           responseBody: decodedBody,
         );
@@ -1155,7 +1150,6 @@ class OpenIrnApiClient {
           tenantId: decodedBody?['tenantId']?.toString() ?? safeTenantId,
           defaultTenantId:
               decodedBody?['defaultTenantId']?.toString() ?? 'default',
-          solutionAdministrator: decodedBody?['solutionAdministrator'] == true,
           tenants: tenants,
           responseBody: decodedBody,
         );
@@ -4641,19 +4635,37 @@ class OpenIrnApiClient {
       '$normalizedBaseUrl/sync/events',
     ).replace(queryParameters: queryParameters);
 
+    var consecutiveAuthorizationRetries = 0;
     while (true) {
+      var retryAuthorizationImmediately = false;
       final client = await OpenIrnSystemProxy.createHttpClient(eventsUri);
       try {
+        final connectionToken = _authorizationTokenForRequest(apiToken);
         final request = await client.getUrl(eventsUri).timeout(timeout);
         request.headers.set(HttpHeaders.acceptHeader, 'text/event-stream');
         request.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
         request.headers.set(HttpHeaders.userAgentHeader, 'OpenIRN');
-        _applyAuthorizationHeaders(request, bearerToken: apiToken);
+        _applyAuthorizationHeaders(request, bearerToken: connectionToken);
 
         final response = await request.close().timeout(timeout);
         if (response.statusCode < 200 || response.statusCode >= 300) {
+          final body = await response
+              .transform(utf8.decoder)
+              .join()
+              .timeout(timeout);
+          final retryToken = await _sessionAuthorizationRetryToken(
+            attemptedToken: connectionToken,
+            statusCode: response.statusCode,
+            responseBody: body,
+          );
+          retryAuthorizationImmediately =
+              retryToken != null && consecutiveAuthorizationRetries == 0;
+          if (retryToken != null) {
+            consecutiveAuthorizationRetries += 1;
+          }
           throw HttpException('SSE refused with HTTP ${response.statusCode}');
         }
+        consecutiveAuthorizationRetries = 0;
 
         final dataLines = <String>[];
         await for (final line
@@ -4693,7 +4705,9 @@ class OpenIrnApiClient {
       } finally {
         client.close(force: true);
       }
-      await Future<void>.delayed(reconnectDelay);
+      if (!retryAuthorizationImmediately) {
+        await Future<void>.delayed(reconnectDelay);
+      }
     }
   }
 
@@ -5044,7 +5058,86 @@ class OpenIrnApiClient {
     }
   }
 
-  Future<_HttpResponse> _get(Uri uri, {String bearerToken = ''}) async {
+  String _authorizationTokenForRequest(String bearerToken) {
+    final session = AppSessionManager.instance;
+    final suppliedToken = bearerToken.trim();
+    final currentSessionToken = session.sessionApiToken;
+    if (suppliedToken.startsWith('ost_') &&
+        currentSessionToken.isNotEmpty &&
+        currentSessionToken != suppliedToken) {
+      return currentSessionToken;
+    }
+    return suppliedToken.isNotEmpty ? suppliedToken : session.apiToken;
+  }
+
+  bool _isRetryableSessionAuthorizationFailure(
+    int statusCode,
+    String responseBody,
+  ) {
+    if (statusCode == HttpStatus.unauthorized) {
+      return true;
+    }
+    if (statusCode != HttpStatus.forbidden) {
+      return false;
+    }
+    final detail = _decodeJsonObject(responseBody)?['detail'];
+    final message = detail is Map
+        ? detail['message']?.toString().trim() ?? ''
+        : detail?.toString().trim() ?? '';
+    return message == 'Session expirée ou autorisation OpenIRN invalide';
+  }
+
+  Future<String?> _sessionAuthorizationRetryToken({
+    required String attemptedToken,
+    required int statusCode,
+    required String responseBody,
+  }) async {
+    if (!attemptedToken.startsWith('ost_') ||
+        !_isRetryableSessionAuthorizationFailure(statusCode, responseBody)) {
+      return null;
+    }
+    final session = AppSessionManager.instance;
+    session.validateSession();
+    var currentSessionToken = session.sessionApiToken;
+    if (currentSessionToken.isEmpty) {
+      return null;
+    }
+    if (currentSessionToken == attemptedToken) {
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      session.validateSession();
+      currentSessionToken = session.sessionApiToken;
+      if (currentSessionToken.isEmpty) {
+        return null;
+      }
+    }
+    return currentSessionToken;
+  }
+
+  Future<_HttpResponse> _sendWithSessionAuthorizationRetry({
+    required String bearerToken,
+    required Future<_HttpResponse> Function(String token) send,
+  }) async {
+    final attemptedToken = _authorizationTokenForRequest(bearerToken);
+    var response = await send(attemptedToken);
+    final retryToken = await _sessionAuthorizationRetryToken(
+      attemptedToken: attemptedToken,
+      statusCode: response.statusCode,
+      responseBody: response.body,
+    );
+    if (retryToken != null) {
+      response = await send(retryToken);
+    }
+    return response;
+  }
+
+  Future<_HttpResponse> _get(Uri uri, {String bearerToken = ''}) {
+    return _sendWithSessionAuthorizationRetry(
+      bearerToken: bearerToken,
+      send: (token) => _getOnce(uri, bearerToken: token),
+    );
+  }
+
+  Future<_HttpResponse> _getOnce(Uri uri, {required String bearerToken}) async {
     final client = await OpenIrnSystemProxy.createHttpClient(uri);
     try {
       final request = await client.getUrl(uri).timeout(timeout);
@@ -5062,7 +5155,17 @@ class OpenIrnApiClient {
     }
   }
 
-  Future<_HttpResponse> _delete(Uri uri, {String bearerToken = ''}) async {
+  Future<_HttpResponse> _delete(Uri uri, {String bearerToken = ''}) {
+    return _sendWithSessionAuthorizationRetry(
+      bearerToken: bearerToken,
+      send: (token) => _deleteOnce(uri, bearerToken: token),
+    );
+  }
+
+  Future<_HttpResponse> _deleteOnce(
+    Uri uri, {
+    required String bearerToken,
+  }) async {
     final client = await OpenIrnSystemProxy.createHttpClient(uri);
     try {
       final request = await client.deleteUrl(uri).timeout(timeout);
@@ -5084,6 +5187,17 @@ class OpenIrnApiClient {
     Uri uri,
     Map<String, dynamic> payload, {
     String bearerToken = '',
+  }) {
+    return _sendWithSessionAuthorizationRetry(
+      bearerToken: bearerToken,
+      send: (token) => _patchJsonOnce(uri, payload, bearerToken: token),
+    );
+  }
+
+  Future<_HttpResponse> _patchJsonOnce(
+    Uri uri,
+    Map<String, dynamic> payload, {
+    required String bearerToken,
   }) async {
     final client = await OpenIrnSystemProxy.createHttpClient(uri);
     try {
@@ -5119,6 +5233,23 @@ class OpenIrnApiClient {
     Uri uri, {
     String bearerToken = '',
   }) async {
+    final attemptedToken = _authorizationTokenForRequest(bearerToken);
+    var response = await _getBytesOnce(uri, bearerToken: attemptedToken);
+    final retryToken = await _sessionAuthorizationRetryToken(
+      attemptedToken: attemptedToken,
+      statusCode: response.statusCode,
+      responseBody: response.bodyText,
+    );
+    if (retryToken != null) {
+      response = await _getBytesOnce(uri, bearerToken: retryToken);
+    }
+    return response;
+  }
+
+  Future<_BinaryHttpResponse> _getBytesOnce(
+    Uri uri, {
+    required String bearerToken,
+  }) async {
     final client = await OpenIrnSystemProxy.createHttpClient(uri);
     try {
       final request = await client.getUrl(uri).timeout(timeout);
@@ -5148,6 +5279,23 @@ class OpenIrnApiClient {
     Uint8List bytes, {
     String bearerToken = '',
     String contentType = 'application/octet-stream',
+  }) {
+    return _sendWithSessionAuthorizationRetry(
+      bearerToken: bearerToken,
+      send: (token) => _postBytesOnce(
+        uri,
+        bytes,
+        bearerToken: token,
+        contentType: contentType,
+      ),
+    );
+  }
+
+  Future<_HttpResponse> _postBytesOnce(
+    Uri uri,
+    Uint8List bytes, {
+    required String bearerToken,
+    required String contentType,
   }) async {
     final client = await OpenIrnSystemProxy.createHttpClient(uri);
     try {
@@ -5172,6 +5320,17 @@ class OpenIrnApiClient {
     Uri uri,
     Map<String, dynamic> payload, {
     String bearerToken = '',
+  }) {
+    return _sendWithSessionAuthorizationRetry(
+      bearerToken: bearerToken,
+      send: (token) => _postJsonOnce(uri, payload, bearerToken: token),
+    );
+  }
+
+  Future<_HttpResponse> _postJsonOnce(
+    Uri uri,
+    Map<String, dynamic> payload, {
+    required String bearerToken,
   }) async {
     final client = await OpenIrnSystemProxy.createHttpClient(uri);
     try {

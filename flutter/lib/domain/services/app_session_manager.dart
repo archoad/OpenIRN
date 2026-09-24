@@ -129,14 +129,6 @@ class AppSessionManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setActiveUser(AppUser user) {
-    if (!hasActiveSession) {
-      return;
-    }
-    _activeUser = user;
-    notifyListeners();
-  }
-
   void registerActivity() {
     if (!hasActiveSession) {
       _clearExpiredSessionIfNeeded();

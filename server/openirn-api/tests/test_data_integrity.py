@@ -261,7 +261,7 @@ class TenantDiscoveryTests(unittest.TestCase):
 
         with (
             patch.object(api, "_resolve_tenant_id_for_request", return_value="unknown"),
-            patch.object(api, "_request_has_solution_admin_authorization", return_value=False),
+            patch.object(api, "_request_auth_context", return_value=None),
             patch.object(api, "_list_tenants", return_value=[rich_tenant]),
             patch.object(api, "_db", return_value=_database(connection)),
         ):
@@ -269,6 +269,7 @@ class TenantDiscoveryTests(unittest.TestCase):
 
         self.assertEqual(response["tenantId"], "unknown")
         self.assertNotIn("solutionAdminTenantId", response)
+        self.assertNotIn("solutionAdministrator", response)
         self.assertEqual(
             set(response["tenants"][0]),
             {"tenantId", "id", "displayName", "permanent", "isDefault"},

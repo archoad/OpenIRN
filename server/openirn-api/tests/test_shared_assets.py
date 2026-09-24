@@ -54,6 +54,19 @@ class _CanonicalConnection:
                         }
                     ]
                 )
+        if normalized.startswith("SELECT name, description, owner"):
+            return _Result(
+                [
+                    {
+                        "name": "SI courant",
+                        "description": "Description courante",
+                        "owner": "Alice Martin",
+                        "owner_first_name": "Alice",
+                        "owner_last_name": "Martin",
+                        "owner_email": "alice.martin@example.test",
+                    }
+                ]
+            )
         if normalized.startswith("SELECT a.asset_id"):
             return _Result(
                 [
@@ -286,6 +299,11 @@ class SharedAssetArchitectureTests(unittest.TestCase):
         assert isinstance(campaign_record, dict)
         information = campaign_record["information"]
         assert isinstance(information, dict)
+        information["systemName"] = "Ancien SI"
+        information["systemDescription"] = "Ancienne description"
+        information["projectDirectorFirstName"] = "Ancien"
+        information["projectDirectorLastName"] = "Responsable"
+        information["projectDirectorEmail"] = "ancien@example.test"
         scope = information["inventoryScope"]
         assert isinstance(scope, dict)
         scope["informationSystemId"] = "system-a"
@@ -303,6 +321,23 @@ class SharedAssetArchitectureTests(unittest.TestCase):
         merged_scope = merged_information["inventoryScope"]
         assert isinstance(merged_scope, dict)
 
+        self.assertEqual(merged_information["systemName"], "SI courant")
+        self.assertEqual(
+            merged_information["systemDescription"],
+            "Description courante",
+        )
+        self.assertEqual(
+            merged_information["projectDirectorFirstName"],
+            "Alice",
+        )
+        self.assertEqual(
+            merged_information["projectDirectorLastName"],
+            "Martin",
+        )
+        self.assertEqual(
+            merged_information["projectDirectorEmail"],
+            "alice.martin@example.test",
+        )
         self.assertEqual(
             merged_scope["criticalFunctionIds"],
             ["function-a", "function-b"],
@@ -313,6 +348,12 @@ class SharedAssetArchitectureTests(unittest.TestCase):
             merged["answers"][0]["criterionId"],
             "asset:asset-a:criterion:C1",
         )
+        system_queries = [
+            parameters
+            for statement, parameters in con.statements
+            if statement.startswith("SELECT name, description, owner")
+        ]
+        self.assertEqual(system_queries, [("tenant-a", "system-a")])
 
     def test_transient_replace_marker_is_not_stored_in_campaign_history(self) -> None:
         stored = api._campaign_payload_for_storage(

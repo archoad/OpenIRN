@@ -226,7 +226,7 @@ class _CampaignInformationQualityCard extends StatelessWidget {
           context.tr(
             'assessment.quality.campaign_info.subtitle',
             fallback:
-                'Ces éléments identifient le système évalué et le directeur de projet.',
+                'Ces éléments identifient le système évalué et son Directeur du SI.',
           ),
         ),
         children: [
@@ -269,7 +269,7 @@ class _CampaignInformationQualityCard extends StatelessWidget {
             title: Text(
               context.tr(
                 'campaign.project_director',
-                fallback: 'Directeur de projet',
+                fallback: 'Directeur du SI',
               ),
             ),
             subtitle: Text(_projectDirectorLabel(info)),
@@ -279,7 +279,7 @@ class _CampaignInformationQualityCard extends StatelessWidget {
               ListTile(
                 dense: true,
                 leading: const Icon(Icons.warning_amber_outlined),
-                title: Text(issue.label),
+                title: Text(_campaignInformationIssueLabel(context, issue)),
                 subtitle: Text(
                   context.tr(
                     'assessment.quality.required_for_review',
@@ -309,6 +309,35 @@ class _CampaignInformationQualityCard extends StatelessWidget {
       'common.not_provided_masculine',
       fallback: 'Non renseigné',
     );
+  }
+
+  String _campaignInformationIssueLabel(
+    BuildContext context,
+    CampaignInformationIssue issue,
+  ) {
+    return switch (issue.field) {
+      'systemName' => context.tr(
+        'inventory.field.system_name',
+        fallback: 'Nom du système d’information',
+      ),
+      'systemDescription' => context.tr(
+        'assessment.quality.system_description',
+        fallback: 'Description du système d’information',
+      ),
+      'projectDirectorFirstName' => context.tr(
+        'assessment.quality.system_director_first_name',
+        fallback: 'Prénom du Directeur du SI',
+      ),
+      'projectDirectorLastName' => context.tr(
+        'assessment.quality.system_director_last_name',
+        fallback: 'Nom du Directeur du SI',
+      ),
+      'projectDirectorEmail' => context.tr(
+        'assessment.quality.system_director_email',
+        fallback: 'Email du Directeur du SI',
+      ),
+      _ => issue.field,
+    };
   }
 }
 

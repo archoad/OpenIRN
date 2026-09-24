@@ -79,27 +79,19 @@ class _UserListScreenState extends State<UserListScreen> {
       return const _UserListStateData(
         users: <AppUser>[],
         serverAvailable: false,
-        solutionAdministrator: false,
+        allWorkspaces: false,
         sourceLabel: 'users.source.terminal_not_authorized',
         sourceMessage: 'users.source.authorize_terminal_first',
       );
     }
 
-    // The cross-tenant "administrateur solution" mode is a server-tracked
-    // flag distinct from the client-side Administrateur role — it must be
-    // read from the server rather than inferred from `activeUser.role`.
-    final tenantsResult = await _apiClient.loadTenants(
-      baseUrl: configuration.apiBaseUrl,
-      tenantId: configuration.tenantId,
-      apiToken: configuration.apiToken,
-    );
-    final solutionAdministrator = tenantsResult.solutionAdministrator;
+    final administrator = widget.activeUser.role == AppUserRole.administrator;
 
     final centralUsers = await _apiClient.loadUsers(
       baseUrl: configuration.apiBaseUrl,
       tenantId: configuration.tenantId,
       apiToken: configuration.apiToken,
-      allTenants: solutionAdministrator,
+      allTenants: administrator,
     );
 
     if (centralUsers.isAvailable ||
@@ -107,8 +99,8 @@ class _UserListScreenState extends State<UserListScreen> {
       return _UserListStateData(
         users: centralUsers.users,
         serverAvailable: true,
-        solutionAdministrator: solutionAdministrator,
-        sourceLabel: solutionAdministrator
+        allWorkspaces: administrator,
+        sourceLabel: administrator
             ? 'users.source.central_all_workspaces'
             : 'users.source.central',
         sourceMessage: centralUsers.message,
@@ -121,7 +113,7 @@ class _UserListScreenState extends State<UserListScreen> {
     return _UserListStateData(
       users: const <AppUser>[],
       serverAvailable: false,
-      solutionAdministrator: solutionAdministrator,
+      allWorkspaces: administrator,
       sourceLabel: 'users.source.server_unavailable',
       sourceMessage: 'users.source.server_unavailable_no_cache',
       apiBaseUrl: configuration.apiBaseUrl,
@@ -172,7 +164,7 @@ class _UserListScreenState extends State<UserListScreen> {
     return _UserListStateData(
       users: centralUsers.users,
       serverAvailable: true,
-      solutionAdministrator: false,
+      allWorkspaces: false,
       sourceLabel: 'Base centrale serveur',
       sourceMessage: centralUsers.message,
       apiBaseUrl: configuration.apiBaseUrl,
@@ -241,14 +233,12 @@ class _UserListScreenState extends State<UserListScreen> {
   }
 
   Future<void> _createUser() async {
-    final solutionAdministrator = (await _usersFuture).solutionAdministrator;
     if (!mounted) {
       return;
     }
     final result = await showDialog<_UserFormResult>(
       context: context,
-      builder: (_) =>
-          _UserDialog(allowAdministratorRole: solutionAdministrator),
+      builder: (_) => const _UserDialog(allowAdministratorRole: false),
     );
     if (result == null) {
       return;
@@ -295,7 +285,6 @@ class _UserListScreenState extends State<UserListScreen> {
   }
 
   Future<void> _editUser(AppUser user) async {
-    final solutionAdministrator = (await _usersFuture).solutionAdministrator;
     if (!mounted) {
       return;
     }
@@ -303,7 +292,8 @@ class _UserListScreenState extends State<UserListScreen> {
       context: context,
       builder: (_) => _UserDialog(
         user: user,
-        allowAdministratorRole: solutionAdministrator,
+        allowAdministratorRole: user.role == AppUserRole.administrator,
+        lockRole: user.role == AppUserRole.administrator,
       ),
     );
     if (result == null) {
@@ -534,24 +524,25 @@ class _UserListScreenState extends State<UserListScreen> {
                   }
                   final user = users[index - 1];
                   final serverAvailable = state?.serverAvailable ?? false;
-                  final solutionAdministrator =
-                      state?.solutionAdministrator ?? false;
+                  final allWorkspaces = state?.allWorkspaces ?? false;
                   return _UserCard(
                     user: user,
-                    centralPinsAvailable:
-                        serverAvailable && solutionAdministrator,
-                    showTenant: solutionAdministrator,
+                    centralPinsAvailable: serverAvailable && allWorkspaces,
+                    showTenant: allWorkspaces,
                     onEdit: serverAvailable && !_working
                         ? () => _editUser(user)
                         : null,
                     onChangePin:
                         state == null ||
                             !serverAvailable ||
-                            !solutionAdministrator ||
+                            !allWorkspaces ||
                             _working
                         ? null
                         : () => _changeUserPin(user, state),
-                    onDelete: !serverAvailable || _working
+                    onDelete:
+                        !serverAvailable ||
+                            _working ||
+                            user.role == AppUserRole.administrator
                         ? null
                         : () => _deleteUser(user),
                   );
@@ -568,7 +559,7 @@ class _UserListScreenState extends State<UserListScreen> {
 class _UserListStateData {
   final List<AppUser> users;
   final bool serverAvailable;
-  final bool solutionAdministrator;
+  final bool allWorkspaces;
   final String sourceLabel;
   final String sourceMessage;
   final String apiBaseUrl;
@@ -578,7 +569,7 @@ class _UserListStateData {
   const _UserListStateData({
     required this.users,
     required this.serverAvailable,
-    required this.solutionAdministrator,
+    required this.allWorkspaces,
     required this.sourceLabel,
     required this.sourceMessage,
     this.apiBaseUrl = '',
@@ -805,8 +796,13 @@ class _UserFormResult {
 class _UserDialog extends StatefulWidget {
   final AppUser? user;
   final bool allowAdministratorRole;
+  final bool lockRole;
 
-  const _UserDialog({this.user, this.allowAdministratorRole = true});
+  const _UserDialog({
+    this.user,
+    this.allowAdministratorRole = true,
+    this.lockRole = false,
+  });
 
   @override
   State<_UserDialog> createState() => _UserDialogState();
@@ -962,7 +958,9 @@ class _UserDialogState extends State<_UserDialog> {
                         ),
                       ),
                   ],
-                  onChanged: (role) => setState(() => _role = role ?? _role),
+                  onChanged: widget.lockRole
+                      ? null
+                      : (role) => setState(() => _role = role ?? _role),
                 ),
               ],
             ),

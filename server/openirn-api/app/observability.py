@@ -52,7 +52,7 @@ _SECURITY_INTEGER_ATTRIBUTES = {
 }
 _SECURITY_BOOLEAN_ATTRIBUTES = {
     "clientProvidedDeviceId": "client_provided_device_id",
-    "globalSolutionAdministrator": "global_solution_administrator",
+    "globalAdministrator": "global_administrator",
     "knownTerminal": "known_terminal",
     "requiresChange": "requires_change",
     "sessionsRevoked": "sessions_revoked",
