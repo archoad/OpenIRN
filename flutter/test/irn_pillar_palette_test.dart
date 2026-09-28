@@ -4,14 +4,14 @@ import 'package:openirn/presentation/common/irn_pillar_palette.dart';
 
 void main() {
   const expectedColors = <Color>[
-    Color(0xFF715660),
-    Color(0xFF846470),
-    Color(0xFF566071),
-    Color(0xFF727F96),
-    Color(0xFFC39F72),
-    Color(0xFFD5BF95),
-    Color(0xFF667762),
-    Color(0xFF879E82),
+    Color(0xFF1E40AF),
+    Color(0xFFA16207),
+    Color(0xFF7E22CE),
+    Color(0xFFC2410C),
+    Color(0xFF0F766E),
+    Color(0xFF0369A1),
+    Color(0xFFBE123C),
+    Color(0xFF2F7D32),
   ];
 
   test('maps RES-1 through RES-8 to the requested palette', () {
@@ -30,6 +30,17 @@ void main() {
           style.foregroundColor,
           style.backgroundColor,
         ),
+        greaterThanOrEqualTo(4.5),
+      );
+      expect(
+        IrnPillarPalette.contrastRatio(
+          style.borderColor,
+          style.backgroundColor,
+        ),
+        greaterThanOrEqualTo(3),
+      );
+      expect(
+        IrnPillarPalette.contrastRatio(Colors.white, style.borderColor),
         greaterThanOrEqualTo(4.5),
       );
     }

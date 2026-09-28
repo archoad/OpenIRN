@@ -31,14 +31,14 @@ class IrnPillarVisualStyle {
 
 abstract final class IrnPillarPalette {
   static const List<Color> borderColors = <Color>[
-    Color(0xFF715660),
-    Color(0xFF846470),
-    Color(0xFF566071),
-    Color(0xFF727F96),
-    Color(0xFFC39F72),
-    Color(0xFFD5BF95),
-    Color(0xFF667762),
-    Color(0xFF879E82),
+    Color(0xFF1E40AF),
+    Color(0xFFA16207),
+    Color(0xFF7E22CE),
+    Color(0xFFC2410C),
+    Color(0xFF0F766E),
+    Color(0xFF0369A1),
+    Color(0xFFBE123C),
+    Color(0xFF2F7D32),
   ];
 
   static const Color _darkText = Color(0xFF1F2937);

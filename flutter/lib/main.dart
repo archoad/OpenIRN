@@ -41,6 +41,11 @@ class _OpenIrnAppState extends State<OpenIrnApp> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = ColorScheme.fromSeed(seedColor: Colors.indigo);
+    final baseTheme = ThemeData(
+      colorScheme: colorScheme,
+      fontFamily: 'Inter',
+      useMaterial3: true,
+    );
     final i18n = OpenIrnLocalizations.instance;
 
     return ListenableBuilder(
@@ -59,9 +64,8 @@ class _OpenIrnAppState extends State<OpenIrnApp> {
             GlobalWidgetsLocalizations.delegate,
             GlobalCupertinoLocalizations.delegate,
           ],
-          theme: ThemeData(
-            colorScheme: colorScheme,
-            useMaterial3: true,
+          theme: baseTheme.copyWith(
+            textTheme: _openIrnTextTheme(baseTheme.textTheme),
             appBarTheme: AppBarTheme(
               backgroundColor: colorScheme.surface,
               foregroundColor: colorScheme.onSurface,
@@ -93,6 +97,29 @@ class _OpenIrnAppState extends State<OpenIrnApp> {
       },
     );
   }
+}
+
+TextTheme _openIrnTextTheme(TextTheme base) {
+  TextStyle? withSize(TextStyle? style, double fontSize) =>
+      style?.copyWith(fontSize: fontSize);
+
+  return base.copyWith(
+    displayLarge: withSize(base.displayLarge, 28),
+    displayMedium: withSize(base.displayMedium, 24),
+    displaySmall: withSize(base.displaySmall, 22),
+    headlineLarge: withSize(base.headlineLarge, 22),
+    headlineMedium: withSize(base.headlineMedium, 20),
+    headlineSmall: withSize(base.headlineSmall, 18),
+    titleLarge: withSize(base.titleLarge, 18),
+    titleMedium: withSize(base.titleMedium, 14),
+    titleSmall: withSize(base.titleSmall, 13),
+    bodyLarge: withSize(base.bodyLarge, 14),
+    bodyMedium: withSize(base.bodyMedium, 13),
+    bodySmall: withSize(base.bodySmall, 12),
+    labelLarge: withSize(base.labelLarge, 12),
+    labelMedium: withSize(base.labelMedium, 11),
+    labelSmall: withSize(base.labelSmall, 10),
+  );
 }
 
 class _SessionActivityScope extends StatefulWidget {
