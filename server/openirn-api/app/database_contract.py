@@ -15,6 +15,7 @@ REQUIRED_TABLES = (
     "critical_function_systems",
     "information_system_assets",
     "asset_assessment_answers",
+    "asset_evaluator_assignments",
     "terminals",
     "authorized_devices",
     "device_enrollment_requests",
@@ -42,6 +43,7 @@ REQUIRED_MIGRATIONS = {
     173: "shared_assets_and_canonical_assessments",
     174: "information_system_owner_identity",
     175: "global_administrator_role",
+    176: "canonical_asset_evaluator_assignments",
 }
 
 RUNTIME_REQUIRED_PRIVILEGES = frozenset({"SELECT", "INSERT", "UPDATE", "DELETE"})

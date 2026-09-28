@@ -3072,6 +3072,25 @@ class OpenIrnApiClient {
     );
   }
 
+  Future<OpenIrnApiInventoryResult> updateInformationAssetEvaluator({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    required String assetId,
+    String userId = '',
+  }) {
+    return _patchInventory(
+      baseUrl: baseUrl,
+      tenantId: tenantId,
+      apiToken: apiToken,
+      path: '/inventory/assets/$assetId/evaluator',
+      payload: <String, dynamic>{'userId': userId.trim()},
+      successTitle: userId.trim().isEmpty
+          ? 'Affectation supprimée'
+          : 'Évaluateur affecté à l’actif',
+    );
+  }
+
   Future<OpenIrnApiInventoryResult> deleteInformationAsset({
     String? baseUrl,
     required String tenantId,

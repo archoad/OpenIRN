@@ -1,5 +1,4 @@
-import 'dart:typed_data';
-
+import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
@@ -31,7 +30,13 @@ class AssessmentPdfExportService {
     DateTime? generatedAt,
   }) async {
     final generatedAtUtc = (generatedAt ?? DateTime.now()).toUtc();
+    final regularFontData = await rootBundle.load(_interRegularFontAsset);
+    final boldFontData = await rootBundle.load(_interBoldFontAsset);
     final document = pw.Document(
+      theme: pw.ThemeData.withFont(
+        base: pw.Font.ttf(regularFontData),
+        bold: pw.Font.ttf(boldFontData),
+      ),
       title: translate(
         'screen.summary.title_prefix',
         values: {'campaign': _clean(campaign.name)},
@@ -555,19 +560,12 @@ class AssessmentPdfExportService {
   }
 
   String _clean(String value) {
-    return value
-        .replaceAll('\u00a0', ' ')
-        .replaceAll('\u2019', "'")
-        .replaceAll('\u2018', "'")
-        .replaceAll('\u201c', '"')
-        .replaceAll('\u201d', '"')
-        .replaceAll('\u2013', '-')
-        .replaceAll('\u2014', '-')
-        .replaceAll('\u2022', '-')
-        .replaceAll('\u0153', 'oe')
-        .replaceAll('\u0152', 'OE');
+    return value.replaceAll('\u00a0', ' ');
   }
 }
+
+const _interRegularFontAsset = 'assets/fonts/Inter-Regular.ttf';
+const _interBoldFontAsset = 'assets/fonts/Inter-Bold.ttf';
 
 const _borderColor = PdfColor(0.84, 0.87, 0.91);
 const _headerColor = PdfColor(0.91, 0.94, 0.97);

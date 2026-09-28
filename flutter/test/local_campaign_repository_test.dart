@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openirn/data/repositories/local_campaign_repository.dart';
 import 'package:openirn/data/repositories/server_campaign_store.dart';
-import 'package:openirn/domain/models/criterion_assignment.dart';
+import 'package:openirn/domain/models/asset_evaluator_assignment.dart';
 import 'package:openirn/domain/models/irn_assessment.dart';
 import 'package:openirn/domain/models/local_campaign.dart';
 
@@ -31,11 +31,11 @@ class _RecordingServerCampaignStore extends ServerCampaignStore {
             answer: IrnAnswer.result,
           ),
         },
-        assignments: <CriterionAssignment>[
-          CriterionAssignment.create(
+        assignments: <AssetEvaluatorAssignment>[
+          AssetEvaluatorAssignment.create(
             referentialId: referentialId,
             campaignId: campaignId,
-            criterionId: 'criterion-a',
+            assetId: 'asset-a',
             userId: 'user-a',
             now: timestamp,
           ),

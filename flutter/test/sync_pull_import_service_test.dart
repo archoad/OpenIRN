@@ -69,6 +69,14 @@ void main() {
               'referentialId': 'adri-irn-v1.1',
               'name': 'Campagne source',
               'description': 'Description source',
+              'information': <String, dynamic>{
+                'inventoryScope': <String, dynamic>{
+                  'informationSystemId': 'system-1',
+                  'assets': <Map<String, dynamic>>[
+                    <String, dynamic>{'assetId': 'asset-1', 'name': 'Actif 1'},
+                  ],
+                },
+              },
               'status': 'draft',
               'createdAt': '2026-06-24T10:00:00Z',
               'updatedAt': '2026-06-24T10:00:00Z',
@@ -82,7 +90,7 @@ void main() {
               },
             ],
             'assignments': <Map<String, dynamic>>[
-              <String, dynamic>{'criterionId': 'RES-1.1', 'userId': 'user-1'},
+              <String, dynamic>{'assetId': 'asset-1', 'userId': 'user-1'},
             ],
             'activityLog': <String, dynamic>{
               'events': <Map<String, dynamic>>[

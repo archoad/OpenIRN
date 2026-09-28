@@ -10,7 +10,7 @@ import '../../data/repositories/local_user_repository.dart';
 import '../../data/repositories/local_campaign_repository.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/app_user.dart';
-import '../../domain/models/criterion_assignment.dart';
+import '../../domain/models/asset_evaluator_assignment.dart';
 import '../../domain/models/irn_assessment.dart';
 import '../../domain/models/irn_asset_inventory.dart';
 import '../../domain/models/local_activity_event.dart';
@@ -24,7 +24,7 @@ import '../../domain/services/referential_catalog_service.dart';
 import '../../domain/services/sync_automation_service.dart';
 import '../../l10n/openirn_localizations.dart';
 import '../activity/activity_log_screen.dart';
-import '../assignments/criterion_assignment_screen.dart';
+import '../assignments/asset_evaluator_assignment_screen.dart';
 import '../common/irn_pillar_palette.dart';
 import '../common/openirn_app_bar.dart';
 import '../common/responsive_autofocus.dart';
@@ -193,8 +193,8 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   Map<String, CriterionAnswer> _lastSyncedCriterionAnswers =
       <String, CriterionAnswer>{};
   final Map<String, AppUser> _usersById = <String, AppUser>{};
-  final Map<String, CriterionAssignment> _assignmentsByCriterionId =
-      <String, CriterionAssignment>{};
+  final Map<String, AssetEvaluatorAssignment> _assignmentsByAssetId =
+      <String, AssetEvaluatorAssignment>{};
   final Set<String> _expandedPillarIds = <String>{};
 
   late LocalCampaign _campaign;
@@ -546,11 +546,11 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
             currentData.criterionAnswers,
           );
         }
-        _assignmentsByCriterionId
+        _assignmentsByAssetId
           ..clear()
           ..addEntries(
             currentData.assignments.map(
-              (assignment) => MapEntry(assignment.criterionId, assignment),
+              (assignment) => MapEntry(assignment.assetId, assignment),
             ),
           );
       }
@@ -706,7 +706,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
 
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => CriterionAssignmentScreen(
+        builder: (_) => AssetEvaluatorAssignmentScreen(
           referential: widget.referential,
           campaign: _campaign,
         ),
@@ -1008,7 +1008,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   Map<IrnPillar, List<IrnCriterion>> _visibleCriteriaByPillar(
     Map<IrnPillar, List<IrnCriterion>> criteriaByPillar,
   ) {
-    if (!_accessPolicy.shouldLimitToAssignedCriteria(widget.activeUser)) {
+    if (!_accessPolicy.shouldLimitToAssignedAssets(widget.activeUser)) {
       return criteriaByPillar;
     }
 
@@ -1027,8 +1027,13 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   }
 
   bool _isCriterionAssignedToActiveEvaluator(IrnCriterion criterion) {
-    final assignment = _assignmentsByCriterionId[criterion.id];
+    final assignment = _activeAssetAssignment;
     return assignment != null && assignment.userId == widget.activeUser.id;
+  }
+
+  AssetEvaluatorAssignment? get _activeAssetAssignment {
+    final assetId = _activeAssetId;
+    return assetId == null ? null : _assignmentsByAssetId[assetId];
   }
 
   bool _canEvaluateCriterion(IrnCriterion criterion) {
@@ -1036,7 +1041,8 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       user: widget.activeUser,
       campaign: _campaign,
       criterion: criterion,
-      assignment: _assignmentsByCriterionId[criterion.id],
+      assetId: _activeAssetId ?? '',
+      assignment: _activeAssetAssignment,
     );
   }
 
@@ -1066,17 +1072,17 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       );
     }
     if (widget.activeUser.role == AppUserRole.evaluator) {
-      final assignment = _assignmentsByCriterionId[criterion.id];
+      final assignment = _activeAssetAssignment;
       if (assignment == null) {
         return context.tr(
           'assessment.disabled.not_assigned_to_evaluator',
-          fallback: 'Ce critère n’est pas affecté à votre profil évaluateur.',
+          fallback: 'Cet actif n’est pas affecté à votre profil évaluateur.',
         );
       }
       if (assignment.userId != widget.activeUser.id) {
         return context.tr(
           'assessment.disabled.assigned_to_other_evaluator',
-          fallback: 'Critère affecté à un autre évaluateur.',
+          fallback: 'Actif affecté à un autre évaluateur.',
         );
       }
     }
@@ -1394,10 +1400,6 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       widget.referential,
     );
     final visibleCriteriaByPillar = _visibleCriteriaByPillar(criteriaByPillar);
-    final visibleCriteriaCount = visibleCriteriaByPillar.values.fold<int>(
-      0,
-      (total, criteria) => total + criteria.length,
-    );
 
     final sections = _AssessmentSections(
       campaignContext: widget.navigationPanel == null
@@ -1410,13 +1412,8 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
           ? _AssignmentStatusCard(
               key: const ValueKey<String>('assessment-assignment-status-card'),
               isLoading: _isLoadingAssignments,
-              assignmentCount: _assignmentsByCriterionId.length,
-              totalCriteria:
-                  _accessPolicy.shouldLimitToAssignedCriteria(widget.activeUser)
-                  ? visibleCriteriaCount
-                  : widget.referential.criteria
-                        .where((criterion) => criterion.active)
-                        .length,
+              assignmentCount: _assignmentsByAssetId.length,
+              totalAssets: _scopedAssets.length,
               onOpenAssignments: _openAssignments,
             )
           : null,
@@ -1469,7 +1466,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
               onExpansionChanged: (isExpanded) =>
                   _setPillarExpanded(entry.key.id, isExpanded),
               criterionAnswers: activeCriterionAnswers,
-              assignmentsByCriterionId: _assignmentsByCriterionId,
+              assignment: _activeAssetAssignment,
               usersById: _usersById,
               answers: answers,
               summary: _scoringService.computeSummaryForPillar(
@@ -2220,14 +2217,14 @@ class _CampaignInformationDialogState
 class _AssignmentStatusCard extends StatelessWidget {
   final bool isLoading;
   final int assignmentCount;
-  final int totalCriteria;
+  final int totalAssets;
   final VoidCallback onOpenAssignments;
 
   const _AssignmentStatusCard({
     super.key,
     required this.isLoading,
     required this.assignmentCount,
-    required this.totalCriteria,
+    required this.totalAssets,
     required this.onOpenAssignments,
   });
 
@@ -2237,7 +2234,7 @@ class _AssignmentStatusCard extends StatelessWidget {
         ? context.tr('assessment.assignments.loading')
         : context.tr(
             'assessment.assignments.count',
-            values: {'assigned': assignmentCount, 'total': totalCriteria},
+            values: {'assigned': assignmentCount, 'total': totalAssets},
           );
     return Card(
       child: Padding(
@@ -2281,7 +2278,7 @@ class _AssignmentStatusCard extends StatelessWidget {
 }
 
 class _AssignmentChip extends StatelessWidget {
-  final CriterionAssignment? assignment;
+  final AssetEvaluatorAssignment? assignment;
   final AppUser? assignedUser;
 
   const _AssignmentChip({required this.assignment, required this.assignedUser});
@@ -2708,7 +2705,7 @@ class _PillarAssessmentCard extends StatelessWidget {
   final IrnPillar pillar;
   final List<IrnCriterion> criteria;
   final Map<String, CriterionAnswer> criterionAnswers;
-  final Map<String, CriterionAssignment> assignmentsByCriterionId;
+  final AssetEvaluatorAssignment? assignment;
   final Map<String, AppUser> usersById;
   final Map<String, IrnAnswer> answers;
   final IrnScoreSummary summary;
@@ -2727,7 +2724,7 @@ class _PillarAssessmentCard extends StatelessWidget {
     required this.initiallyExpanded,
     required this.onExpansionChanged,
     required this.criterionAnswers,
-    required this.assignmentsByCriterionId,
+    required this.assignment,
     required this.usersById,
     required this.answers,
     required this.summary,
@@ -2797,10 +2794,8 @@ class _PillarAssessmentCard extends StatelessWidget {
                           justification:
                               criterionAnswers[criterion.id]?.justification ??
                               '',
-                          assignment: assignmentsByCriterionId[criterion.id],
-                          assignedUser:
-                              usersById[assignmentsByCriterionId[criterion.id]
-                                  ?.userId],
+                          assignment: assignment,
+                          assignedUser: usersById[assignment?.userId],
                           canEdit: canEditCriterion(criterion),
                           disabledReason: disabledReasonForCriterion(criterion),
                           onAnswerChanged: (answer) =>
@@ -2824,7 +2819,7 @@ class _CriterionAnswerTile extends StatelessWidget {
   final IrnCriterion criterion;
   final IrnAnswer answer;
   final String justification;
-  final CriterionAssignment? assignment;
+  final AssetEvaluatorAssignment? assignment;
   final AppUser? assignedUser;
   final bool canEdit;
   final String disabledReason;

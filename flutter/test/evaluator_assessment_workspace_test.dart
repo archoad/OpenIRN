@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openirn/data/repositories/local_campaign_repository.dart';
-import 'package:openirn/domain/models/criterion_assignment.dart';
+import 'package:openirn/domain/models/asset_evaluator_assignment.dart';
 import 'package:openirn/domain/models/local_campaign.dart';
 import 'package:openirn/presentation/assessment/evaluator_assessment_workspace_screen.dart';
 
@@ -39,6 +39,14 @@ void main() {
       'review-assigned',
     ]);
     expect(campaigns.every((entry) => entry.assignmentCount == 1), isTrue);
+    expect(
+      campaigns.every(
+        (entry) =>
+            entry.assignedAssets.map((asset) => asset.id).toList().single ==
+            'asset-test',
+      ),
+      isTrue,
+    );
   });
 
   test('returns no campaign for an empty evaluator identifier', () {
@@ -72,6 +80,7 @@ LocalCampaignData _campaignData({
         informationSystemId: 'system-test',
         assets: <CampaignInformationAsset>[
           CampaignInformationAsset(id: 'asset-test', name: 'Actif test'),
+          CampaignInformationAsset(id: 'asset-other', name: 'Autre actif'),
         ],
       ),
       createdAt: timestamp,
@@ -79,11 +88,11 @@ LocalCampaignData _campaignData({
       statusUpdatedAt: timestamp,
     ),
     criterionAnswers: const {},
-    assignments: <CriterionAssignment>[
-      CriterionAssignment.create(
+    assignments: <AssetEvaluatorAssignment>[
+      AssetEvaluatorAssignment.create(
         referentialId: 'referential-test',
         campaignId: id,
-        criterionId: 'criterion-test',
+        assetId: 'asset-test',
         userId: evaluatorId,
         now: timestamp,
       ),

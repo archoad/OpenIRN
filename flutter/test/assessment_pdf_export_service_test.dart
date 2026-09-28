@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openirn/domain/models/irn_assessment.dart';
 import 'package:openirn/domain/models/irn_referential.dart';
@@ -7,9 +8,22 @@ import 'package:openirn/domain/models/local_campaign.dart';
 import 'package:openirn/domain/services/assessment_pdf_export_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test(
     'summary PDF obtains all user-facing labels from the active catalog',
     () async {
+      final regularFont = await rootBundle.load(
+        'assets/fonts/Inter-Regular.ttf',
+      );
+      final boldFont = await rootBundle.load('assets/fonts/Inter-Bold.ttf');
+      final fontLicense = await rootBundle.loadString(
+        'assets/fonts/LICENSE.txt',
+      );
+      expect(regularFont.lengthInBytes, greaterThan(400000));
+      expect(boldFont.lengthInBytes, greaterThan(400000));
+      expect(fontLicense, contains('SIL OPEN FONT LICENSE Version 1.1'));
+
       final translatedKeys = <String>[];
       String translate(
         String key, {
@@ -48,7 +62,8 @@ void main() {
       final campaign = LocalCampaign(
         id: 'campaign-test',
         referentialId: referential.id,
-        name: 'Campaña de prueba',
+        name: 'Campaña d’œuvre — été',
+        description: 'Résilience • sicher • protección',
         status: LocalCampaignStatus.readyForReview,
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -79,6 +94,7 @@ void main() {
       );
 
       expect(utf8.decode(bytes.take(4).toList()), '%PDF');
+      expect(latin1.decode(bytes).contains('Inter'), isTrue);
       expect(
         translatedKeys,
         containsAll(<String>[

@@ -1,4 +1,4 @@
-import '../../domain/models/criterion_assignment.dart';
+import '../../domain/models/asset_evaluator_assignment.dart';
 import '../../domain/models/irn_assessment.dart';
 import '../../domain/models/local_activity_event.dart';
 import '../../domain/models/local_campaign.dart';
@@ -11,7 +11,7 @@ class ServerCampaignBundle {
   final LocalCampaign campaign;
   final int serverRevision;
   final Map<String, CriterionAnswer> criterionAnswers;
-  final List<CriterionAssignment> assignments;
+  final List<AssetEvaluatorAssignment> assignments;
   final List<LocalActivityEvent> activityEvents;
   final bool replaceAssetAnswers;
 
@@ -19,7 +19,7 @@ class ServerCampaignBundle {
     required this.campaign,
     this.serverRevision = 0,
     this.criterionAnswers = const <String, CriterionAnswer>{},
-    this.assignments = const <CriterionAssignment>[],
+    this.assignments = const <AssetEvaluatorAssignment>[],
     this.activityEvents = const <LocalActivityEvent>[],
     this.replaceAssetAnswers = false,
   });
@@ -28,7 +28,7 @@ class ServerCampaignBundle {
     LocalCampaign? campaign,
     int? serverRevision,
     Map<String, CriterionAnswer>? criterionAnswers,
-    List<CriterionAssignment>? assignments,
+    List<AssetEvaluatorAssignment>? assignments,
     List<LocalActivityEvent>? activityEvents,
     bool? replaceAssetAnswers,
   }) {
@@ -374,15 +374,15 @@ class ServerCampaignStore {
     return answers;
   }
 
-  List<CriterionAssignment> _parseAssignments(
+  List<AssetEvaluatorAssignment> _parseAssignments(
     Object? rawAssignments, {
     required String referentialId,
     required String campaignId,
   }) {
     if (rawAssignments is! List) {
-      return const <CriterionAssignment>[];
+      return const <AssetEvaluatorAssignment>[];
     }
-    final assignments = <CriterionAssignment>[];
+    final assignments = <AssetEvaluatorAssignment>[];
     for (final rawAssignment in rawAssignments) {
       if (rawAssignment is! Map) {
         continue;
@@ -390,14 +390,14 @@ class ServerCampaignStore {
       final payload = _asMap(rawAssignment);
       payload.putIfAbsent('referentialId', () => referentialId);
       payload.putIfAbsent('campaignId', () => campaignId);
-      final assignment = CriterionAssignment.fromJson(payload);
-      if (assignment.criterionId.trim().isEmpty ||
+      final assignment = AssetEvaluatorAssignment.fromJson(payload);
+      if (assignment.assetId.trim().isEmpty ||
           assignment.userId.trim().isEmpty) {
         continue;
       }
       assignments.add(assignment);
     }
-    assignments.sort((a, b) => a.criterionId.compareTo(b.criterionId));
+    assignments.sort((a, b) => a.assetId.compareTo(b.assetId));
     return assignments;
   }
 

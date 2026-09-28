@@ -1,5 +1,5 @@
 import '../models/app_user.dart';
-import '../models/criterion_assignment.dart';
+import '../models/asset_evaluator_assignment.dart';
 import '../models/irn_assessment.dart';
 import '../models/irn_referential.dart';
 import '../models/local_activity_event.dart';
@@ -121,7 +121,9 @@ class SyncPullImportService {
         rawAssignments: campaignItem['assignments'],
         referential: referential,
         campaignId: importedCampaign.id,
-        activeCriterionIds: activeCriterionIds,
+        assetIds: <String>{
+          for (final asset in sourceCampaign.information.assets) asset.id,
+        },
         userIds: userIds,
         importedAt: importedAtUtc,
         warnings: warnings,
@@ -303,26 +305,26 @@ class SyncPullImportService {
     return criterionId.substring(index + marker.length);
   }
 
-  List<CriterionAssignment> _parseAssignments({
+  List<AssetEvaluatorAssignment> _parseAssignments({
     required Object? rawAssignments,
     required IrnReferential referential,
     required String campaignId,
-    required Set<String> activeCriterionIds,
+    required Set<String> assetIds,
     required Set<String> userIds,
     required DateTime importedAt,
     required List<String> warnings,
   }) {
     if (rawAssignments == null) {
-      return const <CriterionAssignment>[];
+      return const <AssetEvaluatorAssignment>[];
     }
     if (rawAssignments is! List) {
       warnings.add(
         'Une liste assignments distante est invalide et a été ignorée.',
       );
-      return const <CriterionAssignment>[];
+      return const <AssetEvaluatorAssignment>[];
     }
 
-    final assignments = <CriterionAssignment>[];
+    final assignments = <AssetEvaluatorAssignment>[];
     for (final rawAssignment in rawAssignments) {
       if (rawAssignment is! Map) {
         warnings.add(
@@ -331,29 +333,29 @@ class SyncPullImportService {
         continue;
       }
       final payload = _asMap(rawAssignment);
-      final criterionId = _asString(payload['criterionId']);
+      final assetId = _asString(payload['assetId']);
       final userId = _asString(payload['userId']);
-      if (criterionId.isEmpty || userId.isEmpty) {
+      if (assetId.isEmpty || userId.isEmpty) {
         warnings.add('Une affectation distante incomplète a été ignorée.');
         continue;
       }
-      if (!activeCriterionIds.contains(criterionId)) {
+      if (!assetIds.contains(assetId)) {
         warnings.add(
-          'L’affectation distante du critère $criterionId a été ignorée car le critère est inconnu.',
+          'L’affectation distante de l’actif $assetId a été ignorée car l’actif est inconnu.',
         );
         continue;
       }
       if (!userIds.contains(userId)) {
         warnings.add(
-          'L’affectation distante du critère $criterionId vers $userId a été ignorée car l’utilisateur est absent des données serveur.',
+          'L’affectation distante de l’actif $assetId vers $userId a été ignorée car l’utilisateur est absent des données serveur.',
         );
         continue;
       }
       assignments.add(
-        CriterionAssignment.create(
+        AssetEvaluatorAssignment.create(
           referentialId: referential.id,
           campaignId: campaignId,
-          criterionId: criterionId,
+          assetId: assetId,
           userId: userId,
           assignedByUserId: _asString(payload['assignedByUserId']),
           now: importedAt,
@@ -535,7 +537,7 @@ class SyncPullImportResult {
 class ImportedRemoteCampaign {
   final LocalCampaign campaign;
   final Map<String, CriterionAnswer> criterionAnswers;
-  final List<CriterionAssignment> assignments;
+  final List<AssetEvaluatorAssignment> assignments;
   final List<LocalActivityEvent> activityEvents;
 
   const ImportedRemoteCampaign({

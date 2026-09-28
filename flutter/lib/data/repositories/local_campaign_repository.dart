@@ -1,4 +1,4 @@
-import '../../domain/models/criterion_assignment.dart';
+import '../../domain/models/asset_evaluator_assignment.dart';
 import '../../domain/models/irn_assessment.dart';
 import '../../domain/models/local_campaign.dart';
 import 'server_campaign_store.dart';
@@ -6,7 +6,7 @@ import 'server_campaign_store.dart';
 class LocalCampaignData {
   final LocalCampaign campaign;
   final Map<String, CriterionAnswer> criterionAnswers;
-  final List<CriterionAssignment> assignments;
+  final List<AssetEvaluatorAssignment> assignments;
 
   const LocalCampaignData({
     required this.campaign,
@@ -39,7 +39,7 @@ class LocalCampaignRepository {
             criterionAnswers: Map<String, CriterionAnswer>.unmodifiable(
               bundle.criterionAnswers,
             ),
-            assignments: List<CriterionAssignment>.unmodifiable(
+            assignments: List<AssetEvaluatorAssignment>.unmodifiable(
               bundle.assignments,
             ),
           ),

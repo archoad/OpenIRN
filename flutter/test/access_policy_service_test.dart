@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openirn/domain/models/app_user.dart';
-import 'package:openirn/domain/models/criterion_assignment.dart';
+import 'package:openirn/domain/models/asset_evaluator_assignment.dart';
 import 'package:openirn/domain/models/irn_referential.dart';
 import 'package:openirn/domain/models/local_campaign.dart';
 import 'package:openirn/domain/services/access_policy_service.dart';
@@ -40,11 +40,11 @@ void main() {
     updatedAt: DateTime.utc(2026, 6, 24),
   );
 
-  CriterionAssignment assignmentFor(String userId) =>
-      CriterionAssignment.create(
+  AssetEvaluatorAssignment assignmentFor(String userId) =>
+      AssetEvaluatorAssignment.create(
         referentialId: 'adri-irn-v1.1',
         campaignId: campaign.id,
-        criterionId: criterion.id,
+        assetId: 'asset-test',
         userId: userId,
         assignedByUserId: 'pilot',
         now: DateTime.utc(2026, 6, 24),
@@ -133,6 +133,7 @@ void main() {
             user: user(role.jsonValue, role),
             campaign: campaign,
             criterion: criterion,
+            assetId: 'asset-test',
           ),
           isTrue,
         );
@@ -140,15 +141,16 @@ void main() {
     },
   );
 
-  test('evaluators can evaluate only criteria explicitly assigned to them', () {
+  test('evaluators can evaluate all criteria of their assigned asset', () {
     final evaluator = user('evaluator-1', AppUserRole.evaluator);
 
-    expect(service.shouldLimitToAssignedCriteria(evaluator), isTrue);
+    expect(service.shouldLimitToAssignedAssets(evaluator), isTrue);
     expect(
       service.canEvaluateCriterion(
         user: evaluator,
         campaign: campaign,
         criterion: criterion,
+        assetId: 'asset-test',
       ),
       isFalse,
     );
@@ -157,6 +159,7 @@ void main() {
         user: evaluator,
         campaign: campaign,
         criterion: criterion,
+        assetId: 'asset-test',
         assignment: assignmentFor('another-evaluator'),
       ),
       isFalse,
@@ -166,9 +169,20 @@ void main() {
         user: evaluator,
         campaign: campaign,
         criterion: criterion,
+        assetId: 'asset-test',
         assignment: assignmentFor(evaluator.id),
       ),
       isTrue,
+    );
+    expect(
+      service.canEvaluateCriterion(
+        user: evaluator,
+        campaign: campaign,
+        criterion: criterion,
+        assetId: 'asset-other',
+        assignment: assignmentFor(evaluator.id),
+      ),
+      isFalse,
     );
   });
 
@@ -179,6 +193,7 @@ void main() {
           user: user(role.jsonValue, role),
           campaign: campaign,
           criterion: criterion,
+          assetId: 'asset-test',
           assignment: assignmentFor(role.jsonValue),
         ),
         isFalse,

@@ -293,7 +293,7 @@ class _CampaignHistoryScreenState extends State<CampaignHistoryScreen> {
             child: SingleChildScrollView(
               child: SelectableText(
                 formatted,
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                style: const TextStyle(fontSize: 12),
               ),
             ),
           ),
@@ -1205,12 +1205,7 @@ class _PayloadImpactTile extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SelectableText(
-              impact.path,
-              style: theme.textTheme.titleSmall?.copyWith(
-                fontFamily: 'monospace',
-              ),
-            ),
+            SelectableText(impact.path, style: theme.textTheme.titleSmall),
             const SizedBox(height: 8),
             LayoutBuilder(
               builder: (context, constraints) {
@@ -1269,10 +1264,7 @@ class _ImpactValueCard extends StatelessWidget {
               style: Theme.of(context).textTheme.labelMedium,
             ),
             const SizedBox(height: 4),
-            SelectableText(
-              value,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-            ),
+            SelectableText(value, style: const TextStyle(fontSize: 12)),
           ],
         ),
       ),

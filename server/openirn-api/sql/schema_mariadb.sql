@@ -185,6 +185,19 @@ CREATE TABLE IF NOT EXISTS asset_assessment_answers (
     CONSTRAINT fk_asset_assessment_answers_asset FOREIGN KEY (tenant_id, asset_id) REFERENCES information_assets(tenant_id, asset_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS asset_evaluator_assignments (
+    tenant_id VARCHAR(80) NOT NULL,
+    asset_id VARCHAR(160) NOT NULL,
+    user_id VARCHAR(160) NOT NULL,
+    assigned_by_user_id VARCHAR(160) NOT NULL DEFAULT '',
+    created_at VARCHAR(40) NOT NULL,
+    updated_at VARCHAR(40) NOT NULL,
+    PRIMARY KEY (tenant_id, asset_id),
+    KEY idx_asset_evaluator_assignments_tenant_user (tenant_id, user_id, updated_at),
+    CONSTRAINT fk_asset_evaluator_assignments_asset FOREIGN KEY (tenant_id, asset_id) REFERENCES information_assets(tenant_id, asset_id) ON DELETE CASCADE,
+    CONSTRAINT fk_asset_evaluator_assignments_user FOREIGN KEY (tenant_id, user_id) REFERENCES users(tenant_id, user_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS terminals (
     device_id VARCHAR(160) NOT NULL,
     name VARCHAR(255) NOT NULL DEFAULT '',

@@ -106,15 +106,15 @@ class _EvaluatorAssessmentWorkspaceScreenState
           ? (campaigns.isEmpty ? null : campaigns.first)
           : selectedCampaign.first;
       final selectedAssetExists =
-          nextCampaign?.campaign.information.assets.any(
+          nextCampaign?.assignedAssets.any(
             (asset) => asset.id == _selectedAssetId,
           ) ??
           false;
       final nextAssetId = selectedAssetExists
           ? _selectedAssetId
-          : (nextCampaign?.campaign.information.assets.isEmpty ?? true)
+          : (nextCampaign?.assignedAssets.isEmpty ?? true)
           ? null
-          : nextCampaign!.campaign.information.assets.first.id;
+          : nextCampaign!.assignedAssets.first.id;
 
       setState(() {
         _campaigns = campaigns;
@@ -202,26 +202,36 @@ List<EvaluatorCampaignEntry> evaluatorAssessmentCampaigns(
   return data
       .where((item) => !item.campaign.isReadOnly)
       .map((item) {
-        final assignmentCount = item.assignments
+        final assignedAssetIds = item.assignments
             .where((assignment) => assignment.userId == cleanEvaluatorId)
-            .length;
+            .map((assignment) => assignment.assetId)
+            .where((assetId) => assetId.trim().isNotEmpty)
+            .toSet();
         return EvaluatorCampaignEntry(
           campaign: item.campaign,
-          assignmentCount: assignmentCount,
+          assignedAssetIds: assignedAssetIds,
         );
       })
-      .where((entry) => entry.assignmentCount > 0)
+      .where((entry) => entry.assignedAssetIds.isNotEmpty)
       .toList(growable: false);
 }
 
 class EvaluatorCampaignEntry {
   final LocalCampaign campaign;
-  final int assignmentCount;
+  final Set<String> assignedAssetIds;
 
   const EvaluatorCampaignEntry({
     required this.campaign,
-    required this.assignmentCount,
+    required this.assignedAssetIds,
   });
+
+  int get assignmentCount => assignedAssetIds.length;
+
+  List<CampaignInformationAsset> get assignedAssets => campaign
+      .information
+      .assets
+      .where((asset) => assignedAssetIds.contains(asset.id))
+      .toList(growable: false);
 }
 
 class _EvaluatorNavigationPanel extends StatelessWidget {
@@ -307,7 +317,7 @@ class _EvaluatorNavigationPanel extends StatelessWidget {
                 final campaign = entry.campaign;
                 final isSelectedCampaign = campaign.id == selectedCampaignId;
                 final systemName = campaign.information.systemName.trim();
-                final assets = campaign.information.assets;
+                final assets = entry.assignedAssets;
                 return Card(
                   key: ValueKey<String>('evaluator-campaign-${campaign.id}'),
                   clipBehavior: Clip.antiAlias,
@@ -325,7 +335,7 @@ class _EvaluatorNavigationPanel extends StatelessWidget {
                     subtitle: Text(
                       context.tr(
                         'assessment.evaluator_workspace.campaign_summary',
-                        fallback: '{campaign} · {count} critère(s) affecté(s)',
+                        fallback: '{campaign} · {count} actif(s) affecté(s)',
                         values: {
                           'campaign': campaign.name,
                           'count': entry.assignmentCount,
@@ -417,7 +427,7 @@ class _EvaluatorWorkspaceEmptyState extends StatelessWidget {
                     ? context.tr(
                         'assessment.evaluator_workspace.empty',
                         fallback:
-                            'Aucune campagne en cours ne contient de critères qui vous sont affectés.',
+                            'Aucune campagne en cours ne contient d’actif qui vous est affecté.',
                       )
                     : context.tr(
                         'assessment.evaluator_workspace.load_error',

@@ -4,10 +4,10 @@ import 'package:flutter/services.dart';
 import '../../data/files/local_json_file_service.dart';
 import '../../l10n/openirn_localizations.dart';
 import '../../data/repositories/local_activity_repository.dart';
-import '../../data/repositories/local_criterion_assignment_repository.dart';
+import '../../data/repositories/local_asset_evaluator_assignment_repository.dart';
 import '../../data/repositories/local_user_repository.dart';
 import '../../domain/models/app_user.dart';
-import '../../domain/models/criterion_assignment.dart';
+import '../../domain/models/asset_evaluator_assignment.dart';
 import '../../domain/models/irn_assessment.dart';
 import '../../domain/models/irn_referential.dart';
 import '../../domain/models/local_activity_event.dart';
@@ -18,12 +18,12 @@ import '../common/openirn_app_bar.dart';
 class _ExportContext {
   final List<LocalActivityEvent> activityEvents;
   final List<AppUser> users;
-  final List<CriterionAssignment> assignments;
+  final List<AssetEvaluatorAssignment> assignments;
 
   const _ExportContext({
     this.activityEvents = const <LocalActivityEvent>[],
     this.users = const <AppUser>[],
-    this.assignments = const <CriterionAssignment>[],
+    this.assignments = const <AssetEvaluatorAssignment>[],
   });
 }
 
@@ -47,8 +47,8 @@ class _AssessmentExportScreenState extends State<AssessmentExportScreen> {
   final LocalActivityRepository _activityRepository =
       const LocalActivityRepository();
   final LocalUserRepository _userRepository = const LocalUserRepository();
-  final LocalCriterionAssignmentRepository _assignmentRepository =
-      const LocalCriterionAssignmentRepository();
+  final LocalAssetEvaluatorAssignmentRepository _assignmentRepository =
+      const LocalAssetEvaluatorAssignmentRepository();
   final LocalJsonFileService _fileService = const LocalJsonFileService();
   late final Future<_ExportContext> _exportContextFuture;
 
@@ -558,7 +558,7 @@ class _JsonPreviewCard extends StatelessWidget {
               ),
               child: SelectableText(
                 jsonPayload,
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                style: const TextStyle(fontSize: 12),
               ),
             ),
           ],

@@ -283,7 +283,6 @@ class _FormulaBox extends StatelessWidget {
       child: SelectableText(
         formula,
         style: theme.textTheme.titleSmall?.copyWith(
-          fontFamily: 'monospace',
           fontWeight: FontWeight.w700,
         ),
       ),

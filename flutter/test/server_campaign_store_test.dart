@@ -38,12 +38,28 @@ class _RecordingApiClient extends OpenIrnApiClient {
               'id': '11111111-1111-4111-8111-111111111111',
               'referentialId': 'adri-irn-v1.1',
               'name': 'Campaign A',
+              'information': <String, dynamic>{
+                'inventoryScope': <String, dynamic>{
+                  'informationSystemId': 'system-a',
+                  'assets': <Map<String, dynamic>>[
+                    <String, dynamic>{'assetId': 'asset-a', 'name': 'Asset A'},
+                  ],
+                },
+              },
               'createdAt': '2026-08-24T09:00:00Z',
               'updatedAt': '2026-08-24T10:00:00Z',
               'statusUpdatedAt': '2026-08-24T09:00:00Z',
             },
             'answers': <Map<String, dynamic>>[],
-            'assignments': <Map<String, dynamic>>[],
+            'assignments': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'id': 'asset-assignment-asset-a',
+                'assetId': 'asset-a',
+                'userId': 'evaluator-a',
+                'createdAt': '2026-08-24T09:00:00Z',
+                'updatedAt': '2026-08-24T10:00:00Z',
+              },
+            ],
             'activityLog': <String, dynamic>{
               'eventCount': 0,
               'events': <Map<String, dynamic>>[],
@@ -109,6 +125,8 @@ void main() {
         expect(bundles, hasLength(1));
         expect(bundles.single.campaign.name, 'Campaign A');
         expect(bundles.single.serverRevision, 7);
+        expect(bundles.single.assignments.single.assetId, 'asset-a');
+        expect(bundles.single.assignments.single.userId, 'evaluator-a');
       },
     );
 

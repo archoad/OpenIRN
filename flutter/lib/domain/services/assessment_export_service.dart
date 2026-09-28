@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import '../models/app_user.dart';
-import '../models/criterion_assignment.dart';
+import '../models/asset_evaluator_assignment.dart';
 import '../models/irn_assessment.dart';
 import '../models/irn_referential.dart';
 import '../models/local_activity_event.dart';
@@ -21,7 +21,8 @@ class AssessmentExportService {
     LocalCampaign? campaign,
     List<LocalActivityEvent> activityEvents = const <LocalActivityEvent>[],
     List<AppUser> users = const <AppUser>[],
-    List<CriterionAssignment> assignments = const <CriterionAssignment>[],
+    List<AssetEvaluatorAssignment> assignments =
+        const <AssetEvaluatorAssignment>[],
     DateTime? exportedAt,
   }) {
     const encoder = JsonEncoder.withIndent('  ');
@@ -44,7 +45,8 @@ class AssessmentExportService {
     LocalCampaign? campaign,
     List<LocalActivityEvent> activityEvents = const <LocalActivityEvent>[],
     List<AppUser> users = const <AppUser>[],
-    List<CriterionAssignment> assignments = const <CriterionAssignment>[],
+    List<AssetEvaluatorAssignment> assignments =
+        const <AssetEvaluatorAssignment>[],
     DateTime? exportedAt,
   }) {
     final exportedAtUtc = (exportedAt ?? DateTime.now()).toUtc();
@@ -230,10 +232,10 @@ class AssessmentExportService {
     };
   }
 
-  Map<String, dynamic> _assignmentToJson(CriterionAssignment assignment) {
+  Map<String, dynamic> _assignmentToJson(AssetEvaluatorAssignment assignment) {
     return <String, dynamic>{
       'id': assignment.id,
-      'criterionId': assignment.criterionId,
+      'assetId': assignment.assetId,
       'userId': assignment.userId,
       if (assignment.assignedByUserId.trim().isNotEmpty)
         'assignedByUserId': assignment.assignedByUserId,

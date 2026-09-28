@@ -1640,6 +1640,7 @@ def _apply_schema(migration_mysql_url: str) -> None:
         _migrate_shared_assets_schema(con)
         _migrate_information_system_owner_schema(con)
         _migrate_global_administrator_role(con)
+        _migrate_asset_evaluator_assignments_schema(con)
         _ensure_tenant(con, DEFAULT_TENANT_ID)
         _backfill_default_tenant_display_name(con)
         _sync_global_administrators_to_all_tenants(con)
@@ -2098,6 +2099,87 @@ def _migrate_global_administrator_role(con: Any) -> None:
 
     _sync_global_administrators_to_all_tenants(con)
     _record_migration(con, 175, "global_administrator_role")
+
+
+def _legacy_campaign_assignment_user_id(raw_campaign: dict[str, Any]) -> str:
+    """Return the sole legacy criterion evaluator, or nothing if ambiguous."""
+    raw_assignments = raw_campaign.get("assignments")
+    if not isinstance(raw_assignments, list):
+        return ""
+    user_ids = {
+        str(item.get("userId") or "").strip()
+        for item in raw_assignments
+        if isinstance(item, dict) and str(item.get("userId") or "").strip()
+    }
+    return next(iter(user_ids)) if len(user_ids) == 1 else ""
+
+
+def _migrate_asset_evaluator_assignments_schema(con: Any) -> None:
+    """Backfill only assets whose legacy campaigns agree on one evaluator."""
+    if _migration_applied(con, 176):
+        return
+    if not _table_exists(con, "asset_evaluator_assignments"):
+        raise RuntimeError(
+            "Migration 176 refusée: table asset_evaluator_assignments absente"
+        )
+
+    now = _utc_now().isoformat()
+    rows = con.execute(
+        """
+        SELECT tenant_id, campaign_id, updated_at, payload_json
+        FROM campaign_states
+        ORDER BY received_at ASC, updated_at ASC, campaign_id ASC
+        """
+    ).fetchall()
+    candidates: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for row in rows:
+        tenant_id = str(row["tenant_id"] or "").strip()
+        payload = _parse_json(row["payload_json"], {})
+        if not tenant_id or not isinstance(payload, dict):
+            continue
+        user_id = _legacy_campaign_assignment_user_id(payload)
+        if not user_id:
+            continue
+        evaluator = con.execute(
+            """
+            SELECT 1 FROM users
+            WHERE tenant_id = ? AND user_id = ? AND active = 1 AND role = 'evaluator'
+            """,
+            (tenant_id, user_id),
+        ).fetchone()
+        if evaluator is None:
+            continue
+        updated_at = str(row["updated_at"] or now)
+        for asset_id in _campaign_scope_asset_ids(payload):
+            asset = con.execute(
+                "SELECT 1 FROM information_assets WHERE tenant_id = ? AND asset_id = ?",
+                (tenant_id, asset_id),
+            ).fetchone()
+            if asset is None:
+                continue
+            candidates.setdefault((tenant_id, asset_id), []).append(
+                (user_id, updated_at)
+            )
+
+    for (tenant_id, asset_id), values in candidates.items():
+        user_ids = {user_id for user_id, _updated_at in values}
+        if len(user_ids) != 1:
+            continue
+        user_id = next(iter(user_ids))
+        updated_at = max(timestamp for _user_id, timestamp in values)
+        con.execute(
+            """
+            INSERT INTO asset_evaluator_assignments(
+                tenant_id, asset_id, user_id, assigned_by_user_id,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, '', ?, ?)
+            ON CONFLICT(tenant_id, asset_id) DO UPDATE SET
+                user_id = excluded.user_id,
+                updated_at = excluded.updated_at
+            """,
+            (tenant_id, asset_id, user_id, updated_at, updated_at),
+        )
+    _record_migration(con, 176, "canonical_asset_evaluator_assignments")
 
 
 def _alias_target(con: Any, entity_type: str, old_id: str, scope_id: str = "") -> str:
@@ -5053,6 +5135,9 @@ def _campaign_payload_for_storage(raw_campaign: dict[str, Any]) -> dict[str, Any
     stored = dict(raw_campaign)
     stored.pop("expectedServerRevision", None)
     stored.pop("replaceAssetAnswers", None)
+    # Asset/evaluator assignments are canonical server data. Never trust or
+    # persist a campaign-scoped copy supplied through the general sync API.
+    stored.pop("assignments", None)
     return stored
 
 
@@ -5213,6 +5298,48 @@ def _campaign_payload_with_canonical_asset_answers(
 
     merged = dict(raw_campaign)
     merged["answers"] = [*preserved_answers, *canonical_answers]
+    return merged
+
+
+def _campaign_payload_with_canonical_asset_assignments(
+    con: Any,
+    tenant_id: str,
+    raw_campaign: dict[str, Any],
+) -> dict[str, Any]:
+    """Expose each asset's sole evaluator in every campaign containing it."""
+    scoped_asset_ids = _campaign_scope_asset_ids(raw_campaign)
+    if not tenant_id or not scoped_asset_ids:
+        return raw_campaign
+
+    campaign_id = _campaign_id(raw_campaign) or ""
+    referential_id = _campaign_referential_id(raw_campaign)
+    assignments: list[dict[str, Any]] = []
+    for asset_id in scoped_asset_ids:
+        row = con.execute(
+            """
+            SELECT user_id, assigned_by_user_id, created_at, updated_at
+            FROM asset_evaluator_assignments
+            WHERE tenant_id = ? AND asset_id = ?
+            """,
+            (tenant_id, asset_id),
+        ).fetchone()
+        if row is None:
+            continue
+        assignments.append(
+            {
+                "id": f"asset-assignment-{asset_id}",
+                "referentialId": referential_id,
+                "campaignId": campaign_id,
+                "assetId": asset_id,
+                "userId": str(row["user_id"] or ""),
+                "assignedByUserId": str(row["assigned_by_user_id"] or ""),
+                "createdAt": str(row["created_at"] or ""),
+                "updatedAt": str(row["updated_at"] or ""),
+            }
+        )
+
+    merged = dict(raw_campaign)
+    merged["assignments"] = assignments
     return merged
 
 
@@ -5540,6 +5667,11 @@ def _public_campaign_state_from_row(
     if include_payload:
         if isinstance(payload, dict) and con is not None:
             payload = _campaign_payload_with_canonical_asset_answers(
+                con,
+                str(row["tenant_id"] or ""),
+                payload,
+            )
+            payload = _campaign_payload_with_canonical_asset_assignments(
                 con,
                 str(row["tenant_id"] or ""),
                 payload,
@@ -9328,6 +9460,125 @@ async def information_asset_update(asset_id: str, request: Request) -> dict[str,
             _replace_asset_system_links(con, tenant_id, asset_id, system_ids, now)
             _record_device_audit(con, tenant_id, "inventory.asset.updated", device_id=str(auth_context.get("deviceId") or ""), payload={"assetId": asset_id, "systemIds": system_ids, "name": name, "actorUserId": auth_context.get("userId") or ""})
             result = _inventory_payload(con, tenant_id)
+    return result
+
+
+@app.patch("/inventory/assets/{asset_id}/evaluator")
+async def information_asset_evaluator_update(
+    asset_id: str,
+    request: Request,
+) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Payload must be a JSON object")
+
+    tenant_id = _resolve_tenant_id_for_request(
+        payload.get("tenantId"),
+        DEFAULT_TENANT_ID,
+    )
+    auth_context = _require_campaign_manager_authorization(request, tenant_id)
+    clean_asset_id = _normalize_uuid(asset_id)
+    if not clean_asset_id:
+        raise HTTPException(status_code=400, detail="Identifiant d’actif invalide")
+    raw_user_id = str(payload.get("userId") or "").strip()
+    user_id = _normalize_uuid(raw_user_id) if raw_user_id else ""
+    if raw_user_id and not user_id:
+        raise HTTPException(status_code=400, detail="Identifiant d’évaluateur invalide")
+
+    now = _utc_now().isoformat()
+    actor_user_id = str(auth_context.get("userId") or "").strip()
+    with _db() as con:
+        with con:
+            _require_information_asset(con, tenant_id, clean_asset_id)
+            existing = con.execute(
+                """
+                SELECT user_id, created_at
+                FROM asset_evaluator_assignments
+                WHERE tenant_id = ? AND asset_id = ?
+                FOR UPDATE
+                """,
+                (tenant_id, clean_asset_id),
+            ).fetchone()
+            previous_user_id = (
+                str(existing["user_id"] or "").strip() if existing else ""
+            )
+
+            if not user_id:
+                con.execute(
+                    """
+                    DELETE FROM asset_evaluator_assignments
+                    WHERE tenant_id = ? AND asset_id = ?
+                    """,
+                    (tenant_id, clean_asset_id),
+                )
+                event_type = "asset.evaluator.unassigned"
+            else:
+                evaluator = con.execute(
+                    """
+                    SELECT 1 FROM users
+                    WHERE tenant_id = ? AND user_id = ?
+                      AND active = 1 AND role = 'evaluator'
+                    """,
+                    (tenant_id, user_id),
+                ).fetchone()
+                if evaluator is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "L’utilisateur sélectionné doit être un évaluateur actif "
+                            "du même espace de travail"
+                        ),
+                    )
+                created_at = (
+                    str(existing["created_at"] or now) if existing else now
+                )
+                con.execute(
+                    """
+                    INSERT INTO asset_evaluator_assignments(
+                        tenant_id, asset_id, user_id, assigned_by_user_id,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(tenant_id, asset_id) DO UPDATE SET
+                        user_id = excluded.user_id,
+                        assigned_by_user_id = excluded.assigned_by_user_id,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        tenant_id,
+                        clean_asset_id,
+                        user_id,
+                        actor_user_id,
+                        created_at,
+                        now,
+                    ),
+                )
+                event_type = (
+                    "asset.evaluator.assigned"
+                    if not previous_user_id
+                    else "asset.evaluator.reassigned"
+                )
+
+            _record_device_audit(
+                con,
+                tenant_id,
+                event_type,
+                device_id=str(auth_context.get("deviceId") or ""),
+                payload={
+                    "assetId": clean_asset_id,
+                    "previousUserId": previous_user_id,
+                    "userId": user_id,
+                    "actorUserId": actor_user_id,
+                },
+            )
+            result = _inventory_payload(con, tenant_id)
+            result["message"] = (
+                "Évaluateur de l’actif supprimé"
+                if not user_id
+                else "Évaluateur de l’actif mis à jour"
+            )
     return result
 
 

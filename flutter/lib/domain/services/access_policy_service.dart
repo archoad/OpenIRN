@@ -1,5 +1,5 @@
 import '../models/app_user.dart';
-import '../models/criterion_assignment.dart';
+import '../models/asset_evaluator_assignment.dart';
 import '../models/irn_referential.dart';
 import '../models/local_campaign.dart';
 
@@ -9,8 +9,8 @@ enum OpenIrnPermission {
   viewCampaign,
   viewCampaignSummary,
   viewCampaignQuality,
-  viewAssignedCriteriaOnly,
-  evaluateAssignedCriterion,
+  viewAssignedAssetsOnly,
+  evaluateAssignedAsset,
   evaluateAnyCriterion,
   reviewCampaign,
   editCampaignInformation,
@@ -94,8 +94,8 @@ class AccessPolicyService {
       OpenIrnPermission.viewCampaign,
       OpenIrnPermission.viewCampaignSummary,
       OpenIrnPermission.viewCampaignQuality,
-      OpenIrnPermission.viewAssignedCriteriaOnly,
-      OpenIrnPermission.evaluateAssignedCriterion,
+      OpenIrnPermission.viewAssignedAssetsOnly,
+      OpenIrnPermission.evaluateAssignedAsset,
     },
     AppUserRole.reviewer: {
       OpenIrnPermission.viewReferentialCatalog,
@@ -202,7 +202,8 @@ class AccessPolicyService {
     required AppUser user,
     required LocalCampaign campaign,
     required IrnCriterion criterion,
-    CriterionAssignment? assignment,
+    required String assetId,
+    AssetEvaluatorAssignment? assignment,
   }) {
     if (!user.active || campaign.isReadOnly) {
       return false;
@@ -210,18 +211,21 @@ class AccessPolicyService {
     if (can(user, OpenIrnPermission.evaluateAnyCriterion)) {
       return true;
     }
-    if (!can(user, OpenIrnPermission.evaluateAssignedCriterion)) {
+    if (!can(user, OpenIrnPermission.evaluateAssignedAsset)) {
       return false;
     }
-    return assignment != null && assignment.userId == user.id;
+    return assignment != null &&
+        assetId.trim().isNotEmpty &&
+        assignment.assetId == assetId &&
+        assignment.userId == user.id;
   }
 
   bool canReadCampaign(AppUser user) {
     return can(user, OpenIrnPermission.viewCampaign);
   }
 
-  bool shouldLimitToAssignedCriteria(AppUser user) {
-    return can(user, OpenIrnPermission.viewAssignedCriteriaOnly);
+  bool shouldLimitToAssignedAssets(AppUser user) {
+    return can(user, OpenIrnPermission.viewAssignedAssetsOnly);
   }
 
   bool shouldOpenEvaluatorAssessmentWorkspace(AppUser user) {
