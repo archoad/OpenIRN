@@ -427,7 +427,7 @@ class _RequestBodyTooLarge(Exception):
 def _request_body_limit(path: str) -> int:
     if path == "/sync/push":
         return MAX_SYNC_PUSH_BODY_BYTES
-    if path == "/inventory/import.xlsx":
+    if path in {"/inventory/import.xlsx", "/inventory/graph/import.xlsx"}:
         return MAX_INVENTORY_XLSX_BODY_BYTES
     return MAX_REQUEST_BODY_BYTES
 
@@ -8790,6 +8790,159 @@ def _inventory_to_excel_bytes(con: Any, tenant_id: str, system_id: str) -> bytes
     return output.getvalue()
 
 
+def _inventory_graph_to_excel_bytes(con: Any, tenant_id: str) -> bytes:
+    openpyxl = _load_openpyxl()
+    from openpyxl.styles import Font, PatternFill, Protection
+    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    inventory = _inventory_payload(con, tenant_id)
+    workbook = openpyxl.Workbook()
+    workbook.remove(workbook.active)
+    password = secrets.token_urlsafe(12)
+    locked = Protection(locked=True)
+    unlocked = Protection(locked=False)
+    header_fill = PatternFill(fill_type="solid", fgColor="E9EEF6")
+    id_fill = PatternFill(fill_type="solid", fgColor="F3F4F6")
+
+    def add_sheet(
+        title: str,
+        headers: list[str],
+        rows: list[list[str]],
+        *,
+        locked_columns: set[int] | None = None,
+        widths: list[int] | None = None,
+    ) -> Any:
+        sheet = workbook.create_sheet(title)
+        locked_column_indexes = locked_columns or set()
+        sheet.append(headers)
+        for cell in sheet[1]:
+            cell.font = Font(bold=True)
+            cell.fill = header_fill
+            cell.protection = locked
+        for values in rows:
+            sheet.append(values)
+        template_last_row = max(sheet.max_row + 100, 201)
+        for row_index in range(2, template_last_row + 1):
+            for column_index in range(1, len(headers) + 1):
+                cell = sheet.cell(row=row_index, column=column_index)
+                cell.protection = (
+                    locked if column_index in locked_column_indexes else unlocked
+                )
+                if column_index in locked_column_indexes:
+                    cell.fill = id_fill
+        sheet.freeze_panes = "A2"
+        sheet.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{max(sheet.max_row, 1)}"
+        for index, width in enumerate(widths or [26] * len(headers), start=1):
+            sheet.column_dimensions[get_column_letter(index)].width = width
+        sheet.protection.sheet = True
+        sheet.protection.password = password
+        sheet.protection.selectLockedCells = False
+        sheet.protection.selectUnlockedCells = False
+        sheet.protection.formatCells = False
+        sheet.protection.formatColumns = False
+        sheet.protection.formatRows = False
+        sheet.protection.insertRows = False
+        sheet.protection.deleteRows = False
+        return sheet
+
+    assets = inventory["assets"]
+    systems = inventory["informationSystems"]
+    functions = inventory["criticalFunctions"]
+    asset_sheet = add_sheet(
+        "Actifs",
+        ["Clé actif", "ID actif", "Nom actif", "Type actif", "Criticité actif", "Description actif"],
+        [
+            [
+                str(asset["assetId"]),
+                str(asset["assetId"]),
+                str(asset.get("name") or ""),
+                str(asset.get("assetType") or ""),
+                str(asset.get("criticality") or ""),
+                str(asset.get("description") or ""),
+            ]
+            for asset in assets
+        ],
+        locked_columns={2},
+        widths=[38, 38, 36, 24, 18, 56],
+    )
+    criticality_validation = DataValidation(
+        type="list",
+        formula1='"1,2,3,4"',
+        allow_blank=False,
+        showErrorMessage=True,
+        errorTitle="Criticité invalide",
+        error="La criticité de l'actif doit être comprise entre 1 et 4.",
+    )
+    asset_sheet.add_data_validation(criticality_validation)
+    criticality_validation.add(f"E2:E{asset_sheet.max_row}")
+    add_sheet(
+        "SI",
+        [
+            "Clé SI",
+            "ID SI",
+            "Nom SI",
+            "Description SI",
+            "Prénom directeur",
+            "Nom directeur",
+            "Email directeur",
+        ],
+        [
+            [
+                str(system["systemId"]),
+                str(system["systemId"]),
+                str(system.get("name") or ""),
+                str(system.get("description") or ""),
+                str(system.get("ownerFirstName") or ""),
+                str(system.get("ownerLastName") or ""),
+                str(system.get("ownerEmail") or ""),
+            ]
+            for system in systems
+        ],
+        locked_columns={2},
+        widths=[38, 38, 36, 56, 24, 24, 36],
+    )
+    add_sheet(
+        "Fonctions critiques",
+        ["Clé fonction", "ID fonction", "Nom fonction", "Description fonction"],
+        [
+            [
+                str(function["functionId"]),
+                str(function["functionId"]),
+                str(function.get("name") or ""),
+                str(function.get("description") or ""),
+            ]
+            for function in functions
+        ],
+        locked_columns={2},
+        widths=[38, 38, 36, 56],
+    )
+    add_sheet(
+        "Actifs - SI",
+        ["Clé actif", "Clé SI"],
+        [
+            [str(asset["assetId"]), str(system_id)]
+            for asset in assets
+            for system_id in asset.get("systemIds") or []
+        ],
+        widths=[38, 38],
+    )
+    add_sheet(
+        "SI - Fonctions",
+        ["Clé SI", "Clé fonction"],
+        [
+            [str(system["systemId"]), str(function_id)]
+            for system in systems
+            for function_id in system.get("functionIds") or []
+        ],
+        widths=[38, 38],
+    )
+
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
 def _excel_norm(value: Any) -> str:
     return str(value or "").strip()
 
@@ -8833,6 +8986,51 @@ def _excel_rows(sheet: Any) -> list[dict[str, str]]:
             if not header:
                 continue
             item[header] = values[index] if index < len(values) else ""
+        result.append(item)
+    return result
+
+
+def _excel_rows_strict(
+    sheet: Any,
+    *,
+    required_headers: list[str],
+    allowed_headers: list[str],
+) -> list[dict[str, str]]:
+    rows = list(sheet.iter_rows(values_only=True))
+    if not rows:
+        raise HTTPException(status_code=400, detail=f"Feuille Excel vide: {sheet.title}")
+    headers = [_excel_header_key(cell) for cell in rows[0]]
+    normalized_required = {_excel_header_key(value) for value in required_headers}
+    normalized_allowed = {_excel_header_key(value) for value in allowed_headers}
+    present = {header for header in headers if header}
+    missing = sorted(normalized_required - present)
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Feuille {sheet.title}: colonne obligatoire absente: {missing[0]}",
+        )
+    unknown = sorted(present - normalized_allowed)
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Feuille {sheet.title}: en-tête inconnu: {unknown[0]}",
+        )
+    non_empty_headers = [header for header in headers if header]
+    if len(non_empty_headers) != len(set(non_empty_headers)):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Feuille {sheet.title}: en-tête dupliqué",
+        )
+    result: list[dict[str, str]] = []
+    for raw_row in rows[1:]:
+        values = [_excel_norm(cell) for cell in raw_row]
+        if not any(values):
+            continue
+        item = {
+            header: values[index] if index < len(values) else ""
+            for index, header in enumerate(headers)
+            if header
+        }
         result.append(item)
     return result
 
@@ -8939,6 +9137,338 @@ def _inventory_import_from_excel_bytes(con: Any, tenant_id: str, system_id: str,
             (tenant_id, system_id, asset_id, now),
         )
     return {"assets": len(assets)}
+
+
+def _inventory_graph_import_from_excel_bytes(
+    con: Any,
+    tenant_id: str,
+    raw: bytes,
+) -> dict[str, int]:
+    if not raw:
+        raise HTTPException(status_code=400, detail="Fichier Excel vide")
+    if len(raw) > INVENTORY_EXCEL_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="Fichier Excel trop volumineux pour l'import de la répartition",
+        )
+    _validate_inventory_xlsx_archive(raw)
+    openpyxl = _load_openpyxl()
+    try:
+        workbook = openpyxl.load_workbook(BytesIO(raw), data_only=True, read_only=True)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Fichier Excel illisible: {exc}") from exc
+    try:
+        asset_rows = _excel_rows_strict(
+            _excel_sheet(workbook, ["Actifs"]),
+            required_headers=["Clé actif", "ID actif", "Nom actif", "Criticité actif"],
+            allowed_headers=[
+                "Clé actif",
+                "ID actif",
+                "Nom actif",
+                "Type actif",
+                "Criticité actif",
+                "Description actif",
+            ],
+        )
+        system_rows = _excel_rows_strict(
+            _excel_sheet(workbook, ["SI"]),
+            required_headers=["Clé SI", "ID SI", "Nom SI"],
+            allowed_headers=[
+                "Clé SI",
+                "ID SI",
+                "Nom SI",
+                "Description SI",
+                "Prénom directeur",
+                "Nom directeur",
+                "Email directeur",
+            ],
+        )
+        function_rows = _excel_rows_strict(
+            _excel_sheet(workbook, ["Fonctions critiques"]),
+            required_headers=["Clé fonction", "ID fonction", "Nom fonction"],
+            allowed_headers=[
+                "Clé fonction",
+                "ID fonction",
+                "Nom fonction",
+                "Description fonction",
+            ],
+        )
+        asset_system_rows = _excel_rows_strict(
+            _excel_sheet(workbook, ["Actifs - SI"]),
+            required_headers=["Clé actif", "Clé SI"],
+            allowed_headers=["Clé actif", "Clé SI"],
+        )
+        system_function_rows = _excel_rows_strict(
+            _excel_sheet(workbook, ["SI - Fonctions"]),
+            required_headers=["Clé SI", "Clé fonction"],
+            allowed_headers=["Clé SI", "Clé fonction"],
+        )
+    finally:
+        workbook.close()
+
+    if len(asset_rows) + len(system_rows) + len(function_rows) > 20000:
+        raise HTTPException(status_code=413, detail="Le fichier Excel contient trop d'éléments")
+    if len(asset_system_rows) + len(system_function_rows) > 50000:
+        raise HTTPException(status_code=413, detail="Le fichier Excel contient trop de liaisons")
+
+    existing_asset_ids = {
+        str(row["asset_id"])
+        for row in con.execute(
+            "SELECT asset_id FROM information_assets WHERE tenant_id = ?",
+            (tenant_id,),
+        ).fetchall()
+    }
+    existing_system_ids = {
+        str(row["system_id"])
+        for row in con.execute(
+            "SELECT system_id FROM information_systems WHERE tenant_id = ?",
+            (tenant_id,),
+        ).fetchall()
+    }
+    existing_function_ids = {
+        str(row["function_id"])
+        for row in con.execute(
+            "SELECT function_id FROM critical_functions WHERE tenant_id = ?",
+            (tenant_id,),
+        ).fetchall()
+    }
+
+    def checked_id(raw_id: str, existing_ids: set[str], sheet_name: str, line: int) -> str:
+        if not raw_id:
+            return _new_uuid()
+        normalized = _normalize_uuid(raw_id)
+        if not normalized:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Feuille {sheet_name}, ligne {line}: identifiant invalide",
+            )
+        if normalized not in existing_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Feuille {sheet_name}, ligne {line}: identifiant inconnu dans cet espace. "
+                    "Pour créer un élément, laissez sa colonne ID vide."
+                ),
+            )
+        return normalized
+
+    def require_complete_catalog(
+        existing_ids: set[str],
+        imported_ids: set[str],
+        sheet_name: str,
+    ) -> None:
+        missing = existing_ids - imported_ids
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Feuille {sheet_name}: l'export complet doit conserver tous les éléments existants "
+                    f"({len(missing)} élément(s) absent(s))."
+                ),
+            )
+
+    assets: list[tuple[str, str, str, str, str, str]] = []
+    asset_ids_by_key: dict[str, str] = {}
+    imported_asset_ids: set[str] = set()
+    for line, row in enumerate(asset_rows, start=2):
+        asset_id = checked_id(
+            _excel_get(row, "ID actif"), existing_asset_ids, "Actifs", line
+        )
+        key = _inventory_text(_excel_get(row, "Clé actif"), 160) or asset_id
+        if key in asset_ids_by_key:
+            raise HTTPException(status_code=400, detail=f"Feuille Actifs, ligne {line}: clé actif dupliquée: {key}")
+        if asset_id in imported_asset_ids:
+            raise HTTPException(status_code=400, detail=f"Feuille Actifs, ligne {line}: ID actif dupliqué: {asset_id}")
+        name = _inventory_text(_excel_get(row, "Nom actif"), 255)
+        if not name:
+            raise HTTPException(status_code=400, detail=f"Feuille Actifs, ligne {line}: le nom de l'actif est obligatoire")
+        try:
+            criticality = _inventory_asset_criticality(_excel_get(row, "Criticité actif"))
+        except HTTPException as exc:
+            raise HTTPException(status_code=400, detail=f"Feuille Actifs, ligne {line}: {exc.detail}") from exc
+        asset_ids_by_key[key] = asset_id
+        imported_asset_ids.add(asset_id)
+        assets.append(
+            (
+                asset_id,
+                name,
+                _inventory_text(_excel_get(row, "Type actif"), 120),
+                criticality,
+                _inventory_text(_excel_get(row, "Description actif"), 4000),
+                key,
+            )
+        )
+    require_complete_catalog(existing_asset_ids, imported_asset_ids, "Actifs")
+
+    systems: list[tuple[str, str, str, str, str, str, str]] = []
+    system_ids_by_key: dict[str, str] = {}
+    imported_system_ids: set[str] = set()
+    for line, row in enumerate(system_rows, start=2):
+        system_id = checked_id(
+            _excel_get(row, "ID SI"), existing_system_ids, "SI", line
+        )
+        key = _inventory_text(_excel_get(row, "Clé SI"), 160) or system_id
+        if key in system_ids_by_key:
+            raise HTTPException(status_code=400, detail=f"Feuille SI, ligne {line}: clé SI dupliquée: {key}")
+        if system_id in imported_system_ids:
+            raise HTTPException(status_code=400, detail=f"Feuille SI, ligne {line}: ID SI dupliqué: {system_id}")
+        name = _inventory_text(_excel_get(row, "Nom SI"), 255)
+        if not name:
+            raise HTTPException(status_code=400, detail=f"Feuille SI, ligne {line}: le nom du SI est obligatoire")
+        try:
+            owner, first_name, last_name, email = _inventory_owner_fields(
+                {
+                    "ownerFirstName": _excel_get(row, "Prénom directeur"),
+                    "ownerLastName": _excel_get(row, "Nom directeur"),
+                    "ownerEmail": _excel_get(row, "Email directeur"),
+                }
+            )
+        except HTTPException as exc:
+            raise HTTPException(status_code=400, detail=f"Feuille SI, ligne {line}: {exc.detail}") from exc
+        system_ids_by_key[key] = system_id
+        imported_system_ids.add(system_id)
+        systems.append(
+            (
+                system_id,
+                name,
+                _inventory_text(_excel_get(row, "Description SI"), 4000),
+                owner,
+                first_name,
+                last_name,
+                email,
+            )
+        )
+    require_complete_catalog(existing_system_ids, imported_system_ids, "SI")
+
+    functions: list[tuple[str, str, str]] = []
+    function_ids_by_key: dict[str, str] = {}
+    imported_function_ids: set[str] = set()
+    for line, row in enumerate(function_rows, start=2):
+        function_id = checked_id(
+            _excel_get(row, "ID fonction"), existing_function_ids, "Fonctions critiques", line
+        )
+        key = _inventory_text(_excel_get(row, "Clé fonction"), 160) or function_id
+        if key in function_ids_by_key:
+            raise HTTPException(status_code=400, detail=f"Feuille Fonctions critiques, ligne {line}: clé fonction dupliquée: {key}")
+        if function_id in imported_function_ids:
+            raise HTTPException(status_code=400, detail=f"Feuille Fonctions critiques, ligne {line}: ID fonction dupliqué: {function_id}")
+        name = _inventory_text(_excel_get(row, "Nom fonction"), 255)
+        if not name:
+            raise HTTPException(status_code=400, detail=f"Feuille Fonctions critiques, ligne {line}: le nom est obligatoire")
+        function_ids_by_key[key] = function_id
+        imported_function_ids.add(function_id)
+        functions.append(
+            (
+                function_id,
+                name,
+                _inventory_text(_excel_get(row, "Description fonction"), 4000),
+            )
+        )
+    require_complete_catalog(existing_function_ids, imported_function_ids, "Fonctions critiques")
+
+    asset_system_links: list[tuple[str, str]] = []
+    used_asset_system_links: set[tuple[str, str]] = set()
+    for line, row in enumerate(asset_system_rows, start=2):
+        asset_key = _excel_get(row, "Clé actif")
+        system_key = _excel_get(row, "Clé SI")
+        if asset_key not in asset_ids_by_key or system_key not in system_ids_by_key:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Feuille Actifs - SI, ligne {line}: clé actif ou clé SI inconnue",
+            )
+        link = (asset_ids_by_key[asset_key], system_ids_by_key[system_key])
+        if link in used_asset_system_links:
+            raise HTTPException(status_code=400, detail=f"Feuille Actifs - SI, ligne {line}: liaison dupliquée")
+        used_asset_system_links.add(link)
+        asset_system_links.append(link)
+
+    system_function_links: list[tuple[str, str]] = []
+    used_system_function_links: set[tuple[str, str]] = set()
+    for line, row in enumerate(system_function_rows, start=2):
+        system_key = _excel_get(row, "Clé SI")
+        function_key = _excel_get(row, "Clé fonction")
+        if system_key not in system_ids_by_key or function_key not in function_ids_by_key:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Feuille SI - Fonctions, ligne {line}: clé SI ou clé fonction inconnue",
+            )
+        link = (system_ids_by_key[system_key], function_ids_by_key[function_key])
+        if link in used_system_function_links:
+            raise HTTPException(status_code=400, detail=f"Feuille SI - Fonctions, ligne {line}: liaison dupliquée")
+        used_system_function_links.add(link)
+        system_function_links.append(link)
+
+    now = _utc_now().isoformat()
+    for function_id, name, description in functions:
+        con.execute(
+            """
+            INSERT INTO critical_functions(tenant_id, function_id, name, description, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(tenant_id, function_id) DO UPDATE SET
+                name = excluded.name,
+                description = excluded.description,
+                updated_at = excluded.updated_at
+            """,
+            (tenant_id, function_id, name, description, now, now),
+        )
+    for system_id, name, description, owner, first_name, last_name, email in systems:
+        con.execute(
+            """
+            INSERT INTO information_systems(
+                tenant_id, system_id, function_id, name, description, owner,
+                owner_first_name, owner_last_name, owner_email, created_at, updated_at
+            ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(tenant_id, system_id) DO UPDATE SET
+                function_id = excluded.function_id,
+                name = excluded.name,
+                description = excluded.description,
+                owner = excluded.owner,
+                owner_first_name = excluded.owner_first_name,
+                owner_last_name = excluded.owner_last_name,
+                owner_email = excluded.owner_email,
+                updated_at = excluded.updated_at
+            """,
+            (tenant_id, system_id, name, description, owner, first_name, last_name, email, now, now),
+        )
+    for asset_id, name, asset_type, criticality, description, _ in assets:
+        con.execute(
+            """
+            INSERT INTO information_assets(
+                tenant_id, asset_id, system_id, name, asset_type, description,
+                criticality, created_at, updated_at
+            ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(tenant_id, asset_id) DO UPDATE SET
+                system_id = excluded.system_id,
+                name = excluded.name,
+                asset_type = excluded.asset_type,
+                description = excluded.description,
+                criticality = excluded.criticality,
+                updated_at = excluded.updated_at
+            """,
+            (tenant_id, asset_id, name, asset_type, description, criticality, now, now),
+        )
+    con.execute("DELETE FROM information_system_assets WHERE tenant_id = ?", (tenant_id,))
+    con.execute("DELETE FROM critical_function_systems WHERE tenant_id = ?", (tenant_id,))
+    for asset_id, system_id in asset_system_links:
+        con.execute(
+            "INSERT INTO information_system_assets(tenant_id, system_id, asset_id, created_at) VALUES (?, ?, ?, ?)",
+            (tenant_id, system_id, asset_id, now),
+        )
+    for system_id, function_id in system_function_links:
+        con.execute(
+            "INSERT INTO critical_function_systems(tenant_id, function_id, system_id, created_at) VALUES (?, ?, ?, ?)",
+            (tenant_id, function_id, system_id, now),
+        )
+    return {
+        "assets": len(assets),
+        "informationSystems": len(systems),
+        "criticalFunctions": len(functions),
+        "assetSystemLinks": len(asset_system_links),
+        "systemFunctionLinks": len(system_function_links),
+        "createdAssets": len(imported_asset_ids - existing_asset_ids),
+        "createdInformationSystems": len(imported_system_ids - existing_system_ids),
+        "createdCriticalFunctions": len(imported_function_ids - existing_function_ids),
+    }
 
 
 def _require_function(con: Any, tenant_id: str, function_id: str) -> None:
@@ -9089,6 +9619,66 @@ async def asset_inventory_import_excel(
             )
             result = _inventory_payload(con, tenant_id)
             result["message"] = f"Actifs importés pour le SI: {counts['assets']} actif(s)."
+            result["importCounts"] = counts
+    return result
+
+
+@app.get("/inventory/graph/export.xlsx")
+def asset_inventory_graph_export_excel(
+    request: Request,
+    tenantId: str = Query(default=DEFAULT_TENANT_ID, min_length=1, max_length=80),
+) -> StreamingResponse:
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
+    _require_campaign_manager_authorization(request, tenant_id)
+    with _db() as con:
+        _ensure_tenant(con, tenant_id)
+        raw = _inventory_graph_to_excel_bytes(con, tenant_id)
+        con.commit()
+    export_date = _utc_now().strftime("%Y%m%d")
+    filename = f"{export_date}_openirn_export.xlsx"
+    return StreamingResponse(
+        BytesIO(raw),
+        media_type=INVENTORY_EXCEL_MIME,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/inventory/graph/import.xlsx")
+async def asset_inventory_graph_import_excel(
+    request: Request,
+    tenantId: str = Query(default=DEFAULT_TENANT_ID, min_length=1, max_length=80),
+    mode: str = Query(default="replace-relations"),
+) -> dict[str, Any]:
+    if mode.strip().lower() != "replace-relations":
+        raise HTTPException(
+            status_code=400,
+            detail="Seul le mode replace-relations est supporté pour l'import de la répartition",
+        )
+    tenant_id = _resolve_tenant_id_for_request(tenantId, DEFAULT_TENANT_ID)
+    auth_context = _require_campaign_manager_authorization(request, tenant_id)
+    raw = await request.body()
+    with _db() as con:
+        with con:
+            _ensure_tenant(con, tenant_id)
+            counts = _inventory_graph_import_from_excel_bytes(con, tenant_id, raw)
+            _record_device_audit(
+                con,
+                tenant_id,
+                "inventory.graph.excel.imported",
+                device_id=str(auth_context.get("deviceId") or ""),
+                payload={
+                    "mode": mode,
+                    "counts": counts,
+                    "actorUserId": auth_context.get("userId") or "",
+                },
+            )
+            result = _inventory_payload(con, tenant_id)
+            result["message"] = (
+                "Répartition importée: "
+                f"{counts['assets']} actif(s), "
+                f"{counts['informationSystems']} SI et "
+                f"{counts['criticalFunctions']} fonction(s) critique(s)."
+            )
             result["importCounts"] = counts
     return result
 

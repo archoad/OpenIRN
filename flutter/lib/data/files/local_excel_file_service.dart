@@ -25,6 +25,7 @@ class LocalExcelFileService {
   Future<String?> saveExcel({
     required Uint8List bytes,
     required String suggestedName,
+    String confirmButtonText = 'Enregistrer',
   }) async {
     final fileName = _ensureExcelExtension(suggestedName);
     debugPrint('[OpenIRN] Opening Excel save dialog for $fileName');
@@ -32,7 +33,7 @@ class LocalExcelFileService {
     final location = await getSaveLocation(
       suggestedName: fileName,
       acceptedTypeGroups: const <XTypeGroup>[_excelTypeGroup],
-      confirmButtonText: 'Enregistrer',
+      confirmButtonText: confirmButtonText,
     );
     if (location == null) {
       debugPrint('[OpenIRN] Excel save dialog cancelled');
@@ -58,11 +59,13 @@ class LocalExcelFileService {
     return path;
   }
 
-  Future<LocalExcelFile?> pickExcel() async {
+  Future<LocalExcelFile?> pickExcel({
+    String confirmButtonText = 'Importer',
+  }) async {
     debugPrint('[OpenIRN] Opening Excel file picker');
     final file = await openFile(
       acceptedTypeGroups: const <XTypeGroup>[_excelTypeGroup],
-      confirmButtonText: 'Importer',
+      confirmButtonText: confirmButtonText,
     );
     if (file == null) {
       debugPrint('[OpenIRN] Excel open dialog cancelled');

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../data/api/openirn_api_client.dart';
+import '../../data/files/local_excel_file_service.dart';
 import '../../data/repositories/local_sync_configuration_repository.dart';
 import '../../domain/models/app_user.dart';
 import '../../domain/models/irn_asset_inventory.dart';
@@ -28,6 +29,7 @@ class _AssetInventoryManagementScreenState
     extends State<AssetInventoryManagementScreen> {
   final _configurationRepository = const LocalSyncConfigurationRepository();
   final _apiClient = const OpenIrnApiClient();
+  final _excelFileService = const LocalExcelFileService();
   final _accessPolicy = const AccessPolicyService();
 
   late Future<_InventoryStateData> _future;
@@ -109,6 +111,101 @@ class _AssetInventoryManagementScreenState
         });
       }
     }
+  }
+
+  Future<void> _exportInventoryGraph(_InventoryStateData state) async {
+    setState(() {
+      _working = true;
+    });
+    try {
+      final result = await _apiClient.exportInventoryGraphExcel(
+        baseUrl: state.configuration.apiBaseUrl,
+        tenantId: state.configuration.tenantId,
+        apiToken: state.configuration.apiToken,
+      );
+      if (!mounted) {
+        return;
+      }
+      if (!result.isAvailable || result.bytes == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${context.trText(result.title)} — ${context.trText(result.message)}',
+            ),
+          ),
+        );
+        return;
+      }
+      final path = await _excelFileService.saveExcel(
+        bytes: result.bytes!,
+        suggestedName: result.suggestedFileName,
+        confirmButtonText: context.tr('action.save'),
+      );
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            path == null
+                ? context.tr('inventory.graph_excel.export_cancelled')
+                : context.tr(
+                    'inventory.graph_excel.export_success',
+                    values: {'path': path},
+                  ),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _working = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _importInventoryGraph(_InventoryStateData state) async {
+    final file = await _excelFileService.pickExcel(
+      confirmButtonText: context.tr('inventory.graph_excel.action.import'),
+    );
+    if (file == null || !mounted) {
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(context.tr('inventory.graph_excel.import.title')),
+        content: Text(
+          context.tr(
+            'inventory.graph_excel.import.message',
+            values: {'file': file.name},
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(context.tr('action.cancel')),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(context).pop(true),
+            icon: const Icon(Icons.upload_file_outlined),
+            label: Text(context.tr('inventory.graph_excel.action.import')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
+    await _applyResult(
+      _apiClient.importInventoryGraphExcel(
+        baseUrl: state.configuration.apiBaseUrl,
+        tenantId: state.configuration.tenantId,
+        apiToken: state.configuration.apiToken,
+        bytes: file.bytes,
+      ),
+    );
   }
 
   Future<void> _createFunction(_InventoryStateData state) async {
@@ -554,6 +651,8 @@ class _AssetInventoryManagementScreenState
             onCreateAsset: () => _createAsset(state),
             onEditAsset: (asset) => _editAsset(state, asset),
             onDeleteAsset: (asset) => _deleteAsset(state, asset),
+            onExportInventoryGraph: () => _exportInventoryGraph(state),
+            onImportInventoryGraph: () => _importInventoryGraph(state),
           );
         },
       ),
@@ -595,6 +694,8 @@ class _InventoryContent extends StatelessWidget {
   final VoidCallback onCreateAsset;
   final ValueChanged<InformationAssetInfo> onEditAsset;
   final ValueChanged<InformationAssetInfo> onDeleteAsset;
+  final VoidCallback onExportInventoryGraph;
+  final VoidCallback onImportInventoryGraph;
 
   const _InventoryContent({
     required this.state,
@@ -614,6 +715,8 @@ class _InventoryContent extends StatelessWidget {
     required this.onCreateAsset,
     required this.onEditAsset,
     required this.onDeleteAsset,
+    required this.onExportInventoryGraph,
+    required this.onImportInventoryGraph,
   });
 
   @override
@@ -734,6 +837,12 @@ class _InventoryContent extends StatelessWidget {
                   },
                 ),
               ),
+            ),
+            const SizedBox(height: 12),
+            _InventoryExcelCard(
+              working: working,
+              onExport: onExportInventoryGraph,
+              onImport: onImportInventoryGraph,
             ),
             const SizedBox(height: 12),
             _InventorySection(
@@ -930,6 +1039,80 @@ String _assetCriticalityLabel(BuildContext context, String value) {
       return context.tr('inventory.asset.criticality.n4');
   }
   return context.tr('inventory.asset.criticality.missing');
+}
+
+class _InventoryExcelCard extends StatelessWidget {
+  final bool working;
+  final VoidCallback onExport;
+  final VoidCallback onImport;
+
+  const _InventoryExcelCard({
+    required this.working,
+    required this.onExport,
+    required this.onImport,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final buttons = Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: [
+        OutlinedButton.icon(
+          onPressed: working ? null : onExport,
+          icon: const Icon(Icons.download_outlined),
+          label: Text(context.tr('inventory.graph_excel.action.export')),
+        ),
+        FilledButton.icon(
+          onPressed: working ? null : onImport,
+          icon: const Icon(Icons.upload_file_outlined),
+          label: Text(context.tr('inventory.graph_excel.action.import')),
+        ),
+      ],
+    );
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final details = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.table_view_outlined),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        context.tr('inventory.graph_excel.title'),
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(context.tr('inventory.graph_excel.description')),
+              ],
+            );
+            if (constraints.maxWidth < 760) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [details, const SizedBox(height: 14), buttons],
+              );
+            }
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(child: details),
+                const SizedBox(width: 18),
+                buttons,
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
 }
 
 class _InventorySection extends StatelessWidget {

@@ -3106,6 +3106,157 @@ class OpenIrnApiClient {
     );
   }
 
+  Future<OpenIrnApiInventoryExcelResult> exportInventoryGraphExcel({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final uri = Uri.parse(
+      '$normalizedBaseUrl/inventory/graph/export.xlsx',
+    ).replace(queryParameters: <String, String>{'tenantId': safeTenantId});
+    try {
+      final response = await _getBytes(uri, bearerToken: apiToken);
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return OpenIrnApiInventoryExcelResult(
+          status: OpenIrnApiDevicesStatus.available,
+          url: uri.toString(),
+          statusCode: response.statusCode,
+          title: 'Export Excel prêt',
+          message: 'Répartition complète exportée au format Excel.',
+          tenantId: safeTenantId,
+          bytes: response.bytes,
+          suggestedFileName:
+              _contentDispositionFileName(response.headers) ??
+              _inventoryGraphExcelFileName(),
+        );
+      }
+      final decodedBody = _decodeJsonObject(response.bodyText);
+      return OpenIrnApiInventoryExcelResult(
+        status: OpenIrnApiDevicesStatus.rejected,
+        url: uri.toString(),
+        statusCode: response.statusCode,
+        title: 'Export Excel refusé',
+        message:
+            decodedBody?['detail']?.toString() ??
+            'Le serveur a répondu avec le statut HTTP ${response.statusCode}.',
+        tenantId: safeTenantId,
+        responseBody: decodedBody,
+      );
+    } on TimeoutException {
+      return _inventoryExcelNetworkError(
+        uri,
+        safeTenantId,
+        'Délai dépassé',
+        'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+      );
+    } on SocketException catch (error) {
+      return _inventoryExcelNetworkError(
+        uri,
+        safeTenantId,
+        'Serveur injoignable',
+        error.message,
+      );
+    } on HandshakeException catch (error) {
+      return _inventoryExcelNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur TLS',
+        error.message,
+      );
+    } on FormatException catch (error) {
+      return _inventoryExcelNetworkError(
+        uri,
+        safeTenantId,
+        'Adresse serveur invalide',
+        error.message,
+      );
+    } on HttpException catch (error) {
+      return _inventoryExcelNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur HTTP',
+        error.message,
+      );
+    }
+  }
+
+  Future<OpenIrnApiInventoryResult> importInventoryGraphExcel({
+    String? baseUrl,
+    required String tenantId,
+    String apiToken = '',
+    required Uint8List bytes,
+  }) async {
+    final normalizedBaseUrl = SyncConfiguration.normalizeApiBaseUrl(
+      baseUrl ?? SyncConfiguration.fixedApiBaseUrl,
+    );
+    final safeTenantId = tenantId.trim().isEmpty
+        ? SyncConfiguration.defaultTenantId
+        : tenantId.trim();
+    final uri = Uri.parse('$normalizedBaseUrl/inventory/graph/import.xlsx')
+        .replace(
+          queryParameters: <String, String>{
+            'tenantId': safeTenantId,
+            'mode': 'replace-relations',
+          },
+        );
+    try {
+      final response = await _postBytes(
+        uri,
+        bytes,
+        bearerToken: apiToken,
+        contentType:
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      );
+      return _inventoryResultFromResponse(
+        response,
+        uri,
+        safeTenantId,
+        successTitle: 'Répartition Excel importée',
+      );
+    } on TimeoutException {
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Délai dépassé',
+        'Le serveur n’a pas répondu en ${timeout.inSeconds} secondes.',
+      );
+    } on SocketException catch (error) {
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Serveur injoignable',
+        error.message,
+      );
+    } on HandshakeException catch (error) {
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur TLS',
+        error.message,
+      );
+    } on FormatException catch (error) {
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Adresse serveur invalide',
+        error.message,
+      );
+    } on HttpException catch (error) {
+      return _inventoryNetworkError(
+        uri,
+        safeTenantId,
+        'Erreur HTTP',
+        error.message,
+      );
+    }
+  }
+
   Future<OpenIrnApiInventoryExcelResult> exportAssetInventoryExcel({
     String? baseUrl,
     required String tenantId,
@@ -3532,6 +3683,12 @@ class OpenIrnApiClient {
     String two(int value) => value.toString().padLeft(2, '0');
     final safeTenant = tenantId.replaceAll(RegExp(r'[^a-zA-Z0-9_.-]+'), '_');
     return 'openirn_inventaire_si_${safeTenant}_${timestamp.year}${two(timestamp.month)}${two(timestamp.day)}_${two(timestamp.hour)}${two(timestamp.minute)}.xlsx';
+  }
+
+  String _inventoryGraphExcelFileName() {
+    final date = DateTime.now().toLocal();
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '${date.year}${two(date.month)}${two(date.day)}_openirn_export.xlsx';
   }
 
   String? _contentDispositionFileName(Map<String, List<String>> headers) {
