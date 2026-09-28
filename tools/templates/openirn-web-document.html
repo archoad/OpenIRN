@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="$lang$">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="description" content="$if(subtitle)$$subtitle$$else$Documentation OpenIRN$endif$">
+	<meta name="robots" content="index,follow">
+	<meta name="referrer" content="strict-origin-when-cross-origin">
+	<meta name="theme-color" content="#596e79">
+	<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
+	<title>$if(title)$$title$ — $endif$OpenIRN</title>
+	<link rel="stylesheet" href="$asset_prefix$assets/site.css">
+	<script src="$asset_prefix$assets/site.js" defer></script>
+</head>
+<body>
+	<a class="skip-link" href="#contenu">$if(is_english)$Skip to content$else$Aller au contenu$endif$</a>
+	<header class="site-header">
+		<nav class="site-nav" aria-label="$if(is_english)$Main navigation$else$Navigation principale$endif$">
+			<a class="brand" href="$asset_prefix$index.html" aria-label="OpenIRN — $if(is_english)$Home$else$Accueil$endif$">
+				<span class="brand-mark" aria-hidden="true">IRN</span>
+				<span>OpenIRN</span>
+			</a>
+			<button class="nav-toggle" type="button" aria-expanded="false" aria-controls="navigation" data-nav-toggle>Menu</button>
+			<div class="nav-links" id="navigation" data-nav-links>
+				<a href="$asset_prefix$index.html#methode">$if(is_english)$Method$else$Méthode$endif$</a>
+				<a href="$asset_prefix$index.html#fonctionnalites">$if(is_english)$Features$else$Fonctionnalités$endif$</a>
+				<a href="$asset_prefix$documentation.html" aria-current="page">Documentation</a>
+				<a href="$asset_prefix$index.html#telecharger">$if(is_english)$Download$else$Télécharger$endif$</a>
+			</div>
+		</nav>
+	</header>
+
+	<main id="contenu" class="generated-doc-layout">
+		$if(toc)$
+		<aside class="doc-toc" aria-label="$if(is_english)$Table of contents$else$Sommaire$endif$">
+			<strong>$if(is_english)$On this page$else$Dans cette page$endif$</strong>
+			$toc$
+		</aside>
+		$endif$
+		<article class="document">
+			<header class="document-header">
+				<p class="eyebrow">Documentation OpenIRN</p>
+				<h1>$if(title)$$title$$else$Documentation OpenIRN$endif$</h1>
+				$if(subtitle)$<p>$subtitle$</p>$endif$
+			</header>
+			<div class="document-body">
+				$body$
+			</div>
+			<footer class="document-actions">
+				<a class="button" href="$asset_prefix$documentation.html">← $if(is_english)$All documentation$else$Toute la documentation$endif$</a>
+				<a class="button" href="$source_url$" target="_blank" rel="noopener noreferrer">$if(is_english)$View Markdown source$else$Voir la source Markdown$endif$ ↗</a>
+			</footer>
+		</article>
+	</main>
+
+	<footer class="site-footer">
+		<div class="container footer-meta">
+			<span>OpenIRN — Archoad</span>
+			<span><a href="$asset_prefix$support.html">$if(is_english)$Support$else$Assistance$endif$</a> · <a href="$asset_prefix$privacy.html">$if(is_english)$Privacy$else$Confidentialité$endif$</a></span>
+		</div>
+	</footer>
+</body>
+</html>
