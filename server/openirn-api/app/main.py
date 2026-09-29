@@ -8635,6 +8635,7 @@ def _inventory_payload(con: Any, tenant_id: str) -> dict[str, Any]:
 
 INVENTORY_EXCEL_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 INVENTORY_EXCEL_MAX_BYTES = MAX_INVENTORY_XLSX_BODY_BYTES
+INVENTORY_EXCEL_KEY_MAX_LENGTH = 160
 
 
 def _validate_inventory_xlsx_archive(raw: bytes) -> None:
@@ -8684,6 +8685,16 @@ def _inventory_excel_safe_name(value: str) -> str:
     return cleaned[:80] or "inventaire"
 
 
+def _excel_append_literal_row(sheet: Any, values: list[Any]) -> int:
+    """Append user-controlled values as literal text, never as formulas."""
+    row_index = sheet.max_row + 1
+    for column_index, value in enumerate(values, start=1):
+        cell = sheet.cell(row=row_index, column=column_index)
+        cell.value = "" if value is None else str(value)
+        cell.data_type = "s"
+    return row_index
+
+
 def _inventory_system_export_context(con: Any, tenant_id: str, system_id: str) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
     inventory = _inventory_payload(con, tenant_id)
     system = next((item for item in inventory["informationSystems"] if item["systemId"] == system_id), None)
@@ -8723,8 +8734,10 @@ def _inventory_to_excel_bytes(con: Any, tenant_id: str, system_id: str) -> bytes
         cell.protection = locked
 
     def append_asset_row(asset_id: str = "", name: str = "", asset_type: str = "", criticality: str = "", description: str = "") -> None:
-        sheet.append([asset_id, name, asset_type, criticality, description])
-        row_index = sheet.max_row
+        row_index = _excel_append_literal_row(
+            sheet,
+            [asset_id, name, asset_type, criticality, description],
+        )
         for col_index in range(1, len(headers) + 1):
             cell = sheet.cell(row=row_index, column=col_index)
             if col_index == 1:
@@ -8792,6 +8805,7 @@ def _inventory_to_excel_bytes(con: Any, tenant_id: str, system_id: str) -> bytes
 
 def _inventory_graph_to_excel_bytes(con: Any, tenant_id: str) -> bytes:
     openpyxl = _load_openpyxl()
+    from openpyxl.comments import Comment
     from openpyxl.styles import Font, PatternFill, Protection
     from openpyxl.utils import get_column_letter
     from openpyxl.worksheet.datavalidation import DataValidation
@@ -8812,16 +8826,22 @@ def _inventory_graph_to_excel_bytes(con: Any, tenant_id: str) -> bytes:
         *,
         locked_columns: set[int] | None = None,
         widths: list[int] | None = None,
+        header_comments: dict[int, str] | None = None,
+        formula_columns: dict[int, str] | None = None,
     ) -> Any:
         sheet = workbook.create_sheet(title)
         locked_column_indexes = locked_columns or set()
+        formula_templates = formula_columns or {}
         sheet.append(headers)
-        for cell in sheet[1]:
+        for column_index, cell in enumerate(sheet[1], start=1):
             cell.font = Font(bold=True)
             cell.fill = header_fill
             cell.protection = locked
+            comment_text = (header_comments or {}).get(column_index)
+            if comment_text:
+                cell.comment = Comment(comment_text, "OpenIRN")
         for values in rows:
-            sheet.append(values)
+            _excel_append_literal_row(sheet, values)
         template_last_row = max(sheet.max_row + 100, 201)
         for row_index in range(2, template_last_row + 1):
             for column_index in range(1, len(headers) + 1):
@@ -8831,6 +8851,9 @@ def _inventory_graph_to_excel_bytes(con: Any, tenant_id: str) -> bytes:
                 )
                 if column_index in locked_column_indexes:
                     cell.fill = id_fill
+                template = formula_templates.get(column_index)
+                if template is not None:
+                    cell.value = template.format(row=row_index)
         sheet.freeze_panes = "A2"
         sheet.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{max(sheet.max_row, 1)}"
         for index, width in enumerate(widths or [26] * len(headers), start=1):
@@ -8844,27 +8867,79 @@ def _inventory_graph_to_excel_bytes(con: Any, tenant_id: str) -> bytes:
         sheet.protection.formatRows = False
         sheet.protection.insertRows = False
         sheet.protection.deleteRows = False
-        return sheet
+        return sheet, template_last_row
+
+    def add_overview_sheet(
+        title: str,
+        headers: list[str],
+        rows: list[list[str]],
+        *,
+        widths: list[int] | None = None,
+    ) -> None:
+        sheet = workbook.create_sheet(title)
+        sheet.append(headers)
+        for cell in sheet[1]:
+            cell.font = Font(bold=True)
+            cell.fill = header_fill
+        for values in rows:
+            _excel_append_literal_row(sheet, values)
+        sheet.freeze_panes = "A2"
+        sheet.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{max(sheet.max_row, 1)}"
+        for index, width in enumerate(widths or [30] * len(headers), start=1):
+            sheet.column_dimensions[get_column_letter(index)].width = width
+        sheet.protection.sheet = True
+        sheet.protection.password = password
+        sheet.protection.selectLockedCells = False
 
     assets = inventory["assets"]
     systems = inventory["informationSystems"]
     functions = inventory["criticalFunctions"]
-    asset_sheet = add_sheet(
+
+    used_keys: set[str] = set()
+    asset_keys = {
+        str(asset["assetId"]): _excel_friendly_key(
+            str(asset.get("name") or ""), str(asset["assetId"])[:8], used_keys
+        )
+        for asset in assets
+    }
+    system_keys = {
+        str(system["systemId"]): _excel_friendly_key(
+            str(system.get("name") or ""), str(system["systemId"])[:8], used_keys
+        )
+        for system in systems
+    }
+    function_keys = {
+        str(function["functionId"]): _excel_friendly_key(
+            str(function.get("name") or ""), str(function["functionId"])[:8], used_keys
+        )
+        for function in functions
+    }
+    system_names = {str(system["systemId"]): str(system.get("name") or "") for system in systems}
+    function_names = {str(function["functionId"]): str(function.get("name") or "") for function in functions}
+
+    id_comment = "Identifiant technique unique (UUID) : ne pas modifier."
+    key_comment = (
+        "Clé de liaison utilisée dans les feuilles de rattachement. "
+        "Peut être personnalisée pour rester lisible."
+    )
+
+    asset_sheet, asset_last_row = add_sheet(
         "Actifs",
-        ["Clé actif", "ID actif", "Nom actif", "Type actif", "Criticité actif", "Description actif"],
+        ["Clé actif", "Nom actif", "Type actif", "Criticité actif", "Description actif", "ID actif"],
         [
             [
-                str(asset["assetId"]),
-                str(asset["assetId"]),
+                asset_keys[str(asset["assetId"])],
                 str(asset.get("name") or ""),
                 str(asset.get("assetType") or ""),
                 str(asset.get("criticality") or ""),
                 str(asset.get("description") or ""),
+                str(asset["assetId"]),
             ]
             for asset in assets
         ],
-        locked_columns={2},
-        widths=[38, 38, 36, 24, 18, 56],
+        locked_columns={6},
+        widths=[24, 36, 24, 18, 56, 38],
+        header_comments={1: key_comment, 6: id_comment},
     )
     criticality_validation = DataValidation(
         type="list",
@@ -8875,67 +8950,158 @@ def _inventory_graph_to_excel_bytes(con: Any, tenant_id: str) -> bytes:
         error="La criticité de l'actif doit être comprise entre 1 et 4.",
     )
     asset_sheet.add_data_validation(criticality_validation)
-    criticality_validation.add(f"E2:E{asset_sheet.max_row}")
-    add_sheet(
+    criticality_validation.add(f"D2:D{asset_sheet.max_row}")
+
+    system_sheet, system_last_row = add_sheet(
         "SI",
         [
             "Clé SI",
-            "ID SI",
             "Nom SI",
             "Description SI",
             "Prénom directeur",
             "Nom directeur",
             "Email directeur",
+            "ID SI",
         ],
         [
             [
-                str(system["systemId"]),
-                str(system["systemId"]),
+                system_keys[str(system["systemId"])],
                 str(system.get("name") or ""),
                 str(system.get("description") or ""),
                 str(system.get("ownerFirstName") or ""),
                 str(system.get("ownerLastName") or ""),
                 str(system.get("ownerEmail") or ""),
+                str(system["systemId"]),
             ]
             for system in systems
         ],
-        locked_columns={2},
-        widths=[38, 38, 36, 56, 24, 24, 36],
+        locked_columns={7},
+        widths=[24, 36, 56, 24, 24, 36, 38],
+        header_comments={1: key_comment, 7: id_comment},
     )
-    add_sheet(
+
+    function_sheet, function_last_row = add_sheet(
         "Fonctions critiques",
-        ["Clé fonction", "ID fonction", "Nom fonction", "Description fonction"],
+        ["Clé fonction", "Nom fonction", "Description fonction", "ID fonction"],
         [
             [
-                str(function["functionId"]),
-                str(function["functionId"]),
+                function_keys[str(function["functionId"])],
                 str(function.get("name") or ""),
                 str(function.get("description") or ""),
+                str(function["functionId"]),
             ]
             for function in functions
         ],
-        locked_columns={2},
-        widths=[38, 38, 36, 56],
+        locked_columns={4},
+        widths=[24, 36, 56, 38],
+        header_comments={1: key_comment, 4: id_comment},
     )
-    add_sheet(
+
+    key_input_message = (
+        "Choisissez une clé existante dans la liste, ou saisissez une nouvelle "
+        "clé pour la relier à un élément créé sur cette même feuille d'import."
+    )
+
+    def key_validation(sheet_title: str, last_row: int, *, title: str) -> "DataValidation":
+        validation = DataValidation(
+            type="list",
+            formula1=f"'{sheet_title}'!$A$2:$A${last_row}",
+            allow_blank=True,
+            showInputMessage=True,
+            promptTitle=title,
+            prompt=key_input_message,
+        )
+        return validation
+
+    asset_system_rows = [
+        [asset_keys[str(asset["assetId"])], system_keys[str(system_id)]]
+        for asset in assets
+        for system_id in asset.get("systemIds") or []
+    ]
+    asset_system_sheet, _ = add_sheet(
         "Actifs - SI",
-        ["Clé actif", "Clé SI"],
-        [
-            [str(asset["assetId"]), str(system_id)]
-            for asset in assets
-            for system_id in asset.get("systemIds") or []
-        ],
-        widths=[38, 38],
+        ["Clé actif", "Clé SI", "Nom actif", "Nom SI"],
+        asset_system_rows,
+        locked_columns={3, 4},
+        widths=[24, 24, 36, 36],
+        header_comments={1: "Clé actif — voir la feuille Actifs.", 2: "Clé SI — voir la feuille SI."},
+        formula_columns={
+            3: "=IFERROR(VLOOKUP($A{row},'Actifs'!$A:$B,2,FALSE),\"\")",
+            4: "=IFERROR(VLOOKUP($B{row},'SI'!$A:$B,2,FALSE),\"\")",
+        },
     )
-    add_sheet(
+    asset_key_validation = key_validation("Actifs", asset_last_row, title="Clé actif")
+    asset_system_sheet.add_data_validation(asset_key_validation)
+    asset_key_validation.add(f"A2:A{asset_system_sheet.max_row}")
+    asset_system_key_validation = key_validation("SI", system_last_row, title="Clé SI")
+    asset_system_sheet.add_data_validation(asset_system_key_validation)
+    asset_system_key_validation.add(f"B2:B{asset_system_sheet.max_row}")
+
+    system_function_rows = [
+        [system_keys[str(system["systemId"])], function_keys[str(function_id)]]
+        for system in systems
+        for function_id in system.get("functionIds") or []
+    ]
+    system_function_sheet, _ = add_sheet(
         "SI - Fonctions",
-        ["Clé SI", "Clé fonction"],
+        ["Clé SI", "Clé fonction", "Nom SI", "Nom fonction"],
+        system_function_rows,
+        locked_columns={3, 4},
+        widths=[24, 24, 36, 36],
+        header_comments={1: "Clé SI — voir la feuille SI.", 2: "Clé fonction — voir la feuille Fonctions critiques."},
+        formula_columns={
+            3: "=IFERROR(VLOOKUP($A{row},'SI'!$A:$B,2,FALSE),\"\")",
+            4: "=IFERROR(VLOOKUP($B{row},'Fonctions critiques'!$A:$B,2,FALSE),\"\")",
+        },
+    )
+    system_key_validation = key_validation("SI", system_last_row, title="Clé SI")
+    system_function_sheet.add_data_validation(system_key_validation)
+    system_key_validation.add(f"A2:A{system_function_sheet.max_row}")
+    function_key_validation = key_validation(
+        "Fonctions critiques", function_last_row, title="Clé fonction"
+    )
+    system_function_sheet.add_data_validation(function_key_validation)
+    function_key_validation.add(f"B2:B{system_function_sheet.max_row}")
+
+    add_overview_sheet(
+        "Aperçu actifs",
+        ["Nom actif", "Type actif", "Criticité actif", "SI associés"],
         [
-            [str(system["systemId"]), str(function_id)]
-            for system in systems
-            for function_id in system.get("functionIds") or []
+            [
+                str(asset.get("name") or ""),
+                str(asset.get("assetType") or ""),
+                str(asset.get("criticality") or ""),
+                ", ".join(
+                    system_names.get(str(system_id), str(system_id))
+                    for system_id in asset.get("systemIds") or []
+                ),
+            ]
+            for asset in assets
         ],
-        widths=[38, 38],
+        widths=[36, 24, 18, 56],
+    )
+    add_overview_sheet(
+        "Aperçu SI",
+        ["Nom SI", "Directeur", "Fonctions critiques associées"],
+        [
+            [
+                str(system.get("name") or ""),
+                " ".join(
+                    part
+                    for part in [
+                        str(system.get("ownerFirstName") or ""),
+                        str(system.get("ownerLastName") or ""),
+                    ]
+                    if part
+                ),
+                ", ".join(
+                    function_names.get(str(function_id), str(function_id))
+                    for function_id in system.get("functionIds") or []
+                ),
+            ]
+            for system in systems
+        ],
+        widths=[36, 30, 56],
     )
 
     output = BytesIO()
@@ -8947,7 +9113,7 @@ def _excel_norm(value: Any) -> str:
     return str(value or "").strip()
 
 
-def _excel_header_key(value: Any) -> str:
+def _excel_ascii_fold(value: Any) -> str:
     text = _excel_norm(value).lower()
     replacements = {
         "é": "e", "è": "e", "ê": "e", "ë": "e",
@@ -8960,7 +9126,33 @@ def _excel_header_key(value: Any) -> str:
     }
     for old, new in replacements.items():
         text = text.replace(old, new)
-    return re.sub(r"[^a-z0-9]+", "_", text).strip("_")
+    return text
+
+
+def _excel_header_key(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", _excel_ascii_fold(value)).strip("_")
+
+
+def _excel_friendly_key(name: str, fallback: str, used_keys: set[str]) -> str:
+    """Human-readable slug for a business key, deduplicated within one export."""
+    raw_base = (
+        re.sub(r"[^a-z0-9]+", "-", _excel_ascii_fold(name)).strip("-")
+        or fallback
+    )
+    base = raw_base[:INVENTORY_EXCEL_KEY_MAX_LENGTH].rstrip("-")
+    if not base:
+        base = fallback[:INVENTORY_EXCEL_KEY_MAX_LENGTH]
+    candidate = base
+    suffix = 2
+    while candidate in used_keys:
+        suffix_text = f"-{suffix}"
+        prefix = base[: INVENTORY_EXCEL_KEY_MAX_LENGTH - len(suffix_text)].rstrip(
+            "-"
+        )
+        candidate = f"{prefix}{suffix_text}"
+        suffix += 1
+    used_keys.add(candidate)
+    return candidate
 
 
 def _excel_sheet(workbook: Any, names: list[str]) -> Any:
@@ -9041,6 +9233,24 @@ def _excel_get(row: dict[str, str], *keys: str) -> str:
         if value:
             return value
     return ""
+
+
+def _excel_import_key(
+    row: dict[str, str],
+    key_name: str,
+    sheet_name: str,
+    line: int,
+) -> str:
+    key = _excel_get(row, key_name)
+    if len(key) > INVENTORY_EXCEL_KEY_MAX_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Feuille {sheet_name}, ligne {line}: {key_name.lower()} limitée à "
+                f"{INVENTORY_EXCEL_KEY_MAX_LENGTH} caractères"
+            ),
+        )
+    return key
 
 
 def _inventory_import_from_excel_bytes(con: Any, tenant_id: str, system_id: str, raw: bytes) -> dict[str, int]:
@@ -9196,12 +9406,12 @@ def _inventory_graph_import_from_excel_bytes(
         asset_system_rows = _excel_rows_strict(
             _excel_sheet(workbook, ["Actifs - SI"]),
             required_headers=["Clé actif", "Clé SI"],
-            allowed_headers=["Clé actif", "Clé SI"],
+            allowed_headers=["Clé actif", "Clé SI", "Nom actif", "Nom SI"],
         )
         system_function_rows = _excel_rows_strict(
             _excel_sheet(workbook, ["SI - Fonctions"]),
             required_headers=["Clé SI", "Clé fonction"],
-            allowed_headers=["Clé SI", "Clé fonction"],
+            allowed_headers=["Clé SI", "Clé fonction", "Nom SI", "Nom fonction"],
         )
     finally:
         workbook.close()
@@ -9274,7 +9484,7 @@ def _inventory_graph_import_from_excel_bytes(
         asset_id = checked_id(
             _excel_get(row, "ID actif"), existing_asset_ids, "Actifs", line
         )
-        key = _inventory_text(_excel_get(row, "Clé actif"), 160) or asset_id
+        key = _excel_import_key(row, "Clé actif", "Actifs", line) or asset_id
         if key in asset_ids_by_key:
             raise HTTPException(status_code=400, detail=f"Feuille Actifs, ligne {line}: clé actif dupliquée: {key}")
         if asset_id in imported_asset_ids:
@@ -9307,7 +9517,7 @@ def _inventory_graph_import_from_excel_bytes(
         system_id = checked_id(
             _excel_get(row, "ID SI"), existing_system_ids, "SI", line
         )
-        key = _inventory_text(_excel_get(row, "Clé SI"), 160) or system_id
+        key = _excel_import_key(row, "Clé SI", "SI", line) or system_id
         if key in system_ids_by_key:
             raise HTTPException(status_code=400, detail=f"Feuille SI, ligne {line}: clé SI dupliquée: {key}")
         if system_id in imported_system_ids:
@@ -9347,7 +9557,15 @@ def _inventory_graph_import_from_excel_bytes(
         function_id = checked_id(
             _excel_get(row, "ID fonction"), existing_function_ids, "Fonctions critiques", line
         )
-        key = _inventory_text(_excel_get(row, "Clé fonction"), 160) or function_id
+        key = (
+            _excel_import_key(
+                row,
+                "Clé fonction",
+                "Fonctions critiques",
+                line,
+            )
+            or function_id
+        )
         if key in function_ids_by_key:
             raise HTTPException(status_code=400, detail=f"Feuille Fonctions critiques, ligne {line}: clé fonction dupliquée: {key}")
         if function_id in imported_function_ids:
@@ -9369,8 +9587,8 @@ def _inventory_graph_import_from_excel_bytes(
     asset_system_links: list[tuple[str, str]] = []
     used_asset_system_links: set[tuple[str, str]] = set()
     for line, row in enumerate(asset_system_rows, start=2):
-        asset_key = _excel_get(row, "Clé actif")
-        system_key = _excel_get(row, "Clé SI")
+        asset_key = _excel_import_key(row, "Clé actif", "Actifs - SI", line)
+        system_key = _excel_import_key(row, "Clé SI", "Actifs - SI", line)
         if asset_key not in asset_ids_by_key or system_key not in system_ids_by_key:
             raise HTTPException(
                 status_code=400,
@@ -9385,8 +9603,13 @@ def _inventory_graph_import_from_excel_bytes(
     system_function_links: list[tuple[str, str]] = []
     used_system_function_links: set[tuple[str, str]] = set()
     for line, row in enumerate(system_function_rows, start=2):
-        system_key = _excel_get(row, "Clé SI")
-        function_key = _excel_get(row, "Clé fonction")
+        system_key = _excel_import_key(row, "Clé SI", "SI - Fonctions", line)
+        function_key = _excel_import_key(
+            row,
+            "Clé fonction",
+            "SI - Fonctions",
+            line,
+        )
         if system_key not in system_ids_by_key or function_key not in function_ids_by_key:
             raise HTTPException(
                 status_code=400,

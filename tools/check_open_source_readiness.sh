@@ -113,12 +113,14 @@ else
 fi
 
 legacy_db_term="sql""ite"
-if grep -RIn --exclude-dir=.git --exclude-dir=build --exclude='*.png' --exclude='*.jpg' --exclude='*.svg' \
+# Les tests peuvent employer un moteur SQL en mémoire comme double unitaire ;
+# l'interdiction porte sur le code et les outils livrés en production.
+if grep -RIn --exclude-dir=.git --exclude-dir=build --exclude-dir=tests --exclude='*.png' --exclude='*.jpg' --exclude='*.svg' \
   -i "$legacy_db_term" README.md docs flutter/lib server/openirn-api tools >/tmp/openirn_legacy_db_refs.txt 2>/dev/null; then
-  fail "références à l’ancien stockage serveur encore présentes"
+  fail "références à l’ancien stockage serveur encore présentes dans le code livré"
   sed 's/^/  - /' /tmp/openirn_legacy_db_refs.txt
 else
-  ok "références à l’ancien stockage serveur absentes"
+  ok "références à l’ancien stockage serveur absentes du code livré"
 fi
 
 check_absent_find "fichier de travail référentiel" -type f \( \

@@ -188,6 +188,190 @@ class InventoryGraphExcelTests(unittest.TestCase):
         self.assertEqual(system["description"], "Description Unicode — 日本語")
         self.assertEqual(system["owner_first_name"], "Élodie")
 
+    def test_default_key_is_a_readable_slug_not_the_raw_uuid(self) -> None:
+        workbook = load_workbook(BytesIO(self.raw))
+        try:
+            self.assertEqual(workbook["Actifs"]["A2"].value, "base-clients")
+            self.assertEqual(workbook["Actifs"]["F2"].value, ASSET_A)
+            self.assertEqual(workbook["SI"]["A2"].value, "si-echanges")
+            self.assertEqual(workbook["SI"]["G2"].value, SYSTEM_A)
+            self.assertEqual(
+                workbook["Fonctions critiques"]["A2"].value, "continuite-metier"
+            )
+            self.assertEqual(workbook["Fonctions critiques"]["D2"].value, FUNCTION_A)
+            self.assertEqual(
+                workbook["Actifs - SI"]["A2"].value, "base-clients"
+            )
+            self.assertEqual(workbook["Actifs - SI"]["B2"].value, "si-echanges")
+        finally:
+            workbook.close()
+
+    def test_duplicate_names_get_deduplicated_keys(self) -> None:
+        now = "2026-09-24T12:00:00+00:00"
+        self.con.execute(
+            "INSERT INTO information_assets VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?)",
+            ("tenant-a", "44444444-4444-4444-8444-444444444444", "Base clients", "Base de données", "", "2", now, now),
+        )
+        self.con.commit()
+        raw = api._inventory_graph_to_excel_bytes(self.con, "tenant-a")
+        workbook = load_workbook(BytesIO(raw))
+        try:
+            keys = {workbook["Actifs"]["A2"].value, workbook["Actifs"]["A3"].value}
+            self.assertEqual(keys, {"base-clients", "base-clients-2"})
+        finally:
+            workbook.close()
+
+    def test_long_generated_keys_are_bounded_deduplicated_and_round_trip(self) -> None:
+        now = "2026-09-24T12:00:00+00:00"
+        second_asset_id = "44444444-4444-4444-8444-444444444444"
+        self.con.execute(
+            "UPDATE information_assets SET name = ? WHERE tenant_id = ? AND asset_id = ?",
+            (f"{'a' * 200}x", "tenant-a", ASSET_A),
+        )
+        self.con.execute(
+            "UPDATE information_systems SET name = ? WHERE tenant_id = ? AND system_id = ?",
+            ("s" * 200, "tenant-a", SYSTEM_A),
+        )
+        self.con.execute(
+            "UPDATE critical_functions SET name = ? WHERE tenant_id = ? AND function_id = ?",
+            ("f" * 200, "tenant-a", FUNCTION_A),
+        )
+        self.con.execute(
+            "INSERT INTO information_assets VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?)",
+            (
+                "tenant-a",
+                second_asset_id,
+                f"{'a' * 200}y",
+                "Service",
+                "",
+                "2",
+                now,
+                now,
+            ),
+        )
+        self.con.execute(
+            "INSERT INTO information_system_assets VALUES (?, ?, ?, ?)",
+            ("tenant-a", SYSTEM_A, second_asset_id, now),
+        )
+        self.con.commit()
+
+        raw = api._inventory_graph_to_excel_bytes(self.con, "tenant-a")
+        workbook = load_workbook(BytesIO(raw))
+        try:
+            asset_keys = [workbook["Actifs"][f"A{row}"].value for row in (2, 3)]
+            self.assertEqual(len(set(asset_keys)), 2)
+            self.assertTrue(all(len(key) <= 160 for key in asset_keys))
+            self.assertTrue(any(key.endswith("-2") for key in asset_keys))
+            self.assertLessEqual(len(workbook["SI"]["A2"].value), 160)
+            self.assertLessEqual(
+                len(workbook["Fonctions critiques"]["A2"].value),
+                160,
+            )
+        finally:
+            workbook.close()
+
+        counts = api._inventory_graph_import_from_excel_bytes(
+            self.con,
+            "tenant-a",
+            raw,
+        )
+        self.assertEqual(counts["assets"], 2)
+        self.assertEqual(counts["assetSystemLinks"], 2)
+
+    def test_custom_key_longer_than_limit_is_rejected_before_write(self) -> None:
+        oversized_key = "k" * 161
+
+        def replace_key(workbook) -> None:
+            workbook["Actifs"]["A2"] = oversized_key
+            workbook["Actifs - SI"]["A2"] = oversized_key
+
+        raw = _edit_workbook(self.raw, replace_key)
+        with self.assertRaisesRegex(HTTPException, "limitée à 160 caractères"):
+            api._inventory_graph_import_from_excel_bytes(
+                self.con,
+                "tenant-a",
+                raw,
+            )
+
+        stored_name = self.con.execute(
+            "SELECT name FROM information_assets WHERE tenant_id = ? AND asset_id = ?",
+            ("tenant-a", ASSET_A),
+        ).fetchone()[0]
+        self.assertEqual(stored_name, "Base clients")
+
+    def test_formula_like_inventory_values_are_exported_as_literal_text(self) -> None:
+        formula_like_name = "=HYPERLINK(\"https://example.test\",\"Actif\")"
+        self.con.execute(
+            "UPDATE information_assets SET name = ? WHERE tenant_id = ? AND asset_id = ?",
+            (formula_like_name, "tenant-a", ASSET_A),
+        )
+        self.con.commit()
+
+        raw = api._inventory_graph_to_excel_bytes(self.con, "tenant-a")
+        workbook = load_workbook(BytesIO(raw), data_only=False)
+        try:
+            for sheet_name, coordinate in (
+                ("Actifs", "B2"),
+                ("Aperçu actifs", "A2"),
+            ):
+                cell = workbook[sheet_name][coordinate]
+                self.assertEqual(cell.value, formula_like_name)
+                self.assertEqual(cell.data_type, "s")
+        finally:
+            workbook.close()
+
+        scoped_raw = api._inventory_to_excel_bytes(
+            self.con,
+            "tenant-a",
+            SYSTEM_A,
+        )
+        scoped_workbook = load_workbook(BytesIO(scoped_raw), data_only=False)
+        try:
+            cell = scoped_workbook["Actifs SI"]["B2"]
+            self.assertEqual(cell.value, formula_like_name)
+            self.assertEqual(cell.data_type, "s")
+        finally:
+            scoped_workbook.close()
+
+        api._inventory_graph_import_from_excel_bytes(self.con, "tenant-a", raw)
+        stored_name = self.con.execute(
+            "SELECT name FROM information_assets WHERE tenant_id = ? AND asset_id = ?",
+            ("tenant-a", ASSET_A),
+        ).fetchone()[0]
+        self.assertEqual(stored_name, formula_like_name)
+
+    def test_overview_sheets_are_read_only_and_human_readable(self) -> None:
+        workbook = load_workbook(BytesIO(self.raw))
+        try:
+            asset_overview = workbook["Aperçu actifs"]
+            self.assertEqual(
+                [cell.value for cell in asset_overview[1]],
+                ["Nom actif", "Type actif", "Criticité actif", "SI associés"],
+            )
+            self.assertEqual(
+                [cell.value for cell in asset_overview[2]],
+                ["Base clients", "Base de données", "4", "SI Échanges"],
+            )
+            system_overview = workbook["Aperçu SI"]
+            self.assertEqual(
+                [cell.value for cell in system_overview[1]],
+                ["Nom SI", "Directeur", "Fonctions critiques associées"],
+            )
+            self.assertEqual(
+                [cell.value for cell in system_overview[2]],
+                ["SI Échanges", "Élodie Martin", "Continuité métier"],
+            )
+        finally:
+            workbook.close()
+
+    def test_overview_sheets_are_ignored_on_import(self) -> None:
+        counts = api._inventory_graph_import_from_excel_bytes(
+            self.con,
+            "tenant-a",
+            self.raw,
+        )
+        self.assertEqual(counts["assets"], 1)
+
     def test_blank_template_rows_are_ignored(self) -> None:
         counts = api._inventory_graph_import_from_excel_bytes(
             self.con,
@@ -222,7 +406,7 @@ class InventoryGraphExcelTests(unittest.TestCase):
     def test_duplicate_identifier_is_rejected(self) -> None:
         def duplicate(workbook) -> None:
             workbook["Actifs"].append(
-                ["autre-cle", ASSET_A, "Copie", "Service", "2", "Dupliqué"]
+                ["autre-cle", "Copie", "Service", "2", "Dupliqué", ASSET_A]
             )
 
         raw = _edit_workbook(self.raw, duplicate)
@@ -232,7 +416,7 @@ class InventoryGraphExcelTests(unittest.TestCase):
     def test_identifier_from_another_tenant_is_rejected(self) -> None:
         raw = _edit_workbook(
             self.raw,
-            lambda workbook: setattr(workbook["Actifs"]["B2"], "value", FOREIGN_ASSET),
+            lambda workbook: setattr(workbook["Actifs"]["F2"], "value", FOREIGN_ASSET),
         )
         with self.assertRaisesRegex(HTTPException, "identifiant inconnu dans cet espace"):
             api._inventory_graph_import_from_excel_bytes(self.con, "tenant-a", raw)
@@ -240,17 +424,18 @@ class InventoryGraphExcelTests(unittest.TestCase):
     def test_invalid_criticality_is_rejected(self) -> None:
         raw = _edit_workbook(
             self.raw,
-            lambda workbook: setattr(workbook["Actifs"]["E2"], "value", "5"),
+            lambda workbook: setattr(workbook["Actifs"]["D2"], "value", "5"),
         )
         with self.assertRaisesRegex(HTTPException, "comprise entre 1 et 4"):
             api._inventory_graph_import_from_excel_bytes(self.con, "tenant-a", raw)
 
     def test_new_rows_with_business_keys_create_and_link_entities(self) -> None:
         def add_asset(workbook) -> None:
+            system_key = workbook["SI"]["A2"].value
             workbook["Actifs"].append(
-                ["nouvel-actif", "", "API partenaires", "Service", "3", "Créé par import"]
+                ["nouvel-actif", "API partenaires", "Service", "3", "Créé par import", ""]
             )
-            workbook["Actifs - SI"].append(["nouvel-actif", SYSTEM_A])
+            workbook["Actifs - SI"].append(["nouvel-actif", system_key])
 
         raw = _edit_workbook(self.raw, add_asset)
         counts = api._inventory_graph_import_from_excel_bytes(self.con, "tenant-a", raw)
@@ -266,17 +451,17 @@ class InventoryGraphExcelTests(unittest.TestCase):
 
     def test_blank_keys_create_unlinked_items_and_existing_labels_are_updated(self) -> None:
         def update_and_add_items(workbook) -> None:
-            workbook["Actifs"]["C2"] = "Base clients renommée"
-            workbook["SI"]["C2"] = "SI Échanges renommé"
-            workbook["Fonctions critiques"]["C2"] = "Continuité renommée"
+            workbook["Actifs"]["B2"] = "Base clients renommée"
+            workbook["SI"]["B2"] = "SI Échanges renommé"
+            workbook["Fonctions critiques"]["B2"] = "Continuité renommée"
             workbook["Actifs"].append(
-                ["", "", "Cluster ELK", "Serveurs", "1", "Créé sans clé"]
+                ["", "Cluster ELK", "Serveurs", "1", "Créé sans clé", ""]
             )
             workbook["SI"].append(
-                ["", "", "SI Observabilité", "Nouveau SI", "Léa", "Durand", "lea@example.test"]
+                ["", "SI Observabilité", "Nouveau SI", "Léa", "Durand", "lea@example.test", ""]
             )
             workbook["Fonctions critiques"].append(
-                ["", "", "Supervision", "Nouvelle fonction"]
+                ["", "Supervision", "Nouvelle fonction", ""]
             )
 
         raw = _edit_workbook(self.raw, update_and_add_items)
