@@ -5,11 +5,12 @@ annotated-types==0.7.0
 anyio==4.14.0
 click==8.4.1
 et-xmlfile==2.0.0
-fastapi==0.141.1
+fastapi==0.142.2
 h11==0.16.0
 httptools==0.8.0
 idna==3.18
 openpyxl==3.1.5
+opentelemetry-api==1.45.0
 pydantic==2.13.4
 pydantic-core==2.46.4
 pymysql==1.2.0
