@@ -48,13 +48,10 @@ if [[ ${mode} == 'render' ]]; then
 	exit 0
 fi
 
-if [[ -z ${KIBANA_API_KEY:-} || ! ${KIBANA_API_KEY} =~ ^[A-Za-z0-9_+/=-]+$ ]]; then
-	echo 'KIBANA_API_KEY doit contenir une clé API Kibana valide.' >&2
-	exit 1
-fi
-
+# shellcheck source=kibana-auth.sh
+source "${script_dir}/kibana-auth.sh"
 auth_config="${tmp_dir}/curl-auth.conf"
-(umask 077; printf 'header = "Authorization: ApiKey %s"\n' "${KIBANA_API_KEY}" > "${auth_config}")
+kibana_write_auth_config "${auth_config}" rules
 
 kibana_request() {
 	local method=$1
@@ -215,6 +212,10 @@ for ((index = 0; index < rule_count; index++)); do
 	esac
 
 	jq -e --arg id "${rule_id}" '.id == $id and .rule_type_id == ".es-query"' "${response_file}" >/dev/null
+	if [[ ${KIBANA_AUTH_MODE} == 'basic' ]] && jq -e '.api_key_created_by_user == true' "${response_file}" >/dev/null; then
+		echo "La règle ${rule_id} utilise encore une clé API fournie par l’appelant." >&2
+		exit 1
+	fi
 	printf '%s\t%s	%s\n' "${action}" "${rule_id}" "${rule_name}"
 done
 

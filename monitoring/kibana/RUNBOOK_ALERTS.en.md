@@ -182,3 +182,16 @@ To adjust a threshold:
 
 Avoid UI-only changes in Kibana: the next deployment restores the versioned
 definition.
+
+## Rules failing with `security_exception`
+
+If every OpenIRN rule starts failing at the same moment with
+`security_exception: unable to authenticate with provided credentials and
+anonymous access is not allowed for this request`, the API key the rules run
+with has expired or was invalidated. This happens when they were deployed with
+an API key: Kibana then reuses that key to run them.
+
+1. In **Stack Management → Rules**, select the failing rules and choose
+   **Update API keys** while logged in with a user account, not an API key;
+2. or rerun `deploy-alerting-rules.sh` with `KIBANA_USERNAME` and
+   `KIBANA_PASSWORD` (see `README.md`).

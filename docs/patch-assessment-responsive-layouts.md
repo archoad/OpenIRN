@@ -1,15 +1,22 @@
-# Préparation des layouts responsives de l’évaluation
+# Interface d’évaluation responsive et identité visuelle
 
 ## Objectif
 
-Préparer l’écran d’évaluation pour trois compositions visuelles — smartphone,
-tablette et grand écran — tout en conservant un état métier unique et les
-composants d’évaluation partagés.
+Proposer trois compositions visuelles de l’écran d’évaluation — smartphone,
+tablette et grand écran — tout en conservant un état métier unique, puis
+harmoniser la typographie et les repères des huit piliers dans toute
+l’application.
 
 ## Fichiers concernés
 
 - `flutter/lib/presentation/assessment/assessment_screen.dart`
+- `flutter/lib/presentation/common/irn_pillar_palette.dart`
+- `flutter/lib/main.dart`
+- `flutter/pubspec.yaml`
+- `flutter/assets/fonts/`
 - `flutter/test/assessment_screen_layout_test.dart`
+- `flutter/test/app_theme_test.dart`
+- `flutter/test/irn_pillar_palette_test.dart`
 
 ## Changements
 
@@ -21,10 +28,19 @@ composants d’évaluation partagés.
   gauche, puis score, persistance et critères à droite ;
 - fond de la barre latérale large basé sur `surfaceContainerHigh` afin de la
   distinguer des cartes sans introduire une couleur hors thème ;
-- palette visuelle centralisée des piliers RES-1 à RES-8 : chaque couleur
-  demandée dessine le contour du cartouche correspondant et génère son fond
-  pastel, avec sélection automatique d’un texte offrant un contraste d’au
-  moins 4,5:1 ;
+- police Inter embarquée localement en graisses 400 à 800, utilisée par le
+  thème Flutter et les exports PDF, avec sa licence SIL OFL 1.1 ;
+- hiérarchie typographique Material rééquilibrée : Display `28/24/22`,
+  Headline `22/20/18`, Title `18/14/13`, Body `14/13/12` et Label `12/11/10` ;
+- agrandissement de texte configuré par le système conservé, notamment à 200 %,
+  sans facteur local qui neutraliserait l’accessibilité ;
+- palette visuelle centralisée des piliers : RES-1 bleu royal `#1E40AF`, RES-2
+  or ocre `#A16207`, RES-3 violet `#7E22CE`, RES-4 orange cuivré `#C2410C`,
+  RES-5 turquoise profond `#0F766E`, RES-6 bleu azur `#0369A1`, RES-7 rouge
+  framboise `#BE123C` et RES-8 vert forêt `#2F7D32` ;
+- fonds pastel dérivés à 20 % sur blanc et texte sombre `#1F2937`, avec des
+  contrôles de contraste d’au moins 4,5:1 pour le texte, 3:1 entre contour et
+  fond pastel et 4,5:1 pour du texte blanc sur la couleur principale ;
 - masquage complet des cartouches d’informations de campagne et d’affectations
   lorsque le profil actif ne possède pas la permission de gestion associée ;
 - affichage des critères sur deux colonnes uniquement à partir de 960 px de
@@ -52,12 +68,19 @@ Environnement : Flutter 3.47.4, Dart 3.13.3.
 ```bash
 cd flutter
 dart format --output=none --set-exit-if-changed \
+  lib/main.dart \
+  lib/presentation/common/irn_pillar_palette.dart \
   lib/presentation/assessment/assessment_screen.dart \
-  test/assessment_screen_layout_test.dart
+  test/app_theme_test.dart \
+  test/assessment_screen_layout_test.dart \
+  test/irn_pillar_palette_test.dart
 flutter analyze
-flutter test test/assessment_screen_layout_test.dart
+flutter test \
+  test/app_theme_test.dart \
+  test/assessment_screen_layout_test.dart \
+  test/irn_pillar_palette_test.dart
 flutter test
 ```
 
-Résultats : analyse statique sans anomalie, test responsive ciblé réussi et
-95 tests Flutter réussis.
+Les tests ciblés contrôlent les trois layouts, la hiérarchie typographique,
+l’agrandissement du texte et les contrastes de la palette.

@@ -87,23 +87,53 @@ puis exécuter :
 cd /chemin/vers/OpenIRN
 export KIBANA_URL=http://127.0.0.1:5601
 export OPENIRN_MONITORED_HOST=openirn-api.example.org
-IFS= read -r -s 'KIBANA_API_KEY?Clé API Kibana : '
+export KIBANA_USERNAME=openirn-monitoring
+IFS= read -r -s 'KIBANA_PASSWORD?Mot de passe Kibana : '
 printf '\n'
-export KIBANA_API_KEY
+export KIBANA_PASSWORD
 monitoring/kibana/install-monitoring.sh
-unset KIBANA_API_KEY KIBANA_URL OPENIRN_MONITORED_HOST
+unset KIBANA_USERNAME KIBANA_PASSWORD KIBANA_URL OPENIRN_MONITORED_HOST
 ```
 
-La clé doit pouvoir :
+Le compte doit pouvoir :
 
 - lire les data streams supervisés ;
 - créer ou modifier un dashboard ;
 - lire, créer et modifier des règles Kibana ;
 - lire et, si nécessaire, créer un connecteur `.server-log`.
 
-La clé n'est écrite dans aucun fichier par les scripts et n'apparaît pas dans
-les arguments de `curl`. Ne jamais l'ajouter à un fichier versionné, à la ligne
-de commande ou à l'historique du shell.
+Utiliser de préférence un utilisateur dédié à la supervision plutôt qu'un
+compte personnel : chaque règle s'exécute avec les privilèges de l'utilisateur
+qui l'a créée ou modifiée en dernier.
+
+### Pourquoi pas de clé API pour les règles
+
+Lorsqu'une règle est créée ou modifiée avec une clé API, Kibana exécute ensuite
+la règle avec **cette même clé**. À son expiration ou à son invalidation, toutes
+les règles échouent avec `security_exception: unable to authenticate with
+provided credentials and anonymous access is not allowed for this request`.
+Avec un nom d'utilisateur et un mot de passe, Kibana crée pour chaque règle sa
+propre clé API, sans expiration, indépendante de la session de déploiement.
+
+`deploy-alerting-rules.sh` refuse donc `KIBANA_API_KEY` par défaut et vérifie
+après déploiement qu'aucune règle n'utilise une clé fournie par l'appelant
+(`api_key_created_by_user`). `deploy-dashboard.sh` accepte toujours
+`KIBANA_API_KEY`, car un dashboard ne dépend pas de la clé après son import.
+Pour utiliser malgré tout une clé API **sans expiration** réservée aux règles :
+
+```bash
+export OPENIRN_RULES_ALLOW_API_KEY=true
+```
+
+Si les règles échouent déjà pour cette raison, sélectionner les règles en
+erreur dans **Stack Management → Rules**, puis **Update API keys** en étant
+connecté avec un compte utilisateur, ou relancer `deploy-alerting-rules.sh`
+avec `KIBANA_USERNAME` et `KIBANA_PASSWORD`.
+
+Le mot de passe et la clé ne sont écrits que dans un fichier temporaire en mode
+`600`, supprimé en fin d'exécution, et n'apparaissent pas dans les arguments de
+`curl`. Ne jamais les ajouter à un fichier versionné, à la ligne de commande ou
+à l'historique du shell.
 
 ## Dashboard
 

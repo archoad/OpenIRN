@@ -17,12 +17,12 @@ La solution couvre aujourd’hui :
 - la création et la gestion de campagnes d’évaluation ;
 - la notation des critères selon la grille IRN intégrée ;
 - la justification contextualisée des réponses ;
-- la gestion des affectations par critère ;
+- l’affectation canonique d’un évaluateur par actif, partagée entre les campagnes ;
 - la synthèse, le contrôle qualité et l’export des résultats ;
 - le journal d’activité des campagnes ;
 - l’historique serveur des versions de campagnes et la détection de conflits ;
 - la gestion d’un inventaire métier : fonctions critiques, systèmes d’information et actifs ;
-- l’import/export Excel de l’inventaire SI ;
+- l’import/export Excel global des catalogues et des liaisons de l’inventaire ;
 - la création de campagnes à partir d’un système d’information ;
 - la notation IRN par actif ;
 - le calcul d’une maturité consolidée pour un système d’information ;
@@ -32,13 +32,14 @@ La solution couvre aujourd’hui :
 - la consultation des sessions serveur actives ;
 - la consultation du journal de sécurité serveur ;
 - la maintenance serveur et les sauvegardes MariaDB signées ;
-- une interface multilingue français / anglais / espagnol / allemand.
+- une interface responsive multilingue français / anglais / espagnol / allemand,
+  fondée sur la police Inter et des repères visuels accessibles pour les huit piliers.
 
 ## Documentation
 
 - [Guide d'utilisation](./docs/guide-utilisateur.md)
 - [Guide d'administration](./docs/administration-instance.md)
-- [Guide installation sereur API](./docs/installation-serveur-api.md)
+- [Guide d’installation du serveur API](./docs/installation-serveur-api.md)
 - [Guide de déploiement de l'application](./docs/deploiement-applications.md)
 
 ## Architecture générale
@@ -109,8 +110,9 @@ OpenIRN prend en charge :
 - le suivi de l’état d’avancement ;
 - la saisie des réponses ;
 - les justifications ;
-- l’affectation de critères à des évaluateurs ;
-- la consultation des critères affectés ;
+- l’affectation d’un unique évaluateur à chaque actif, commune à toutes les
+  campagnes qui référencent cet actif ;
+- la consultation et la saisie de tous les critères des actifs affectés ;
 - les exports JSON ;
 - les exports de synthèse ;
 - la production et l'export d'éléments statistiques ;
@@ -130,7 +132,10 @@ Actif + notation IRN
     └── rattachés à une ou plusieurs fonctions critiques
 ```
 
-Chaque actif porte une criticité de 1 à 4. Un même actif peut être partagé par plusieurs SI : sa notation canonique est alors automatiquement utilisée dans toutes les campagnes et fonctions critiques qui le référencent.
+Chaque actif porte une criticité de 1 à 4 et peut recevoir un unique évaluateur.
+Un même actif peut être partagé par plusieurs SI : sa notation et son affectation
+canoniques sont alors automatiquement utilisées dans toutes les campagnes et
+fonctions critiques qui le référencent.
 
 La notation peut alors être conduite actif par actif, avec un calcul consolidé de maturité pour le système d’information.
 
@@ -173,8 +178,8 @@ OpenIRN manipule des informations potentiellement sensibles : cartographie SI, r
 La matrice de permissions distingue actuellement :
 
 - **Administrateur** : accès complet aux campagnes, utilisateurs, terminaux, sécurité, référentiel officiel, historique et maintenance ;
-- **Pilote IRN** : pilotage métier des campagnes, affectations, inventaire, export, journal et historique ;
-- **Évaluateur** : saisie des critères qui lui sont affectés ;
+- **Pilote IRN** : pilotage métier des campagnes, affectations d’actifs, inventaire, export et journal d’activité ;
+- **Évaluateur** : saisie de tous les critères des actifs qui lui sont affectés ;
 - **Validateur** : consultation, synthèse et contrôle qualité ;
 - **Lecteur** : accès en lecture aux campagnes, synthèses et contrôles qualité.
 

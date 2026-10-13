@@ -48,14 +48,14 @@ if [[ ${mode} == 'render' ]]; then
 	exit 0
 fi
 
-if [[ -z ${KIBANA_API_KEY:-} || ! ${KIBANA_API_KEY} =~ ^[A-Za-z0-9_+/=-]+$ ]]; then
-	echo 'KIBANA_API_KEY doit contenir une clé API Kibana valide.' >&2
-	exit 1
-fi
+# shellcheck source=kibana-auth.sh
+source "${script_dir}/kibana-auth.sh"
+auth_config="${tmp_dir}/curl-auth.conf"
+kibana_write_auth_config "${auth_config}"
 
 response_file="${tmp_dir}/dashboard-response.json"
 curl --fail-with-body --silent --show-error \
-	--config <(printf 'header = "Authorization: ApiKey %s"\n' "${KIBANA_API_KEY}") \
+	--config "${auth_config}" \
 	-X PUT \
 	-H 'Accept: application/json' \
 	-H 'Content-Type: application/json' \

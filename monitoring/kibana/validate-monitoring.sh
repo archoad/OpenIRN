@@ -12,6 +12,7 @@ audit_files=(
 	"${script_dir}/deploy-dashboard.sh"
 	"${script_dir}/deploy-alerting-rules.sh"
 	"${script_dir}/install-monitoring.sh"
+	"${script_dir}/kibana-auth.sh"
 	"${script_dir}/README.md"
 	"${script_dir}/RUNBOOK_ALERTES.md"
 	"${script_dir}/RUNBOOK_ALERTS.en.md"
@@ -33,6 +34,7 @@ bash -n \
 	"${script_dir}/deploy-dashboard.sh" \
 	"${script_dir}/deploy-alerting-rules.sh" \
 	"${script_dir}/install-monitoring.sh" \
+	"${script_dir}/kibana-auth.sh" \
 	"${script_dir}/validate-monitoring.sh"
 
 jq -e '
@@ -124,5 +126,24 @@ for source_pattern in \
 		exit 1
 	fi
 done
+
+if (
+	unset KIBANA_USERNAME KIBANA_PASSWORD OPENIRN_RULES_ALLOW_API_KEY
+	source "${script_dir}/kibana-auth.sh"
+	KIBANA_API_KEY='fixture-key' kibana_write_auth_config "${tmp_dir}/auth-rules.conf" rules
+) 2>/dev/null; then
+	echo 'Les règles ne doivent pas être déployables avec une clé API par défaut.' >&2
+	exit 1
+fi
+(
+	unset KIBANA_API_KEY
+	source "${script_dir}/kibana-auth.sh"
+	KIBANA_USERNAME='openirn-deployer' KIBANA_PASSWORD='fixture"pass\word' \
+		kibana_write_auth_config "${tmp_dir}/auth-basic.conf" rules
+)
+if [[ $(<"${tmp_dir}/auth-basic.conf") != 'user = "openirn-deployer:fixture\"pass\\word"' ]]; then
+	echo 'La configuration curl en authentification basique est mal échappée.' >&2
+	exit 1
+fi
 
 echo 'Monitoring OpenIRN valide : aucun secret détecté et rendu portable réussi.'

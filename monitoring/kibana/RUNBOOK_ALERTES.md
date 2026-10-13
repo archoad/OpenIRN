@@ -185,3 +185,17 @@ Si un seuil doit être ajusté :
 
 Éviter les changements uniquement dans l'interface Kibana : le prochain
 déploiement remettrait la définition versionnée.
+
+## Règles en erreur `security_exception`
+
+Si toutes les règles OpenIRN passent en erreur au même moment avec
+`security_exception: unable to authenticate with provided credentials and
+anonymous access is not allowed for this request`, la clé API avec laquelle
+elles s'exécutent a expiré ou a été invalidée. C'est le cas lorsqu'elles ont été
+déployées avec une clé API : Kibana réutilise alors cette clé pour les exécuter.
+
+1. Dans **Stack Management → Rules**, sélectionner les règles en erreur puis
+   **Update API keys**, en étant connecté avec un compte utilisateur et non avec
+   une clé API ;
+2. ou relancer `deploy-alerting-rules.sh` avec `KIBANA_USERNAME` et
+   `KIBANA_PASSWORD` (voir `README.md`).

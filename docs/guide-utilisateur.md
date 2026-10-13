@@ -6,7 +6,7 @@ author: "Projet OpenIRN"
 
 # Bienvenue dans OpenIRN
 
-OpenIRN aide une organisation à structurer et conduire des évaluations de l'Indice de Résilience Numérique. L'application permet de préparer le périmètre, répartir les critères entre plusieurs personnes, saisir et justifier les réponses, contrôler la qualité et produire une synthèse.
+OpenIRN aide une organisation à structurer et conduire des évaluations de l'Indice de Résilience Numérique. L'application permet de préparer le périmètre, répartir les actifs entre plusieurs évaluateurs, saisir et justifier les réponses, contrôler la qualité et produire une synthèse.
 
 OpenIRN est un outil de travail indépendant. Il ne délivre pas une certification et ne remplace pas l'interprétation du référentiel officiel publié par l'aDRI / Digital Resilience Initiative.
 
@@ -20,7 +20,7 @@ OpenIRN est un outil de travail indépendant. Il ne délivre pas une certificati
 | Actif | composant humain, informationnel, logiciel, matériel ou fournisseur du SI |
 | Campagne | évaluation IRN d'un SI et de ses actifs |
 | Critère | question ou attente issue du référentiel IRN |
-| Affectation | critère confié à un évaluateur |
+| Affectation | actif confié à un unique évaluateur dans l'espace de travail |
 | Justification | élément factuel expliquant la réponse choisie |
 | Synthèse | vue consolidée des résultats de la campagne |
 | Terminal | ordinateur, téléphone ou tablette qui utilise OpenIRN |
@@ -60,11 +60,10 @@ Le Pilote IRN peut :
 - gérer l'inventaire des fonctions critiques, SI et actifs ;
 - créer une campagne à partir d'un SI et de ses actifs ;
 - modifier toutes les réponses d'une campagne éditable ;
-- affecter des critères aux évaluateurs ;
+- affecter un évaluateur unique à chaque actif ;
 - consulter la synthèse et le contrôle qualité ;
 - faire évoluer le statut de la campagne ;
 - exporter les données et consulter le journal d'activité ;
-- consulter l'historique et restaurer une révision ;
 - gérer les utilisateurs non administrateurs de son espace ;
 - traiter les demandes et autorisations de terminaux de son espace.
 
@@ -72,17 +71,17 @@ Le Pilote IRN ne gère pas les espaces, les administrateurs, le journal de sécu
 
 ## Évaluateur
 
-**Mission :** produire des réponses fiables et justifiées sur les critères qui lui sont confiés.
+**Mission :** produire des réponses fiables et justifiées pour les actifs qui lui sont confiés.
 
 L'évaluateur peut :
 
 - consulter le référentiel ;
 - ouvrir les campagnes de son espace ;
 - consulter la synthèse et le contrôle qualité ;
-- voir les critères qui lui sont affectés ;
-- répondre et ajouter des justifications uniquement sur ces critères, tant que la campagne reste éditable.
+- voir les actifs qui lui sont affectés ;
+- répondre à tous les critères de ces actifs et ajouter des justifications, tant que la campagne reste éditable.
 
-Il ne crée pas la campagne, ne modifie pas les affectations et ne répond pas aux critères confiés à une autre personne.
+Il ne crée pas la campagne, ne modifie pas les affectations et ne répond pas pour les actifs confiés à une autre personne.
 
 ## Validateur
 
@@ -117,7 +116,7 @@ Il ne modifie aucune donnée.
 | Consulter référentiel et campagnes | oui | oui | oui | oui | oui |
 | Consulter synthèse et qualité | oui | oui | oui | oui | oui |
 | Répondre à tous les critères | oui | oui | non | non | non |
-| Répondre aux critères affectés | oui | oui | oui | non | non |
+| Répondre aux critères des actifs affectés | oui | oui | oui | non | non |
 | Revoir une campagne | oui | oui | non | oui | non |
 | Gérer campagnes et affectations | oui | oui | non | non | non |
 | Gérer inventaire SI | oui | oui | non | non | non |
@@ -176,6 +175,18 @@ Après ouverture de session, l'accueil donne accès aux grandes fonctions autori
 
 Si une carte n'apparaît pas, vérifier d'abord votre rôle. L'interface masque les fonctions interdites et le serveur contrôle également chaque opération sensible.
 
+## Lire les repères visuels
+
+L'interface utilise la police Inter et une hiérarchie typographique commune sur
+smartphone, tablette et grand écran. La composition s'adapte automatiquement à
+la largeur disponible et conserve l'agrandissement de texte configuré dans le
+système.
+
+Chaque pilier RES-1 à RES-8 possède une couleur distinctive, reprise dans les
+contours, fonds pastel, indicateurs et graphiques. La couleur facilite le
+repérage mais ne remplace jamais le numéro, le libellé ou la valeur affichée.
+Les contrastes du thème sont contrôlés pour préserver la lisibilité.
+
 # 5. Consulter le référentiel officiel
 
 1. Depuis l'accueil, ouvrir **Référentiel aDRI IRN**.
@@ -226,7 +237,21 @@ Les niveaux de criticité sont :
 
 ## Importer ou exporter avec Excel
 
-L'écran permet d'exporter les actifs rattachés à un SI, de compléter le fichier puis de l'importer. Un identifiant existant rattache l'actif global au SI et met à jour ses métadonnées ; une ligne sans identifiant crée un actif. Un actif absent du fichier est seulement détaché du SI concerné, sans supprimer l'actif global ni sa notation. Conserver les identifiants protégés du fichier et ne pas renommer arbitrairement les feuilles.
+Le cartouche **Import / export de la répartition** produit un classeur global
+nommé `YYYYMMDD_openirn_export.xlsx`. Il couvre les catalogues **Actifs**, **SI**
+et **Fonctions critiques**, les liaisons **Actifs - SI** et **SI - Fonctions**,
+ainsi que l'identité du directeur de chaque SI.
+
+Conserver toutes les feuilles, tous les éléments existants, les identifiants et
+les clés de liaison. Une ligne dont l'ID et la clé sont vides crée un nouvel
+élément non rattaché. Pour rattacher ce nouvel élément pendant le même import,
+lui attribuer une clé libre et reporter cette clé dans la feuille de liaisons
+correspondante.
+
+Avant toute écriture, OpenIRN valide le classeur complet, les identifiants de
+l'espace, les clés et les liaisons. L'import met à jour les trois catalogues et
+remplace leur répartition, mais ne supprime aucune notation d'actif. Un classeur
+incomplet ou incohérent est refusé sans écriture partielle.
 
 Un export constitue une copie contenant des informations de cartographie potentiellement sensibles. Il est nécessaire de le stocker selon la politique de sécurité de l'organisation.
 
@@ -245,15 +270,19 @@ Cette action appartient à l'administrateur ou au Pilote IRN.
 
 La campagne débute au statut **Brouillon**. Éviter les noms génériques comme « Test » sur une instance de production.
 
-# 8. Affecter les critères
+# 8. Affecter les actifs
 
 1. Ouvrir la campagne.
-2. Ouvrir **Affectations des critères**.
-3. Choisir un pilier puis un critère.
-4. Sélectionner l'évaluateur compétent.
-5. Enregistrer l'affectation.
+2. Ouvrir **Affectations** puis **Affectation des actifs**.
+3. Repérer l'actif concerné.
+4. Sélectionner un unique évaluateur actif, ou **Non affecté**.
+5. Enregistrer l'affectation avant de passer à l'actif suivant.
 
-Répartir les critères selon la connaissance réelle des actifs, pas seulement selon la disponibilité. Un évaluateur ne peut saisir que ce qui lui est explicitement affecté.
+L'affectation appartient à l'actif dans l'espace de travail : elle s'applique
+automatiquement à toutes les campagnes qui contiennent ce même actif. La
+modifier depuis une campagne modifie donc aussi l'évaluateur présenté dans les
+autres campagnes concernées. Un évaluateur peut saisir tous les critères de ses
+actifs affectés, et aucun critère des autres actifs.
 
 # 9. Répondre à une évaluation
 

@@ -6,7 +6,7 @@ author: "OpenIRN Project"
 
 # Welcome to OpenIRN
 
-OpenIRN helps an organization structure and conduct Digital Resilience Index assessments. The application is used to prepare the scope, distribute criteria among several people, enter and justify answers, check quality, and produce a summary.
+OpenIRN helps an organization structure and conduct Digital Resilience Index assessments. The application is used to prepare the scope, distribute assets among several Evaluators, enter and justify answers, check quality, and produce a summary.
 
 OpenIRN is an independent working tool. It does not issue certification and does not replace interpretation of the official referential published by aDRI / Digital Resilience Initiative.
 
@@ -20,7 +20,7 @@ OpenIRN is an independent working tool. It does not issue certification and does
 | Asset | human, information, software, hardware, or supplier component of the IS |
 | Campaign | IRN assessment of an IS and its assets |
 | Criterion | question or expectation from the IRN referential |
-| Assignment | criterion allocated to an evaluator |
+| Assignment | asset allocated to one Evaluator within the workspace |
 | Justification | factual information explaining the selected answer |
 | Summary | consolidated view of campaign results |
 | Device | computer, phone, or tablet running OpenIRN |
@@ -60,11 +60,10 @@ An IRN Manager can:
 - manage the inventory of critical functions, information systems, and assets;
 - create a campaign from an IS and its assets;
 - modify all answers in an editable campaign;
-- assign criteria to Evaluators;
+- assign one Evaluator to each asset;
 - view the summary and quality check;
 - change the campaign status;
 - export data and view the campaign activity log;
-- view history and restore a revision;
 - manage non-administrator users in their workspace;
 - process device authorization requests and authorizations in their workspace.
 
@@ -72,17 +71,17 @@ An IRN Manager cannot manage workspaces, Administrators, the security log, serve
 
 ## Evaluator
 
-**Responsibility:** provide reliable and justified answers for the criteria assigned to them.
+**Responsibility:** provide reliable and justified answers for assigned assets.
 
 An Evaluator can:
 
 - view the referential;
 - open campaigns in their workspace;
 - view the summary and quality check;
-- see the criteria assigned to them;
-- answer and add justifications only for those criteria while the campaign remains editable.
+- see their assigned assets;
+- answer every criterion for those assets and add justifications while the campaign remains editable.
 
-An Evaluator cannot create a campaign, change assignments, or answer criteria assigned to another person.
+An Evaluator cannot create a campaign, change assignments, or answer for assets assigned to another person.
 
 ## Reviewer
 
@@ -117,7 +116,7 @@ A Reader cannot modify data.
 | View referential and campaigns | yes | yes | yes | yes | yes |
 | View summary and quality | yes | yes | yes | yes | yes |
 | Answer all criteria | yes | yes | no | no | no |
-| Answer assigned criteria | yes | yes | yes | no | no |
+| Answer criteria for assigned assets | yes | yes | yes | no | no |
 | Review a campaign | yes | yes | no | yes | no |
 | Manage campaigns and assignments | yes | yes | no | no | no |
 | Manage the IS inventory | yes | yes | no | no | no |
@@ -176,6 +175,18 @@ After opening a session, the home screen provides access to the main authorized 
 
 If a card is not displayed, check your role first. The interface hides prohibited functions, and the server also checks every sensitive operation.
 
+## Read the visual cues
+
+The interface uses the Inter typeface and a shared typographic hierarchy on
+phones, tablets, and large screens. The layout automatically adapts to the
+available width and preserves the text enlargement configured in the operating
+system.
+
+Each RES-1 to RES-8 pillar has a distinct colour used consistently for borders,
+pastel backgrounds, indicators, and charts. Colour makes navigation easier but
+never replaces the displayed number, label, or value. Theme contrast is checked
+to preserve readability.
+
 # 5. View the official referential
 
 1. From the home screen, open **aDRI IRN referential**.
@@ -226,7 +237,20 @@ The criticality levels are:
 
 ## Import or export with Excel
 
-The screen exports the assets linked to an IS. An existing identifier links the global asset to that IS and updates its metadata; a row without an identifier creates an asset. An asset missing from the file is only unlinked from the selected IS, without deleting the global asset or its rating. Preserve protected identifiers and do not rename worksheets arbitrarily.
+The **Mapping import / export** card produces a global workbook named
+`YYYYMMDD_openirn_export.xlsx`. It contains the **Actifs**, **SI**, and
+**Fonctions critiques** catalogues, the **Actifs - SI** and **SI - Fonctions**
+relationship sheets, and the director identity for each information system.
+
+Keep every worksheet and existing item, identifier, and relationship key. A row
+with both an empty ID and key creates a new unlinked item. To link that item in
+the same import, give it a custom key and reuse that key in the corresponding
+relationship sheet.
+
+OpenIRN validates the complete workbook, workspace identifiers, keys, and
+relationships before writing anything. Import updates all three catalogues and
+replaces their mapping, but does not delete any asset rating. An incomplete or
+inconsistent workbook is rejected without a partial update.
 
 An export is a copy that may contain sensitive mapping information. Store it according to the organization's security policy.
 
@@ -245,15 +269,19 @@ This action is available to an Administrator or IRN Manager.
 
 The campaign starts with **Draft** status. Avoid generic names such as “Test” on a production instance.
 
-# 8. Assign criteria
+# 8. Assign assets
 
 1. Open the campaign.
-2. Open **Criterion assignments**.
-3. Choose a pillar and then a criterion.
-4. Select the appropriate Evaluator.
-5. Save the assignment.
+2. Open **Assignments**, then **Asset assignments**.
+3. Locate the relevant asset.
+4. Select one active Evaluator, or **Unassigned**.
+5. Save before moving to the next asset.
 
-Assign criteria according to actual knowledge of the assets, not availability alone. Evaluators can enter data only for criteria explicitly assigned to them.
+The assignment belongs to the asset within the workspace and automatically
+applies to every campaign containing that asset. Changing it from one campaign
+therefore changes the Evaluator displayed in every other relevant campaign. An
+Evaluator can answer every criterion for assigned assets and no criteria for
+other assets.
 
 # 9. Answer an assessment
 
