@@ -35,7 +35,7 @@ kibana_write_auth_config() {
 				Les règles d'alerte ne peuvent pas être déployées avec KIBANA_API_KEY :
 				Kibana exécuterait chaque règle avec cette clé, et toutes les règles
 				échoueraient (security_exception) dès son expiration ou son invalidation.
-				Utiliser KIBANA_USERNAME et KIBANA_PASSWORD : Kibana crée alors pour chaque
+				Utiliser KIBANA_USERNAME et KIBANA_PASSWORD, Kibana crée alors pour chaque
 				règle une clé API dédiée, sans expiration, indépendante de la session.
 				Pour une clé API sans expiration réservée aux règles, définir
 				OPENIRN_RULES_ALLOW_API_KEY=true.
